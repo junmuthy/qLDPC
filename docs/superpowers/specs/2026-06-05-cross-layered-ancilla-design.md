@@ -201,6 +201,27 @@ H_Z:              ┌─────────┬─────────�
 
 `_build_layered_blocks` is one loop from i = 1 to L; even/odd branch selects intra-layer F vs F^T and which adjacent blocks get identity wiring.
 
+### 4.5 Paper traceability
+
+Every construction element above maps to a specific passage in arXiv:2407.18393. Line numbers refer to the rendered PDF text extraction; section/equation numbers are paper-canonical.
+
+**Notation convention**: the paper writes inter-layer wiring with the higher-layer vertex on the left of the arrow (e.g. `I : V_1 →_X V_0`, `I : C_2 →_Z C_1`). Identity is self-transpose, so directionality is cosmetic, but implementations should match the paper for grep-ability.
+
+| Construction element | Paper citation |
+|---|---|
+| `V_0 = supp(X̄_M)`, `C_0 = {Z-checks neighboring V_0}`, `F = J_{C_0}^⊤ H^Z J_{V_0}` (= `H_Z[C_0, V_0]`) | §2.2, paragraph beginning "Key to their construction" |
+| Vertex roles per layer (odd i → X-check/qubit; even i → qubit/Z-check) | §2.2, Eq. (1)–(2) |
+| Intra-layer wiring: `F : C_i →_Z V_i` for even i, `F^⊤ : V_i →_X C_i` for odd i | §2.2, sentence beginning "Layers are connected identically via F" |
+| Inter-layer identities `I : C_0 →_Z C_1`, `I : V_1 →_X V_0`, `I : V_1 →_X V_2`, `I : C_2 →_Z C_1`, etc. | §2.2, next sentence ("adjacent layers are connected by the identity") |
+| Layers extended to L total: `(C_1, V_1), ..., (C_L, V_L)` with the same wiring rules | §3.1, first paragraph |
+| Gauge-fix: `G` spans `null(F)` (`G F = 0`), and `G : U_L →_Z C_L` introduces `rank(null(F))` new Z-checks; "Minimizing row and column weight of G minimizes the degrees added" | §3.1, paragraph beginning "To find a set of additional Z checks" |
+| Merged code G_X is a non-subsystem stabilizer code; `X̄_M` becomes a stabilizer; `k(G_X) = k(G) − 1` | §3.1, Theorem 1 |
+| Layer-count condition `⌈L/2⌉ ≥ 1/β` (β = boundary Cheeger constant of F); `L = 1` reference example for [[144,12,12]] gross code | §3.3, Lemma 4 / Theorem 6; §IV.1 mono-layer construction; Table 1 |
+| Distance preservation verified numerically (CPLEX), not from β | §IV.1, paragraph beginning "We verify numerically using CPLEX" |
+| Practical L ∈ {1, 3, 5} for small-to-medium codes (worst-case bound is pessimistic) | §3.3, paragraph beginning "We also consider Theorem 6 a worst case upper bound" (cites [Cow24]) |
+
+The block-matrix expansions in §4.2 / §4.3 / §4.4 are mechanical specializations of these rules to concrete L; no additional algorithmic content beyond what is stated in §2.2 + §3.1.
+
 ## 5. Validation
 
 All validation lives in `_restrict_to_logical_support` at function entry. Raises `ValueError` with explicit messages.
