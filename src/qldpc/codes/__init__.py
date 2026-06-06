@@ -94,8 +94,8 @@ __all__ = [
     "TBCode",
     "TetrahedralCode",
     "ToricCode",
-    "build_layered_surgery_code",
     "SurgeryLayout",
+    "build_layered_surgery_code",
     "get_distance_classical",
     "get_distance_quantum",
 ]
