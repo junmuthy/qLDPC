@@ -962,3 +962,161 @@ def _build_bridge_via_skiptree(
         u_b_rows=field(u_b_rows_arr),
         interface_vertex_to_qubit=interface_vertex_to_qubit,
     )
+
+
+def _stitch_gadgets_with_bridge(
+    data_code: CSSCode,
+    merged1: CSSCode,
+    layout1: SurgeryLayout,
+    merged2: CSSCode,
+    layout2: SurgeryLayout,
+    bridge: _BridgeSpec,
+    *,
+    pauli_type: Pauli,
+) -> tuple[CSSCode, JointSurgeryLayout]:
+    """Combine two single-operator merged codes with bridge into a joint CSSCode.
+
+    Qubit register:
+        [ data qubits | layout1.ancilla | layout2.ancilla | bridge ]
+        n_data         n_anc_1            n_anc_2           n_bridge
+
+    Construction (X-type joint, ``pauli_type=Pauli.X``):
+        - H_X rows: HX1 padded to the joint register, plus HX2's non-"data"
+          rows padded (the "data" X-checks of merged2 duplicate those of
+          merged1 on data columns and are zero on every ancilla, so they
+          are removed).
+        - H_Z rows: HZ1 padded + HZ2's non-"data" rows padded + U_B rows.
+          HZ2's "data" rows are subsumed by HZ1's "data" rows, but for each
+          j in ``layout2.c0_indices`` we splice in the gadget-2 ancilla
+          connection (identity on the κ_j_2 column) onto the corresponding
+          HZ1 row so the gadget-2 c0 connection isn't lost.
+        - Each U_B[r] row carries Z support on the joint register equal to
+          the SUM of the gadget data Z-checks at the path endpoints (i.e.
+          for endpoint vertex j in block 1: full ``HZ1`` row at C0-row
+          ``c0_1_to_row[j]``; for endpoint vertex k in block 2: the gadget-2
+          ancilla connection ``Z_{κ_k_2}`` plus the data Z-check S_{c0_2[k]}).
+          The "Z on bridge qubit r" lives on the bridge column. Because this
+          U_B is itself a SUM of existing data Z-stabilizers (which already
+          commute with both gadgets' X-stabilizers) plus a Z on a fresh
+          bridge qubit, CSS commutation is guaranteed.
+
+    Returns the joint merged CSSCode and the JointSurgeryLayout.
+    """
+    field = data_code.field
+    n_data = data_code.num_qubits
+    n_anc_1 = layout1.num_ancilla_qubits
+    n_anc_2 = layout2.num_ancilla_qubits
+    n_bridge = bridge.num_bridge_qubits
+    n_merged = n_data + n_anc_1 + n_anc_2 + n_bridge
+
+    HX1 = np.asarray(merged1.matrix_x).astype(np.int_)
+    HX2 = np.asarray(merged2.matrix_x).astype(np.int_)
+    HZ1 = np.asarray(merged1.matrix_z).astype(np.int_)
+    HZ2 = np.asarray(merged2.matrix_z).astype(np.int_)
+
+    def _pad_row(matrix: np.ndarray, *, ancilla_block: int) -> np.ndarray:
+        """Embed a row of merged_i into the joint register column layout."""
+        out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
+        out[:, :n_data] = matrix[:, :n_data]
+        if ancilla_block == 0:
+            out[:, n_data : n_data + n_anc_1] = matrix[:, n_data:]
+        else:
+            out[:, n_data + n_anc_1 : n_data + n_anc_1 + n_anc_2] = matrix[:, n_data:]
+        return out
+
+    HX1_padded = _pad_row(HX1, ancilla_block=0)
+    HX2_padded = _pad_row(HX2, ancilla_block=1)
+    HZ1_padded = _pad_row(HZ1, ancilla_block=0)
+    HZ2_padded = _pad_row(HZ2, ancilla_block=1)
+
+    # De-duplicate gadget2's "data" X-checks (they replicate gadget1's after
+    # padding — same on data columns, zero on every ancilla and bridge column).
+    is_data_hx_2 = layout2.hx_row_kind == "data"
+    HX2_padded = HX2_padded[~is_data_hx_2]
+
+    # Splice the gadget-2 κ_k_2 connection onto HZ1's c0_2 rows, then drop
+    # HZ2's "data" rows (now subsumed). For each j ∈ layout2.c0_indices, the
+    # k-th row of layout2.F maps to data Z-check row j of the data code; the
+    # j-th data row of HZ1_padded becomes (S_j on data) + Z_κ_j_1 (if j ∈
+    # c0_1, from merged1) + Z_κ_j_2 (newly added from merged2 connection).
+    n_z_data = int(data_code.matrix_z.shape[0])
+    is_data_hz_1 = layout1.hz_row_kind == "data"
+    data_hz1_row_indices = np.flatnonzero(is_data_hz_1)
+    # Map: data Z-check index j  ->  row index in HZ1_padded
+    # The "data" rows of HZ1 are the first n_z_data rows (see _assemble_merged_HZ).
+    assert data_hz1_row_indices.size == n_z_data
+    blocks2 = _build_layered_blocks(layout2.F, layout2.num_layers)
+    c1_slice_2 = blocks2.ancilla_col_slice(1)
+    # offset of κ_k_2 within joint register
+    kappa2_col_start = n_data + n_anc_1 + c1_slice_2.start
+    for k, j in enumerate(layout2.c0_indices):
+        row_in_hz1 = int(data_hz1_row_indices[j])
+        HZ1_padded[row_in_hz1, kappa2_col_start + k] = 1
+
+    is_data_hz_2 = layout2.hz_row_kind == "data"
+    HZ2_padded = HZ2_padded[~is_data_hz_2]
+
+    # U_B rows: bridge.u_b_rows has columns [n_kappa_1 | n_kappa_2 | n_bridge].
+    # Map each interface-vertex column to the FULL data Z-check of the matching
+    # gadget, so each U_B row is (sum of existing data Z-stabilizers of the two
+    # gadgets at the path endpoints) + Z on bridge qubit r. This is the only
+    # construction that preserves CSS commutation with chi_v X-checks of both
+    # gadgets (since each summand individually commutes with H_X).
+    n_k1 = layout1.F.shape[0]
+    n_k2 = layout2.F.shape[0]
+    u_b_arr = np.asarray(bridge.u_b_rows).astype(np.int_)
+    if u_b_arr.shape[1] != n_k1 + n_k2 + n_bridge:
+        raise ValueError(
+            f"bridge.u_b_rows width {u_b_arr.shape[1]} != n_kappa_1 + n_kappa_2 "
+            f"+ n_bridge ({n_k1} + {n_k2} + {n_bridge}); cannot stitch."
+        )
+
+    blocks1 = _build_layered_blocks(layout1.F, layout1.num_layers)
+    c1_slice_1 = blocks1.ancilla_col_slice(1)
+    kappa1_col_start = n_data + c1_slice_1.start
+
+    u_b_padded = np.zeros((u_b_arr.shape[0], n_merged), dtype=np.int_)
+    for r in range(u_b_arr.shape[0]):
+        # Each block-1 endpoint κ_j_1 contributes spliced HZ1's data row at
+        # c0_1[j]: this row carries S_{c0_1[j]} on data, Z_κ_j_1 on gadget-1
+        # ancilla, and (if c0_1[j] ∈ c0_2) Z_κ_{k}_2 on gadget-2 ancilla. It
+        # already commutes with chi rows of BOTH gadgets (see the splice
+        # analysis above), so any sum of such rows + Z on a fresh bridge qubit
+        # also commutes.
+        for j_in_k1 in range(n_k1):
+            if u_b_arr[r, j_in_k1] == 1:
+                row_in_hz1 = int(data_hz1_row_indices[layout1.c0_indices[j_in_k1]])
+                u_b_padded[r] = (u_b_padded[r] + HZ1_padded[row_in_hz1]) % 2
+        # Each block-2 endpoint κ_k_2 ALSO contributes spliced HZ1's data row
+        # at c0_2[k] — by the splice, this row carries Z_κ_k_2 on gadget-2
+        # ancilla (and S_{c0_2[k]} on data, and Z_κ_j_1 if c0_2[k] ∈ c0_1).
+        # Using the spliced row guarantees the cross-gadget commutation.
+        for k_in_k2 in range(n_k2):
+            if u_b_arr[r, n_k1 + k_in_k2] == 1:
+                row_in_hz1 = int(data_hz1_row_indices[layout2.c0_indices[k_in_k2]])
+                u_b_padded[r] = (u_b_padded[r] + HZ1_padded[row_in_hz1]) % 2
+        # Bridge qubit r.
+        for r2 in range(n_bridge):
+            if u_b_arr[r, n_k1 + n_k2 + r2] == 1:
+                u_b_padded[r, n_data + n_anc_1 + n_anc_2 + r2] ^= 1
+
+    HX_joint = field(np.vstack([HX1_padded, HX2_padded]))
+    HZ_joint = field(np.vstack([HZ1_padded, HZ2_padded, u_b_padded]))
+
+    joint_merged = CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
+
+    bridge_slice = slice(n_data + n_anc_1 + n_anc_2, n_merged)
+    u_b_check_kind_mask = np.zeros(HZ_joint.shape[0], dtype=bool)
+    if u_b_arr.shape[0] > 0:
+        u_b_check_kind_mask[-u_b_arr.shape[0]:] = True
+
+    joint_layout = JointSurgeryLayout(
+        gadget_layouts=(layout1, layout2),
+        pauli_type=pauli_type,
+        num_data_qubits=n_data,
+        num_ancilla_qubits=n_anc_1 + n_anc_2,
+        num_bridge_qubits=n_bridge,
+        bridge_qubit_slice=bridge_slice,
+        u_b_check_kind_mask=u_b_check_kind_mask,
+    )
+    return joint_merged, joint_layout

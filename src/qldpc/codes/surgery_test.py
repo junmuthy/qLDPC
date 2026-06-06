@@ -695,3 +695,36 @@ def test_build_bridge_u_b_rows_have_correct_width() -> None:
     expected_width = lay1.F.shape[0] + lay2.F.shape[0] + spec.num_bridge_qubits
     if spec.u_b_rows.shape[0] > 0:
         assert spec.u_b_rows.shape[1] == expected_width
+
+
+from qldpc.codes.surgery import _stitch_gadgets_with_bridge
+from qldpc.codes.surgery import JointSurgeryLayout
+
+
+def test_stitch_gadgets_returns_valid_css() -> None:
+    """The stitched code's H_X @ H_Z.T over GF(2) is zero (CSS commutation)."""
+    try:
+        hgp, lay1, lay2 = _two_overlapping_hgp_gadgets()
+    except ValueError:
+        pytest.skip("Random HGP gave incompatible inputs")
+
+    arr1 = np.asarray(hgp.get_logical_ops(Pauli.X)[0]).astype(np.int_)
+    arr2 = np.asarray(hgp.get_logical_ops(Pauli.X)[1]).astype(np.int_)
+    merged1, _ = build_layered_surgery_code(hgp, arr1, num_layers=1)
+    merged2, _ = build_layered_surgery_code(hgp, arr2, num_layers=1)
+    try:
+        bridge = _build_bridge_via_skiptree(lay1, lay2)
+    except ValueError:
+        pytest.skip("Bridge could not be constructed for this fixture")
+
+    joint, joint_layout = _stitch_gadgets_with_bridge(
+        hgp, merged1, lay1, merged2, lay2, bridge, pauli_type=Pauli.X,
+    )
+    assert joint.is_subsystem_code is False
+    assert np.all((joint.matrix_x @ joint.matrix_z.T) == 0), (
+        "Joint code violates CSS commutation; bridge U_B does not commute "
+        "with X-stabilizers of the gadgets."
+    )
+    assert isinstance(joint_layout, JointSurgeryLayout)
+    assert joint_layout.num_data_qubits == hgp.num_qubits
+    assert joint_layout.num_bridge_qubits == bridge.num_bridge_qubits
