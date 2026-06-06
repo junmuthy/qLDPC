@@ -316,3 +316,100 @@ def _assemble_merged_HZ(
         gauge_rows.append(gf)
 
     return field(np.vstack([old_z, *even_rows, *gauge_rows]))
+
+
+def build_layered_surgery_code(
+    data_code: CSSCode,
+    logical_op: npt.ArrayLike,
+    *,
+    num_layers: int = 1,
+    validate_logical_op: bool = True,
+) -> tuple[CSSCode, SurgeryLayout]:
+    """Construct a merged stabilizer code that measures ``logical_op`` by lattice surgery.
+
+    Implements the layered ancilla construction of Cross et al. 2024 §III
+    (arXiv:2407.18393). Given a stabilizer CSSCode and the binary support
+    vector of a logical X operator X̄_M, this builds ``num_layers`` ancilla
+    layers (L must be odd) plus a top-layer gauge-fix Z-check block, and
+    returns the merged CSSCode together with a SurgeryLayout describing the
+    qubit / check partition.
+
+    Args:
+        data_code: The data CSSCode (stabilizer, not subsystem).
+        logical_op: Binary row vector of length ``data_code.num_qubits``
+            indicating supp(X̄_M).
+        num_layers: Layer count L. Odd, >= 1. Default 1 follows the
+            [[144,12,12]] gross code example in Cross et al. Table 1. For
+            arbitrary logical_op, distance preservation may require L in
+            {3, 5}; this function does not verify distance.
+        validate_logical_op: If True (default), check that logical_op is
+            not in the row span of H_X. Skip with False if the caller has
+            already validated.
+
+    Returns:
+        (merged_code, layout):
+            merged_code: CSSCode on (n_data + n_ancilla) qubits with logical
+                dimension ``data_code.dimension - 1``.
+            layout: SurgeryLayout describing qubit / check provenance.
+
+    Raises:
+        ValueError: See spec §5 for the exhaustive list of cases.
+    """
+    v0_indices, c0_indices, F = _restrict_to_logical_support(
+        data_code, logical_op, num_layers, validate_logical_op
+    )
+    G = _compute_gauge_fix(F)
+    blocks = _build_layered_blocks(F, num_layers)
+
+    HX_merged = _assemble_merged_HX(data_code, blocks, v0_indices)
+    HZ_merged = _assemble_merged_HZ(data_code, blocks, G, c0_indices)
+
+    merged_code = CSSCode(HX_merged, HZ_merged, is_subsystem_code=False)
+
+    layout = _build_layout(
+        data_code, blocks, G, v0_indices, c0_indices, F
+    )
+    return merged_code, layout
+
+
+def _build_layout(
+    data_code: CSSCode,
+    blocks: _LayeredBlocks,
+    G: galois.FieldArray,
+    v0_indices: np.ndarray,
+    c0_indices: np.ndarray,
+    F: galois.FieldArray,
+) -> SurgeryLayout:
+    """Assemble the SurgeryLayout dataclass from the building blocks."""
+    n_data = data_code.num_qubits
+    n_ancilla = blocks.total_ancilla
+    qubit_layer = np.zeros(n_data + n_ancilla, dtype=np.int_)
+    for i in range(1, blocks.num_layers + 1):
+        slc = blocks.ancilla_col_slice(i)
+        qubit_layer[n_data + slc.start : n_data + slc.stop] = i
+
+    n_x_data = data_code.matrix_x.shape[0]
+    hx_labels: list[str] = ["data"] * n_x_data
+    for i in range(1, blocks.num_layers + 1, 2):  # odd
+        hx_labels.extend([f"ancilla_L{i}"] * blocks.n_v0)
+    hx_row_kind = np.array(hx_labels, dtype=object)
+
+    n_z_data = data_code.matrix_z.shape[0]
+    hz_labels: list[str] = ["data"] * n_z_data
+    for i in range(2, blocks.num_layers, 2):  # even (>=2, <L)
+        hz_labels.extend([f"ancilla_L{i}"] * blocks.n_c0)
+    hz_labels.extend(["gauge_fix"] * int(G.shape[0]))
+    hz_row_kind = np.array(hz_labels, dtype=object)
+
+    return SurgeryLayout(
+        num_data_qubits=n_data,
+        num_ancilla_qubits=n_ancilla,
+        num_layers=blocks.num_layers,
+        qubit_layer=qubit_layer,
+        v0_indices=v0_indices,
+        c0_indices=c0_indices,
+        F=F,
+        G=G,
+        hx_row_kind=hx_row_kind,
+        hz_row_kind=hz_row_kind,
+    )

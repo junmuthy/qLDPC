@@ -241,3 +241,116 @@ def test_assemble_HZ_steane_L1_shape_and_structure() -> None:
         gauge_rows = HZ[n_z_data:]
         assert np.all(gauge_rows[:, :code.num_qubits] == 0)
         assert np.array_equal(gauge_rows[:, code.num_qubits:], G)
+
+
+from qldpc.codes.surgery import build_layered_surgery_code
+
+
+def _assert_css_and_logical_count(
+    merged: codes.CSSCode,
+    data: codes.CSSCode,
+) -> None:
+    """Merged code satisfies CSS commutation and has dimension k_data − 1."""
+    assert merged.is_subsystem_code is False
+    assert np.all((merged.matrix_x @ merged.matrix_z.T) == 0)
+    assert merged.dimension == data.dimension - 1
+
+
+def test_build_surgery_steane_L1_integration() -> None:
+    """Steane L=1: merged code is CSS, has k_merged = 0, layout is consistent."""
+    code, logical_x = _steane_logical_x()
+    merged, layout = build_layered_surgery_code(
+        code, np.asarray(logical_x).astype(np.int_), num_layers=1
+    )
+
+    _assert_css_and_logical_count(merged, code)
+    assert layout.num_data_qubits == code.num_qubits
+    assert layout.num_layers == 1
+    assert layout.num_ancilla_qubits == layout.qubit_layer.size - code.num_qubits
+    assert merged.num_qubits == code.num_qubits + layout.num_ancilla_qubits
+
+    # Data qubits marked layer 0, ancilla marked layer 1.
+    assert np.all(layout.qubit_layer[: code.num_qubits] == 0)
+    assert np.all(layout.qubit_layer[code.num_qubits :] == 1)
+
+
+def test_build_surgery_steane_L3_integration() -> None:
+    """Steane L=3 exercises the loop body for >= 1 odd and >= 1 even ancilla layer."""
+    code, logical_x = _steane_logical_x()
+    merged, layout = build_layered_surgery_code(
+        code, np.asarray(logical_x).astype(np.int_), num_layers=3
+    )
+    _assert_css_and_logical_count(merged, code)
+    assert layout.num_layers == 3
+
+    # Qubit-layer labels appear in {0, 1, 2, 3}.
+    assert set(np.unique(layout.qubit_layer).tolist()) <= {0, 1, 2, 3}
+
+    # Layout row-kind labels match expected counts.
+    n_x_data = code.matrix_x.shape[0]
+    n_z_data = code.matrix_z.shape[0]
+    assert int(np.sum(layout.hx_row_kind == "data")) == n_x_data
+    assert int(np.sum(layout.hz_row_kind == "data")) == n_z_data
+    assert "ancilla_L1" in set(layout.hx_row_kind.tolist())
+    assert "ancilla_L3" in set(layout.hx_row_kind.tolist())
+    assert "ancilla_L2" in set(layout.hz_row_kind.tolist())
+
+
+def test_build_surgery_layout_row_counts_match_matrices() -> None:
+    """hx_row_kind / hz_row_kind lengths == merged check counts."""
+    code, logical_x = _steane_logical_x()
+    merged, layout = build_layered_surgery_code(
+        code, np.asarray(logical_x).astype(np.int_), num_layers=3
+    )
+    assert layout.hx_row_kind.size == merged.matrix_x.shape[0]
+    assert layout.hz_row_kind.size == merged.matrix_z.shape[0]
+
+
+def test_build_surgery_small_hgp_L1() -> None:
+    """Cross-code coverage on a small HGPCode."""
+    seed = 0
+    classical = codes.ClassicalCode.random(4, 2, seed=seed)
+    hgp = codes.HGPCode(classical)
+    logical_x = hgp.get_logical_ops(Pauli.X)[0]
+    merged, layout = build_layered_surgery_code(
+        hgp, np.asarray(logical_x).astype(np.int_), num_layers=1
+    )
+    _assert_css_and_logical_count(merged, hgp)
+    assert layout.num_layers == 1
+    assert layout.num_data_qubits == hgp.num_qubits
+
+
+def test_webster_observable_equals_logical_x_on_data() -> None:
+    """Webster Eq. (1) algebraic identity for the noise-free observable.
+
+    Claim: with gadget qubits kappa_j initialized to |0>, measuring the merged
+    code's stabilizers and taking the product of the chi_i (new X-check)
+    outcomes equals the X_M eigenvalue. The proof is purely algebraic:
+
+        Pi_i chi_i = (Pi_{i in V_0} X_{q_i}) * Pi_j X_{kappa_j}^{|S_j cap supp(L)| mod 2}
+
+    and |S_j cap supp(L)| == 0 mod 2 for every Z-stabilizer S_j of the data
+    code (because Z-stabilizers commute with the logical X X_M). So the
+    second factor is identity and the first factor is X_M on data qubits.
+
+    Equivalently, the XOR of all chi_i rows of merged.matrix_x, restricted
+    to data columns, equals logical_op, and restricted to ancilla columns
+    equals 0. This is a pure GF(2) identity and is the noise-free core
+    that the Section 7 notebook's logical observable definition relies on.
+    """
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+
+    chi_mask = layout.hx_row_kind == "ancilla_L1"
+    chi_rows = np.asarray(merged.matrix_x[chi_mask]).astype(np.int_)
+    product = chi_rows.sum(axis=0) % 2  # XOR of all chi_i rows
+
+    n_data = layout.num_data_qubits
+    assert np.array_equal(product[:n_data], arr), (
+        "Webster Eq. (1): XOR of chi_i restricted to data should equal logical_op"
+    )
+    assert np.all(product[n_data:] == 0), (
+        "Webster Eq. (1): XOR of chi_i restricted to ancilla should be zero "
+        "(every Z-check of the data code touches V_0 in an even number of qubits)"
+    )
