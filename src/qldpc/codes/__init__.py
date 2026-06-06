@@ -49,8 +49,13 @@ from .quantum import (
     ToricCode,
 )
 from .surgery import (
+    BoostResult,
+    JointSurgeryLayout,
     SurgeryLayout,
+    boost_gadget_cheeger,
+    build_joint_measurement_code,
     build_layered_surgery_code,
+    load_webster_seed_set,
 )
 
 __all__ = [
@@ -94,8 +99,13 @@ __all__ = [
     "TBCode",
     "TetrahedralCode",
     "ToricCode",
+    "BoostResult",
+    "JointSurgeryLayout",
     "SurgeryLayout",
+    "boost_gadget_cheeger",
+    "build_joint_measurement_code",
     "build_layered_surgery_code",
+    "load_webster_seed_set",
     "get_distance_classical",
     "get_distance_quantum",
 ]

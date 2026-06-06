@@ -800,3 +800,18 @@ def test_build_joint_invalid_mixed_type_raises() -> None:
     logical_z = np.asarray(hgp.get_logical_ops(Pauli.Z)[0]).astype(np.int_)
     with pytest.raises(ValueError, match="same Pauli type"):
         build_joint_measurement_code(hgp, logical_x, logical_z)
+
+
+def test_v2_reexports_from_qldpc_codes() -> None:
+    """v2 public symbols are re-exported."""
+    from qldpc import codes as codes_module
+
+    for name in (
+        "JointSurgeryLayout",
+        "build_joint_measurement_code",
+        "BoostResult",
+        "boost_gadget_cheeger",
+        "load_webster_seed_set",
+    ):
+        assert hasattr(codes_module, name), f"missing re-export: {name}"
+        assert name in codes_module.__all__, f"missing from __all__: {name}"
