@@ -459,3 +459,31 @@ def test_webster_table1_bare_gadget(code_index: int) -> None:
             f"gadget qubits = {expected}, got {webster_count} "
             f"(κ_j={n_kappa}, χ_i={n_chi}, gauge-fix={n_gauge_fix})"
         )
+
+
+import networkx as nx
+from qldpc.codes.surgery import _skip_tree
+
+
+def test_skip_tree_path_graph_3_vertices() -> None:
+    """SkipTree on a 3-vertex path graph 0—1—2: T has shape (2, 2),
+    P is 3x3 permutation matrix."""
+    S = nx.Graph()
+    S.add_edges_from([(0, 1), (1, 2)])
+    T, P = _skip_tree(S, root=0)
+    assert T.shape == (2, 2)
+    assert P.shape == (3, 3)
+    # P is a permutation: each row and column has exactly one 1.
+    assert np.all(P.sum(axis=0) == 1)
+    assert np.all(P.sum(axis=1) == 1)
+
+
+def test_skip_tree_star_graph_5_vertices() -> None:
+    """SkipTree on a 5-vertex star (center=0, leaves 1..4)."""
+    S = nx.Graph()
+    S.add_edges_from([(0, 1), (0, 2), (0, 3), (0, 4)])
+    T, P = _skip_tree(S, root=0)
+    assert T.shape == (4, 4)
+    assert P.shape == (5, 5)
+    assert np.all(P.sum(axis=0) == 1)
+    assert np.all(P.sum(axis=1) == 1)
