@@ -1,31 +1,34 @@
-# Design: Cross et al. 2024 Layered Ancilla Construction for QLDPC Surgery
+# Design: Explicit Gadget Construction for QLDPC Surgery
 
-**Date**: 2026-06-05
+**Date**: 2026-06-05 (revised 2026-06-06)
 **Status**: Approved (brainstorming phase)
-**Reference**: Cross, He, Rall, Yoder. *Improved QLDPC Surgery: Logical Measurements and Bridging Codes*. arXiv:2407.18393, §III, Lemma 4–Theorem 6, §IV.1.
+**Primary reference**: Webster, Smith, Cohen. *Explicit construction of low-overhead gadgets for gates on quantum LDPC codes*. arXiv:2511.15989, §II.A Steps 1–3.
+**Supporting references**: Cross, He, Rall, Yoder. *Improved QLDPC Surgery: Logical Measurements and Bridging Codes*. arXiv:2407.18393 (theoretical antecedent; boundary Cheeger constant definition; multi-layer fallback and bridges for future work). He, Cowtan, Williamson, Yoder. *Extractors: QLDPC Architectures for Efficient Pauli-Based Computation*. arXiv:2503.10390 (general `Q(L, G, f)` framework; cleaner measurement protocol than Cross §3.2).
 
 ## 1. Motivation
 
-The qLDPC repository currently has no implementation of generalized lattice surgery for QLDPC codes. A prior in-tree attempt (a Cohen-style L1 toy implementation) fails BP decoding for bivariate-bicycle codes because the chosen ancilla graph does not expand sufficiently — Cohen / CKBB requires `L = 2d − 1` layers in the worst case, which is impractical (Table 1 of the paper: 1380 ancilla qubits for the [[144,12,12]] gross code).
+The qLDPC repository currently has no implementation of generalized lattice surgery for QLDPC codes. A prior in-tree attempt (a Cohen-style toy implementation) fails BP decoding for bivariate-bicycle codes because the chosen ancilla graph does not expand sufficiently — Cohen / CKBB requires `L = 2d − 1` layers in the worst case, which is impractical (1380 ancilla qubits for the [[144,12,12]] gross code per Cross et al. 2024 Table 1).
 
-Cross et al. 2024 §III replaces the random expander with a *deterministic* layered Tanner graph built from `F = H_Z[C_0, V_0]` and proves that `⌈L/2⌉ ≥ 1/β` (β = boundary Cheeger constant of F) suffices, where in practice L ∈ {1, 3, 5} covers all cases of interest. For the [[144,12,12]] gross code with hand-chosen polynomial logical operators the authors achieve L = 1 with 103 ancilla qubits.
+Webster, Smith, Cohen (arXiv:2511.15989, Nov 2025) give an explicit, pedagogically clean 3-step gadget recipe (§II.A) for measuring a logical X operator X̄_M on any CSS code. The construction is structurally identical to the L=1 mono-layer specialization of Cross et al. 2024 §III, but the gadget framing makes the recipe directly implementable: (1) one new qubit κ_j per adjacent Z-check; (2) one new X-check χ_i per data qubit in supp(X̄_M), wired to κ_j iff F[j,i]=1; (3) extra Z-checks spanning ker(H_X^gadget) restricted to gadget qubits. The merged code's logical X̄_M becomes a stabilizer and the observable is just the product of the new X-checks (Webster Eq. 1).
 
-This spec adds the layered ancilla construction to qLDPC as a public API plus an end-to-end Cain Fig 1b reproduction notebook.
+This spec adds the gadget construction to qLDPC as a public API plus a Cain Fig 1b reproduction notebook that implements a Webster-style minimal surgery measurement circuit on top of the gadget. No public reference implementation of Webster's gadget construction currently exists.
 
 ## 2. Scope
 
 **In scope**:
-- A function `build_layered_surgery_code(data_code, logical_op, *, num_layers=1)` that returns a merged `CSSCode` plus a `SurgeryLayout` describing qubit/check provenance.
-- Internal helpers for the four algorithmic steps (restriction, layered block construction, gauge fix, matrix assembly).
+- A function `build_layered_surgery_code(data_code, logical_op, *, num_layers=1)` returning a merged `CSSCode` plus a `SurgeryLayout` describing qubit/check provenance. (The `num_layers` parameter and "layered" naming are retained for the optional Cross fallback at L>1; default L=1 implements Webster §II.A Steps 1–3 directly.)
+- Internal helpers for restriction (Step 1), layered block scaffolding, gauge fix (Step 3), and merged-matrix assembly.
 - Unit tests for CSS validity, helper correctness, and layout consistency.
-- A reproduction notebook `examples/logical_error_rates/9_lattice_surgery_cain_fig1b.ipynb`.
+- A Cain Fig 1b reproduction notebook implementing the Webster minimal surgery measurement circuit: initialize κ_j gadget qubits to |0⟩, run R = d rounds of merged-code stabilizer measurement, define detectors as standard round-to-round parities, define the logical observable as the product of the χ_i (= V_1 X-check) outcomes per Webster Eq. 1.
 
-**Out of scope (future work)**:
+**Out of scope (future specs)**:
 - Logical Z measurement merge (symmetric construction; trivial extension once X works).
-- Bridge / joint measurement systems (paper §3.6–3.8).
+- Bridge / joint measurement systems (Cross §3.6–3.8, arXiv:2407.18393; Webster cites Cross for bridges and does not introduce a new bridge construction).
+- Seed-operator + automorphism-orbit gadget reuse (Webster §II.B, Definition 3) — would let one gadget measure the full logical orbit on bivariate bicycle codes via cyclic-shift automorphisms.
+- Cheeger-boosting via edge augmentation (Webster §II.A end): adding O(n) extra gadget qubits/edges to lift the boundary Cheeger constant to h ≥ 1 without increasing the layer count. Webster gives empirical "+n" values in Table I but no constructive algorithm.
+- Multi-layer (L > 1) fault-tolerant measurement protocol (Cross §3.2's reliable/unreliable check schedule, or the cleaner Extractors Definition 10 framework).
 - Automatic Cheeger constant estimation.
-- Distance verification (caller's responsibility; paper uses CPLEX).
-- Syndrome extraction circuit synthesis for the merged code.
+- Distance verification (caller's responsibility; Cross/Webster use CPLEX or hand verification).
 
 ## 3. Public API
 
@@ -203,24 +206,32 @@ H_Z:              ┌─────────┬─────────�
 
 ### 4.5 Paper traceability
 
-Every construction element above maps to a specific passage in arXiv:2407.18393. Line numbers refer to the rendered PDF text extraction; section/equation numbers are paper-canonical.
+Webster §II.A Steps 1–3 (arXiv:2511.15989) is the primary, pedagogically clearest reference for the L=1 case implemented by default; Cross 2024 (arXiv:2407.18393) §2.2 + §3.1 is the original layered formulation that also covers the optional `num_layers > 1` fallback. The two formulations produce the *same* merged code at L=1 — Webster's "gadget qubit κ_j for each adjacent Z-check S_j" maps directly to Cross's "C_1 ancilla qubit at the same index as the C_0 Z-check", and Webster's "X-check χ_i wired to κ_j iff q_i ∈ S_j" is exactly Cross's `[Π_V_0, F^T]` row pattern.
 
-**Notation convention**: the paper writes inter-layer wiring with the higher-layer vertex on the left of the arrow (e.g. `I : V_1 →_X V_0`, `I : C_2 →_Z C_1`). Identity is self-transpose, so directionality is cosmetic, but implementations should match the paper for grep-ability.
+**Notation convention (Cross)**: Cross writes inter-layer wiring with the higher-layer vertex on the left of the arrow (e.g. `I : V_1 →_X V_0`, `I : C_2 →_Z C_1`). Identity is self-transpose, so directionality is cosmetic, but implementations should match the paper for grep-ability.
 
-| Construction element | Paper citation |
+| Construction element | Webster ref | Cross ref |
+|---|---|---|
+| `V_0 = supp(X̄_M)`, `C_0 = {Z-checks neighboring V_0}`, `F = H_Z[C_0, V_0]` | §II.A introduction ("Let S_L = {S_j} be the subset of Z-type checks of the code that act non-trivially on supp(L)") | §2.2, paragraph beginning "Key to their construction" |
+| New ancilla qubit κ_j per adjacent Z-check (= C_1 in Cross) | §II.A Step 1 | §2.2 Eq. (1)–(2) + `I : C_0 →_Z C_1` |
+| New X-check χ_i per data qubit in V_0, wired χ_i ⇄ κ_j iff F[j,i]=1, plus χ_i ⇄ q_i ("identity to V_0") | §II.A Step 2 | V_1 X-check row `[Π_V_0, F^T]` from intra-layer F^T and inter-layer `I : V_1 →_X V_0` |
+| Extra Z-type gauge-fix checks spanning ker(H_X^gadget) restricted to gadget qubits = left_null(F) | §II.A Step 3 | §3.1, paragraph beginning "To find a set of additional Z checks" |
+| Merged code is non-subsystem stabilizer; X̄_M becomes a stabilizer; k_merged = k_data − 1 | §II.A Eq. (1) derivation | §3.1, Theorem 1 |
+| Observable for fault-tolerant measurement = product of χ_i outcomes (≡ X̄_M after κ_j initialized to |0⟩) | §II.A Eq. (1) | (§3.2 with reliable/unreliable bookkeeping — Webster's clean init eliminates this) |
+| Optional layer-count condition `⌈L/2⌉ ≥ 1/β` (β = boundary Cheeger constant of F) for `num_layers > 1` | (cites Cross [10]) | §3.3, Lemma 4 / Theorem 6; §IV.1 mono-layer example; Table 1 |
+| Practical L ∈ {1, 3, 5} for small-to-medium codes (worst-case bound is pessimistic) | (cites Cross [10]) | §3.3, paragraph beginning "We also consider Theorem 6 a worst case upper bound" |
+
+Specifically the legacy traceability rows below remain for the `num_layers > 1` fallback path:
+
+| Cross-specific (num_layers > 1) | Paper citation |
 |---|---|
-| `V_0 = supp(X̄_M)`, `C_0 = {Z-checks neighboring V_0}`, `F = J_{C_0}^⊤ H^Z J_{V_0}` (= `H_Z[C_0, V_0]`) | §2.2, paragraph beginning "Key to their construction" |
 | Vertex roles per layer (odd i → X-check/qubit; even i → qubit/Z-check) | §2.2, Eq. (1)–(2) |
 | Intra-layer wiring: `F : C_i →_Z V_i` for even i, `F^⊤ : V_i →_X C_i` for odd i | §2.2, sentence beginning "Layers are connected identically via F" |
 | Inter-layer identities `I : C_0 →_Z C_1`, `I : V_1 →_X V_0`, `I : V_1 →_X V_2`, `I : C_2 →_Z C_1`, etc. | §2.2, next sentence ("adjacent layers are connected by the identity") |
 | Layers extended to L total: `(C_1, V_1), ..., (C_L, V_L)` with the same wiring rules | §3.1, first paragraph |
-| Gauge-fix: `G` spans `null(F)` (`G F = 0`), and `G : U_L →_Z C_L` introduces `rank(null(F))` new Z-checks; "Minimizing row and column weight of G minimizes the degrees added" | §3.1, paragraph beginning "To find a set of additional Z checks" |
-| Merged code G_X is a non-subsystem stabilizer code; `X̄_M` becomes a stabilizer; `k(G_X) = k(G) − 1` | §3.1, Theorem 1 |
-| Layer-count condition `⌈L/2⌉ ≥ 1/β` (β = boundary Cheeger constant of F); `L = 1` reference example for [[144,12,12]] gross code | §3.3, Lemma 4 / Theorem 6; §IV.1 mono-layer construction; Table 1 |
 | Distance preservation verified numerically (CPLEX), not from β | §IV.1, paragraph beginning "We verify numerically using CPLEX" |
-| Practical L ∈ {1, 3, 5} for small-to-medium codes (worst-case bound is pessimistic) | §3.3, paragraph beginning "We also consider Theorem 6 a worst case upper bound" (cites [Cow24]) |
 
-The block-matrix expansions in §4.2 / §4.3 / §4.4 are mechanical specializations of these rules to concrete L; no additional algorithmic content beyond what is stated in §2.2 + §3.1.
+The block-matrix expansions in §4.2 / §4.3 / §4.4 are mechanical specializations of these rules to concrete L; no additional algorithmic content beyond what is stated in Webster §II.A or Cross §2.2 + §3.1.
 
 ## 5. Validation
 
@@ -256,16 +267,22 @@ The internal helper sanity tests (`F`, `G`, layout consistency) go beyond the us
 
 No distance computation or Cain Table III matching in unit tests — those belong in the notebook.
 
-## 7. End-to-end notebook
+## 7. End-to-end notebook: Webster minimal surgery measurement circuit
 
 **Path**: `examples/logical_error_rates/9_lattice_surgery_cain_fig1b.ipynb`.
+
+This notebook implements a Webster-style minimal fault-tolerant measurement circuit on top of the gadget produced by `build_layered_surgery_code(..., num_layers=1)`. With L=1 (mono-layer gadget) and a clean |0⟩ initialization of all gadget qubits κ_j, the χ_i (new X-check) outcomes are reliable from the very first round and the Cross §3.2 reliable/unreliable bookkeeping collapses entirely. The fault-tolerant circuit differs from a standard memory experiment in only one place: the logical observable.
 
 Sections:
 1. Imports; construct the bb_18 BBCode (polynomial / orders specified inline).
 2. Choose X̄_M (default `code.get_logical_ops(Pauli.X)[0]`; hook to swap representative).
 3. Call `build_layered_surgery_code(bb18, X_bar, num_layers=1)`.
-4. Print ancilla qubit count, new X-check count, new Z-check count from `layout`. Qualitative comparison against Cain Table III (189, 104, 86); exact match not expected (Cain construction may include bridge qubits beyond Cross's bare layered ancilla).
-5. Build memory experiment circuit on `merged_code` via existing `qldpc.circuits.memory` API.
+4. Print ancilla qubit count, new X-check count, new Z-check count from `layout`. Qualitative comparison against Cain Table III (189, 104, 86); exact match not expected (Cain likely includes bridges and possibly Cheeger-boost augmentation qubits beyond the bare 3-step gadget).
+5. **Build the surgery measurement circuit** on `merged_code`, following Webster Eq. (1) and Extractors Definition 10 simplified for L=1:
+   - **Init**: data qubits in a test logical state |ψ⟩ of the bb_18 code (e.g., logical |+⟩ via standard CSS init); gadget qubits κ_j (all qubits with `layout.qubit_layer == 1`) in |0⟩.
+   - **Rounds**: R = d rounds of merged-code stabilizer measurement (X-checks and Z-checks of `merged_code`).
+   - **Detectors**: standard round-to-round parities of each stabilizer. Because κ_j are cleanly initialized, the χ_i (rows tagged `layout.hx_row_kind == "ancilla_L1"`) are reliable from round 1; no D_0 special-casing is needed.
+   - **Logical observable**: product across all R rounds of the χ_i outcomes. By Webster Eq. (1), this equals the X̄_M measurement bit in the noise-free case.
 6. Configure BP-LSD decoder following Cain Appendix D settings.
 7. Sweep physical error rate; produce LER curve.
 8. Plot alongside Cain Fig 1b for visual comparison.
@@ -285,7 +302,12 @@ Notebook follows the established `NUM_WORKERS` constant and `num_workers` parame
 
 ## 9. References
 
-- Cross, He, Rall, Yoder. *Improved QLDPC Surgery: Logical Measurements and Bridging Codes*. arXiv:2407.18393 (2024). §III, Lemma 4, Theorem 6; §IV.1 for the L = 1 mono-layer example on the [[144,12,12]] gross code; Table 1 for L comparison with CKBB and [Cow24].
-- Cohen, Kim, Bartlett, Brown. *Low-overhead fault-tolerant quantum computing using long-range connectivity*. Sci. Adv. 8, eabn1717 (2022). Original CKBB scheme with L = 2d − 1.
-- Cowtan. *SSIP: Automated Surgery with QLDPC Codes*. arXiv:2407.09423 (2024). Heuristic L = 5 for the gross code.
-- Bravyi, Cross, Gambetta, et al. *High-threshold and low-overhead fault-tolerant quantum memory*. Nature 627 (2024). The [[144,12,12]] code and notation.
+**Primary**:
+- Webster, Smith, Cohen. *Explicit construction of low-overhead gadgets for gates on quantum LDPC codes*. arXiv:2511.15989 (Nov 2025). §II.A Steps 1–3 (gadget construction = 3-step recipe directly translated into this implementation); Eq. (1) (observable = product of χ_i outcomes, used in the notebook); §II.A end and Table I ("+n" Cheeger augmentation — future spec); §II.B and Definition 3 (seed + automorphism orbit reuse — future spec); Appendix A (4 explicit seed-operator examples for generalised bicycle codes l ∈ {31, 63, 127, 255} — future spec verification data).
+
+**Theoretical antecedents and supporting frameworks**:
+- Cross, He, Rall, Yoder. *Improved QLDPC Surgery: Logical Measurements and Bridging Codes*. arXiv:2407.18393 (Jul 2024). §III, Lemma 4, Theorem 6 (boundary Cheeger constant and L ≥ ⌈2/β⌉ condition, used for the optional `num_layers > 1` fallback); §IV.1 (L = 1 mono-layer example on [[144,12,12]] gross code); Table 1 (overhead comparison with CKBB and [Cow24]); §3.6–3.7 (bridges for joint measurements — future spec).
+- He, Cowtan, Williamson, Yoder. *Extractors: QLDPC Architectures for Efficient Pauli-Based Computation*. arXiv:2503.10390 (Mar 2025). General `Q(L, G, f)` framework (Webster gadget = `Q(L, G_dual-restriction, f_natural)`); Definition 10 measurement protocol (Init / Merge / Split / Correct) — cleaner than Cross §3.2; Theorem 7 and Theorem 11 (correctness and fault distance).
+- Cohen, Kim, Bartlett, Brown. *Low-overhead fault-tolerant quantum computing using long-range connectivity*. Sci. Adv. 8, eabn1717 (2022). Original CKBB scheme with L = 2d − 1; the "baseline" against which Webster / Cross / Extractors improve.
+- Cowtan. *SSIP: Automated Surgery with QLDPC Codes*. arXiv:2407.09423 (Jul 2024). Heuristic L = 5 for the gross code; homological measurement framing.
+- Bravyi, Cross, Gambetta, et al. *High-threshold and low-overhead fault-tolerant quantum memory*. Nature 627 (2024). The [[144,12,12]] gross code definition and bivariate bicycle notation used throughout.

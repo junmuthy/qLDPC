@@ -1,14 +1,14 @@
-# Cross 2024 Layered Ancilla Construction — Implementation Plan
+# Webster-Style Gadget Construction for QLDPC Surgery — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement `build_layered_surgery_code` for QLDPC lattice surgery per Cross et al. 2024 (arXiv:2407.18393) §III, plus a Cain Fig 1b reproduction notebook.
+**Goal:** Implement `build_layered_surgery_code` for QLDPC lattice surgery per Webster, Smith, Cohen (arXiv:2511.15989) §II.A Steps 1–3 (which is structurally identical to the L=1 case of Cross et al. 2024 §III), plus a Cain Fig 1b reproduction notebook that implements a Webster-style minimal fault-tolerant surgery measurement circuit (init + d rounds + Π χ_i observable per Webster Eq. 1).
 
-**Architecture:** New module `src/qldpc/codes/surgery.py` exposing a function `build_layered_surgery_code(data_code, logical_op, *, num_layers=1)` that returns `(merged_CSSCode, SurgeryLayout)`. Five pure internal helpers implement Steps 1–4 of the paper (restriction `F`, gauge fix `G`, layered block scaffold, then `H_X` / `H_Z` assembly via block matrices). All linear algebra runs over GF(2) via `galois.GF(2)`.
+**Architecture:** New module `src/qldpc/codes/surgery.py` exposing a function `build_layered_surgery_code(data_code, logical_op, *, num_layers=1)` that returns `(merged_CSSCode, SurgeryLayout)`. Five pure internal helpers implement Webster Steps 1–3 with the Cross-generalized `num_layers > 1` fallback (restriction `F`, gauge fix `G = left_null(F)`, layered block scaffold, `H_X` / `H_Z` assembly). All linear algebra runs over GF(2) via `galois.GF(2)`.
 
 **Tech Stack:** Python 3, `galois.GF(2)`, `numpy`, `pytest`. Builds on `qldpc.codes.CSSCode`, `qldpc.codes.SteaneCode`, `qldpc.codes.HGPCode`.
 
-**Spec:** `docs/superpowers/specs/2026-06-05-cross-layered-ancilla-design.md` (commit `dc22f6b`).
+**Spec:** `docs/superpowers/specs/2026-06-05-cross-layered-ancilla-design.md`.
 
 ---
 
@@ -91,11 +91,22 @@ Expected: `ModuleNotFoundError: No module named 'qldpc.codes.surgery'`.
 Create `src/qldpc/codes/surgery.py`:
 
 ```python
-"""Layered ancilla construction for QLDPC lattice surgery (Cross et al. 2024).
+"""Gadget construction for QLDPC lattice surgery.
 
-Implements arXiv:2407.18393 §III. See
-docs/superpowers/specs/2026-06-05-cross-layered-ancilla-design.md for the
-design rationale and paper traceability.
+Primary reference: Webster, Smith, Cohen, arXiv:2511.15989 §II.A Steps 1-3,
+an explicit pedagogically clean 3-step recipe for building a logical-X
+measurement gadget on any CSS code. The default ``num_layers=1`` mode
+implements Webster's 3 steps verbatim; ``num_layers > 1`` activates the
+multi-layer fallback of Cross et al. 2024 (arXiv:2407.18393 §III) for codes
+whose induced Tanner graph has insufficient boundary Cheeger constant.
+
+The two formulations produce the same merged code at L=1: Webster's "gadget
+qubit kappa_j for each adjacent Z-check S_j" = Cross's "C_1 ancilla qubit
+at the same index as the C_0 Z-check"; Webster's "X-check chi_i wired to
+kappa_j iff q_i in S_j" = Cross's `[Pi_V_0, F^T]` row pattern.
+
+See docs/superpowers/specs/2026-06-05-cross-layered-ancilla-design.md for
+the full paper traceability and design rationale.
 
 Copyright 2026 The qLDPC Authors.
 Licensed under the Apache License, Version 2.0.
@@ -1256,14 +1267,17 @@ EOF
 
 ---
 
-## Task 10: Cain Fig 1b reproduction notebook (manual E2E artifact)
+## Task 10: Webster minimal surgery measurement circuit + Cain Fig 1b reproduction notebook (manual E2E artifact)
 
 **Files:**
+- Create: `examples/logical_error_rates/_9_lattice_surgery_cain_fig1b_source.py`
 - Create: `examples/logical_error_rates/9_lattice_surgery_cain_fig1b.ipynb`
 
-This task produces the end-to-end reproduction notebook. It is NOT run in CI; it is the manual integration artifact named in spec §7. The notebook follows existing conventions from `examples/logical_error_rates/`: `NUM_WORKERS` constant, parametrised cells, `qldpc.circuits.memory` API, BP-LSD via sinter.
+This task produces the end-to-end reproduction notebook implementing a Webster-style minimal fault-tolerant surgery measurement circuit on top of the gadget. It is NOT run in CI; it is the manual integration artifact named in spec §7. The notebook follows existing conventions from `examples/logical_error_rates/`: `NUM_WORKERS` constant, parametrised cells, `qldpc.circuits.memory` API, BP-LSD via sinter.
 
-Since notebooks are large JSON files, this task creates the notebook with `jupyter nbconvert --to notebook` from a Python source file, ensuring the content is reviewable and the JSON is well-formed.
+**Key construction (per Webster Eq. 1 / spec §7):** with `num_layers=1`, all gadget qubits κ_j are initialized to |0⟩ at the start of the circuit. The χ_i (new X-checks, rows tagged `layout.hx_row_kind == "ancilla_L1"`) are reliable from round 1 — no Cross §3.2 D_0 special-casing needed. The fault-tolerant circuit is **identical to a standard memory experiment except for the logical observable**, which is the product across all R rounds of the χ_i outcomes (= X̄_M's measurement bit in the noise-free case).
+
+Since notebooks are large JSON files, this task creates the notebook with `jupytext --to notebook` from a Python source file, ensuring the content is reviewable and the JSON is well-formed.
 
 - [ ] **Step 10.1: Write the notebook source as a `.py` "percent" file**
 
@@ -1272,25 +1286,26 @@ Create `examples/logical_error_rates/_9_lattice_surgery_cain_fig1b_source.py`:
 ```python
 """Source for 9_lattice_surgery_cain_fig1b.ipynb.
 
-Reproduces Cain et al. 2024 Fig 1b end-to-end using
-``qldpc.codes.build_layered_surgery_code`` (Cross et al. 2024 §III).
+Reproduces Cain et al. 2024 Fig 1b using qldpc.codes.build_layered_surgery_code
+(Webster, Smith, Cohen 2025 §II.A 3-step gadget; equivalent to Cross 2024
+§III at L=1). The measurement circuit follows Webster Eq. (1): with gadget
+qubits initialized to |0⟩, the logical observable is the product of new
+X-check (χ_i) outcomes across all rounds.
 
 Convert with:
-    jupyter nbconvert --to notebook --execute=False \
+    jupytext --to notebook \
         examples/logical_error_rates/_9_lattice_surgery_cain_fig1b_source.py \
-        --output 9_lattice_surgery_cain_fig1b.ipynb
-
-(Use --execute to also run all cells. By default this script does not
-execute on conversion because the sweep is expensive.)
+        -o examples/logical_error_rates/9_lattice_surgery_cain_fig1b.ipynb
 """
 
 # %% [markdown]
 # # Lattice Surgery for bb_18 — Reproducing Cain et al. 2024 Fig 1b
 #
-# This notebook builds a merged surgery code for a bivariate-bicycle code via
-# the layered ancilla construction of Cross et al. 2024 §III
-# (arXiv:2407.18393), then runs BP-LSD decoding on a memory experiment
-# circuit to reproduce the logical error rate curve of Cain et al. Fig 1b.
+# Builds a merged surgery code for a bivariate-bicycle code via the explicit
+# Webster–Smith–Cohen 3-step gadget recipe (arXiv:2511.15989 §II.A), runs a
+# fault-tolerant measurement circuit on top with Webster's Eq. (1) observable
+# (product of new X-check outcomes), decodes via BP-LSD, and compares the
+# resulting LER curve against Cain et al. Fig 1b.
 
 # %%
 from __future__ import annotations
@@ -1304,17 +1319,13 @@ NUM_WORKERS = 8  # adjust to your machine; matches conventions in this directory
 
 # %% [markdown]
 # ## 1. Construct the bb_18 BBCode
-#
-# Replace the polynomial / orders below with the bb_18 instance you want to
-# reproduce. The example below is a placeholder; see Cain App. D or your
-# project notes for the exact polynomials.
 
 # %%
 import sympy
 
 x, y = sympy.symbols("x y")
 # TODO(notebook author): replace with the bb_18 polynomials used in your
-# reproduction target. This is the line you re-edit per code instance.
+# reproduction target. See Cain App. D or your project notes.
 poly_a = 1 + x + x**2  # PLACEHOLDER
 poly_b = 1 + y + y**2  # PLACEHOLDER
 orders = (3, 3)         # PLACEHOLDER
@@ -1324,20 +1335,16 @@ print(f"Data code: [[{data_code.num_qubits}, {data_code.dimension}]]")
 
 # %% [markdown]
 # ## 2. Pick a logical X representative
-#
-# Default: first logical X from ``get_logical_ops``. Swap below to try
-# heaviest / lightest representatives if you want to compare.
 
 # %%
 logical_x = np.asarray(data_code.get_logical_ops(Pauli.X)[0]).astype(np.int_)
 print(f"|supp(X̄_M)| = {int(logical_x.sum())}")
 
 # %% [markdown]
-# ## 3. Build the merged surgery code
+# ## 3. Build the gadget (merged surgery code)
 #
-# ``num_layers=1`` follows the Cross et al. 2024 Table 1 mono-layer example
-# for the [[144,12,12]] gross code. If the resulting decoder fails to
-# converge, bump to ``num_layers=3`` (see spec §4.5 paper traceability).
+# ``num_layers=1`` implements Webster Steps 1–3 verbatim. If BP-LSD fails to
+# converge, try ``num_layers=3`` (Cross fallback).
 
 # %%
 merged, layout = codes.build_layered_surgery_code(
@@ -1349,40 +1356,85 @@ print(f"Merged code: [[{merged.num_qubits}, {merged.dimension}]]")
 # ## 4. Sanity print against Cain Table III
 #
 # Cain Table III lists (ancilla qubits, X-checks, Z-checks) = (189, 104, 86)
-# for bb_18. Exact match is not expected — Cain includes bridge qubits and
-# joint-measurement structure beyond Cross's bare layered ancilla — but the
-# orders of magnitude should be comparable.
+# for bb_18. Exact match is not expected — Cain likely includes bridges and
+# Cheeger-augmentation qubits beyond the bare 3-step gadget. The orders of
+# magnitude should be comparable.
 
 # %%
 ancilla_qubits = int(layout.num_ancilla_qubits)
 new_x_checks = int(np.sum(layout.hx_row_kind != "data"))
 new_z_checks = int(np.sum(layout.hz_row_kind != "data"))
 print(f"Ancilla qubits      : {ancilla_qubits}")
-print(f"New X-checks (V_i)  : {new_x_checks}")
+print(f"New X-checks (χ_i)  : {new_x_checks}")
 print(f"New Z-checks + U_L  : {new_z_checks}")
 print(f"Cain Table III ref  : (189, 104, 86) — qualitative comparison only")
 
 # %% [markdown]
-# ## 5. Build the memory experiment circuit
+# ## 5. Build the Webster minimal surgery measurement circuit
 #
-# Uses ``qldpc.circuits.memory`` to construct an X-memory experiment on the
-# merged code. The circuit-level noise model is the standard depolarizing
-# channel from this repo's helpers.
+# The circuit differs from a standard X-memory experiment in only one place:
+# the logical observable. Per Webster Eq. (1), the observable is the product
+# across all R = d rounds of the χ_i outcomes — these are the rows of the
+# merged H_X tagged ``"ancilla_L1"`` in ``layout.hx_row_kind``. Because the
+# gadget qubits κ_j (columns where ``layout.qubit_layer == 1``) are
+# initialized to |0⟩, the χ_i are reliable from round 1 — no Cross §3.2
+# unreliable/D_0 bookkeeping is needed.
 
 # %%
 from qldpc.circuits import memory
 
-# TODO(notebook author): pick num_rounds matching Cain App. D. The exact
-# constant depends on the code distance; typical choice is num_rounds = d.
+# TODO(notebook author): pick num_rounds matching Cain App. D. Typical
+# choice is num_rounds = d (the code distance).
 num_rounds = 12  # PLACEHOLDER — set per target code distance
 
-# %% [markdown]
-# ## 6. Configure the BP-LSD decoder
+# Identify which columns of the merged code are gadget qubits (Webster κ_j)
+# vs data qubits — needed for the per-qubit initial state.
+ancilla_qubit_mask = layout.qubit_layer == 1
+data_qubit_mask = layout.qubit_layer == 0
+
+# Identify which H_X rows are the χ_i (new X-checks added by the gadget).
+chi_row_mask = layout.hx_row_kind == "ancilla_L1"
+chi_row_indices = np.flatnonzero(chi_row_mask)
+print(f"#chi_i rows: {chi_row_indices.size}")
+
+# TODO(notebook author): build the surgery circuit. The pattern is:
 #
-# Cain App. D specifies BP iterations and LSD parameters. See
-# ``qldpc.decoders.BPLSDDecoder`` (or equivalent) for the API used in this
-# repo's prior bb_18 work. The cell below is a placeholder; copy the exact
-# configuration from your prior reproduce_cain_bb18_*.py scripts.
+#     circuit = memory.build_x_memory_circuit(
+#         code=merged,
+#         num_rounds=num_rounds,
+#         initial_state="logical_plus",   # data qubits = logical |+⟩ of bb_18
+#         ancilla_initial_state={i: "0" for i in np.flatnonzero(ancilla_qubit_mask)},
+#         noise_model=...,                # standard depolarizing per Cain App. D
+#     )
+#
+# The exact builder API depends on the `qldpc.circuits.memory` interface in
+# this repo — adapt to whichever helper notebooks 2/3 already use. The
+# critical detail is that gadget qubits start in |0⟩ (Z=+1 eigenstate).
+#
+# Then OVERRIDE the logical observable on the resulting stim circuit so it
+# becomes the product of all chi_i measurement outcomes across all rounds,
+# instead of the default data-code logical X̄.
+#
+# Pseudo-code:
+#
+#     circuit = ...build base circuit as above...
+#     # Remove the default OBSERVABLE_INCLUDE that targets the data logical:
+#     circuit = strip_default_observable(circuit)
+#     # Add an OBSERVABLE_INCLUDE that XORs every chi_i measurement record
+#     # across all num_rounds rounds:
+#     chi_measurement_records = [
+#         stim.target_rec(-offset_for(round_idx, chi_idx))
+#         for round_idx in range(num_rounds)
+#         for chi_idx in chi_row_indices
+#     ]
+#     circuit.append("OBSERVABLE_INCLUDE", chi_measurement_records, 0)
+
+# %% [markdown]
+# ## 6. Configure the BP-LSD decoder per Cain App. D
+#
+# Copy the exact decoder configuration from your prior
+# `reproduce_cain_bb18_*.py` scripts. The key Cain App. D parameters are BP
+# iteration count and LSD post-processing settings.
 
 # %%
 from qldpc import decoders
@@ -1394,17 +1446,14 @@ decoder_kwargs = {
 
 # %% [markdown]
 # ## 7. Sweep and produce the LER curve
-#
-# Run a sinter sweep over physical error rates p ∈ [1e-3, 5e-3, 1e-2, ...]
-# and collect logical error rate per cycle.
 
 # %%
 import sinter
 
-# TODO(notebook author): fill in the actual sweep with sinter.collect, using
-# NUM_WORKERS and a circuit factory that wires (merged, layout, p, num_rounds,
-# decoder_kwargs). The decoder integration follows the same pattern as
-# notebooks 2 / 3 in this directory.
+# TODO(notebook author): fill in the sinter.collect sweep over physical
+# error rates, using NUM_WORKERS workers. The circuit factory must wire the
+# Webster observable defined in section 5; the decoder runs on the DEM
+# derived from that circuit so that "logical error" = wrong χ_i product.
 
 p_values = [1e-3, 2e-3, 3e-3, 5e-3, 7e-3]
 results = []  # placeholder for sinter.collect output
@@ -1455,13 +1504,16 @@ git add \
   examples/logical_error_rates/_9_lattice_surgery_cain_fig1b_source.py \
   examples/logical_error_rates/9_lattice_surgery_cain_fig1b.ipynb
 git commit -m "$(cat <<'EOF'
-Add Cain Fig 1b reproduction notebook skeleton
+Add Cain Fig 1b reproduction notebook (Webster minimal surgery circuit)
 
-The notebook calls qldpc.codes.build_layered_surgery_code and lays out
-the full pipeline (BBCode construction → surgery → memory circuit →
-BP-LSD decode → sweep). Polynomial/decoder-specific TODOs are flagged
-inline for the notebook author to wire up to their bb_18 instance and
-the prior reproduce_cain_bb18 decoder configuration.
+Notebook builds the gadget via build_layered_surgery_code (Webster Steps
+1-3 at num_layers=1), then defines a fault-tolerant surgery measurement
+circuit with the Webster Eq. 1 observable (product of new X-check χ_i
+outcomes across R = d rounds). Gadget qubits initialize to |0⟩ so the
+χ_i are reliable from round 1 — no Cross §3.2 D_0 bookkeeping. The
+remaining circuit-construction and decoder-config TODOs are tagged for
+the notebook author to wire to their bb_18 instance and Cain App. D
+settings.
 
 The corresponding _source.py jupytext file is committed alongside so the
 notebook is reviewable as plain Python.
