@@ -28,6 +28,8 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 
+from qldpc.objects import Pauli
+
 from .common import CSSCode
 
 
@@ -752,3 +754,32 @@ def boost_gadget_cheeger(
         iterations=iterations,
         terminated_by=terminated_by,
     )
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class JointSurgeryLayout:
+    """Provenance of qubits and checks in a merged joint-measurement code.
+
+    Returned by ``build_joint_measurement_code`` alongside the merged
+    CSSCode. Captures the two individual gadget layouts plus bridge
+    metadata.
+
+    Attributes:
+        gadget_layouts: Pair of SurgeryLayout instances, one per logical op.
+        pauli_type: Pauli.X for X̄_1 X̄_2; Pauli.Z for Z̄_1 Z̄_2.
+        num_data_qubits: Number of qubits in the original data code.
+        num_ancilla_qubits: gadget1.num_ancilla + gadget2.num_ancilla.
+        num_bridge_qubits: Bridge qubits introduced by SkipTree.
+        bridge_qubit_slice: Column slice for bridge qubits within the
+            merged qubit register (after data + both gadget ancillas).
+        u_b_check_kind_mask: Boolean mask over merged H_Z rows marking the
+            U_B bridge stabilizer rows.
+    """
+
+    gadget_layouts: tuple[SurgeryLayout, SurgeryLayout]
+    pauli_type: Pauli
+    num_data_qubits: int
+    num_ancilla_qubits: int
+    num_bridge_qubits: int
+    bridge_qubit_slice: slice
+    u_b_check_kind_mask: npt.NDArray[np.bool_]

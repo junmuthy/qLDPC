@@ -580,3 +580,43 @@ def test_boost_gadget_cheeger_invalid_target_raises() -> None:
     merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
     with pytest.raises(ValueError, match="target_h"):
         boost_gadget_cheeger(merged, layout, target_h=-1.0)
+
+
+def test_joint_surgery_layout_construction() -> None:
+    """JointSurgeryLayout is a frozen dataclass with the documented fields."""
+    from qldpc.codes.surgery import JointSurgeryLayout
+
+    field = galois.GF(2)
+    F1 = field([[1, 0, 1]])
+    F2 = field([[0, 1, 1]])
+    G_empty = field.Zeros((0, 1))
+    sub_layout1 = SurgeryLayout(
+        num_data_qubits=7, num_ancilla_qubits=1, num_layers=1,
+        qubit_layer=np.array([0]*7 + [1], dtype=np.int_),
+        v0_indices=np.array([0, 1, 2], dtype=np.int_),
+        c0_indices=np.array([0], dtype=np.int_),
+        F=F1, G=G_empty,
+        hx_row_kind=np.array(["data"]*3 + ["ancilla_L1"]*3, dtype=object),
+        hz_row_kind=np.array(["data"]*3, dtype=object),
+    )
+    sub_layout2 = SurgeryLayout(
+        num_data_qubits=7, num_ancilla_qubits=1, num_layers=1,
+        qubit_layer=np.array([0]*7 + [1], dtype=np.int_),
+        v0_indices=np.array([3, 4, 5], dtype=np.int_),
+        c0_indices=np.array([1], dtype=np.int_),
+        F=F2, G=G_empty,
+        hx_row_kind=np.array(["data"]*3 + ["ancilla_L1"]*3, dtype=object),
+        hz_row_kind=np.array(["data"]*3, dtype=object),
+    )
+    joint = JointSurgeryLayout(
+        gadget_layouts=(sub_layout1, sub_layout2),
+        pauli_type=Pauli.X,
+        num_data_qubits=7,
+        num_ancilla_qubits=2,
+        num_bridge_qubits=1,
+        bridge_qubit_slice=slice(9, 10),
+        u_b_check_kind_mask=np.array([False]*3 + [True], dtype=bool),
+    )
+    assert joint.num_data_qubits == 7
+    assert joint.num_bridge_qubits == 1
+    assert dataclasses.is_dataclass(joint) and joint.__dataclass_params__.frozen
