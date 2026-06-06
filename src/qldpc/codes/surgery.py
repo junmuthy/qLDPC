@@ -772,8 +772,9 @@ class JointSurgeryLayout:
         num_bridge_qubits: Bridge qubits introduced by SkipTree.
         bridge_qubit_slice: Column slice for bridge qubits within the
             merged qubit register (after data + both gadget ancillas).
-        u_b_check_kind_mask: Boolean mask over merged H_Z rows marking the
-            U_B bridge stabilizer rows.
+        u_b_check_kind_mask: Boolean mask over merged H_X rows (since the
+            bridge stabilizers are X-type in the joint-X measurement case)
+            marking the U_B bridge stabilizer rows.
     """
 
     gadget_layouts: tuple[SurgeryLayout, SurgeryLayout]
@@ -836,131 +837,79 @@ def _validate_joint_logical_ops(
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class _BridgeSpec:
-    """Internal output of _build_bridge_via_skiptree.
+    """Internal bridge specification for joint-measurement code construction.
+
+    Per Cross §3.6 + Webster (arXiv:2511.15989) paragraph on bridges. The
+    bridge is a path graph of w data qubits with w-1 X-type stabilizers,
+    where w = min(wt(L_1), wt(L_2)) = min(|V_0_1|, |V_0_2|). One χ from
+    each gadget is extended with X on a bridge endpoint:
+    - χ_0^(1) gets X on bridge qubit 0
+    - χ_0^(2) gets X on bridge qubit w-1
 
     Attributes:
-        num_bridge_qubits: number of bridge qubits introduced.
-        u_b_rows: shape (n_u_b, |C_0_1| + |C_0_2| + num_bridge_qubits)
-            GF(2) matrix. Each row is one U_B Z-stabilizer over
-            (κ_j_1, κ_j_2, bridge) qubits.
-        interface_vertex_to_qubit: dict mapping interface-graph vertex
-            index → (block, kappa_index) where block ∈ {0, 1}.
+        num_bridge_qubits: w.
+        u_b_x_rows: shape (w-1, w) GF(2) matrix. Row i has 1s at columns
+            i and i+1, encoding the X_{b_i} X_{b_{i+1}} path stabilizer.
+        gadget1_extended_chi_row_in_v1: index of the χ in gadget1's V_1
+            block (0-indexed) that gets extended with X on bridge qubit 0.
+            For this simple design, always 0.
+        gadget2_extended_chi_row_in_v1: index for gadget2. Always 0.
+        gadget1_bridge_qubit_idx: which bridge qubit attaches to gadget 1.
+            For this design, always 0.
+        gadget2_bridge_qubit_idx: which bridge qubit attaches to gadget 2.
+            For this design, always w-1.
     """
-
     num_bridge_qubits: int
-    u_b_rows: galois.FieldArray
-    interface_vertex_to_qubit: dict[int, tuple[int, int]]
+    u_b_x_rows: galois.FieldArray
+    gadget1_extended_chi_row_in_v1: int
+    gadget2_extended_chi_row_in_v1: int
+    gadget1_bridge_qubit_idx: int
+    gadget2_bridge_qubit_idx: int
 
 
 def _build_bridge_via_skiptree(
     layout1: SurgeryLayout,
     layout2: SurgeryLayout,
 ) -> _BridgeSpec:
-    """Construct the same-block joint-measurement bridge.
+    """Bridge construction for joint X̄_1 X̄_2 measurement.
 
-    Algorithm:
-    1. Interface graph S = (V, E):
-       V = κ_j_1 vertices (one per layout1.c0_indices) ∪ κ_j_2 vertices.
-       E = pairs (κ_j_1, κ_k_2) where data Z-checks indexed j and k share
-           at least one qubit in supp(op1) ∩ supp(op2).
-    2. Add chord edges via _cellulate_long_cycles(S, max_len=6).
-    3. Run _skip_tree(S, root=0) → T (n-1, |E|) and P (n, n).
-    4. Bridge qubits = n - 1.
-       For row r of T, U_B stabilizer acts on:
-         interface vertices that appear an ODD number of times in T[r]
-         (i.e., XOR of endpoints of all edges in T[r])
-         plus the bridge qubit r.
+    Per Cross §3.6 (arXiv:2407.18393) + Webster (arXiv:2511.15989)
+    paragraph on bridges with disjoint logical support:
+
+    - w = min(wt(L_1), wt(L_2)) bridge data qubits b_0..b_{w-1}
+    - w-1 X-type stabilizers: X_{b_i} X_{b_{i+1}} for i in 0..w-2 (path)
+    - Endpoint attachment: χ_0^(1) ⊗ X_{b_0}, χ_0^(2) ⊗ X_{b_{w-1}}
+
+    SkipTree on a path graph is the identity (no optimization needed for
+    the simple case). The function name retains "via_skiptree" for API
+    consistency; future generalizations to non-path interface graphs
+    would use the SkipTree primitive.
 
     Raises:
-        ValueError: if the interface graph has no edges or is disconnected.
+        ValueError: if w = 0 (one of the logical operators has empty
+            support — caller should have rejected this earlier).
     """
-    n_kappa_1 = layout1.F.shape[0]
-    n_kappa_2 = layout2.F.shape[0]
+    w = min(int(layout1.v0_indices.size), int(layout2.v0_indices.size))
+    if w == 0:
+        raise ValueError(
+            "min(wt(L_1), wt(L_2)) is 0; cannot build a bridge between "
+            "logical operators with empty support."
+        )
     field = layout1.F.__class__
 
-    S = nx.Graph()
-    S.add_nodes_from(range(n_kappa_1 + n_kappa_2))
-    interface_vertex_to_qubit: dict[int, tuple[int, int]] = {}
-    for j_idx in range(n_kappa_1):
-        interface_vertex_to_qubit[j_idx] = (0, j_idx)
-    for k_idx in range(n_kappa_2):
-        interface_vertex_to_qubit[n_kappa_1 + k_idx] = (1, k_idx)
-
-    F1 = np.asarray(layout1.F).astype(np.int_)
-    F2 = np.asarray(layout2.F).astype(np.int_)
-    v0_1 = layout1.v0_indices
-    v0_2 = layout2.v0_indices
-    common_qubits = np.intersect1d(v0_1, v0_2)
-
-    edge_qubit_to_vertices: dict[int, tuple[int, int]] = {}
-    vert_to_edge: dict[tuple[int, int], int] = {}
-    next_edge_index = 0
-    for q in common_qubits:
-        col1 = int(np.where(v0_1 == q)[0][0])
-        col2 = int(np.where(v0_2 == q)[0][0])
-        j_indices = np.flatnonzero(F1[:, col1])
-        k_indices = np.flatnonzero(F2[:, col2])
-        for j in j_indices:
-            for k in k_indices:
-                u, v = sorted((int(j), int(n_kappa_1 + k)))
-                if (u, v) not in vert_to_edge:
-                    S.add_edge(u, v)
-                    edge_qubit_to_vertices[next_edge_index] = (u, v)
-                    vert_to_edge[(u, v)] = next_edge_index
-                    next_edge_index += 1
-
-    if next_edge_index == 0:
-        raise ValueError(
-            "interface graph has no edges; gadgets' V_0 supports do not overlap "
-            "via any data Z-check, so no same-block bridge is possible."
-        )
-    if not nx.is_connected(S.subgraph([v for v in S.nodes if S.degree(v) > 0])):
-        raise ValueError(
-            "interface graph between the two gadgets is disconnected; "
-            "same-block joint-measurement bridge requires a connected interface."
-        )
-
-    G_mat = np.zeros((next_edge_index, n_kappa_1 + n_kappa_2), dtype=np.int_)
-    for ei, (u, v) in edge_qubit_to_vertices.items():
-        G_mat[ei, u] = 1
-        G_mat[ei, v] = 1
-    _, edge_qubit_to_vertices, vert_to_edge, G_mat = _cellulate_long_cycles(
-        S, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=6
-    )
-
-    # Restrict S to vertices with degree > 0 for SkipTree (the algorithm needs a connected component)
-    connected_vertices = sorted([v for v in S.nodes if S.degree(v) > 0])
-    if len(connected_vertices) < 2:
-        raise ValueError("interface graph has fewer than 2 connected vertices.")
-    # _skip_tree assumes vertices are labeled 0..n-1; relabel and translate back at the end.
-    relabel_map = {v: i for i, v in enumerate(connected_vertices)}
-    inv_relabel = {i: v for v, i in relabel_map.items()}
-    S_sub = nx.relabel_nodes(S.subgraph(connected_vertices).copy(), relabel_map)
-    root = relabel_map[connected_vertices[0]]
-
-    T, P = _skip_tree(S_sub, root=root)
-    num_bridge_qubits = T.shape[0]
-    n_interface = n_kappa_1 + n_kappa_2
-    u_b_rows_arr = np.zeros((num_bridge_qubits, n_interface + num_bridge_qubits), dtype=np.int_)
-    # Build an edge_to_index map for the subgraph, then translate vertices back to the original S labels.
-    sub_edge_index_verts = {tuple(sorted(e)): i for i, e in enumerate(S_sub.edges())}
-    inv_sub_edges = {i: tuple(sorted(e)) for e, i in sub_edge_index_verts.items()}
-
-    for r in range(num_bridge_qubits):
-        # Edges on this row's shortest path in S_sub
-        for e_idx in np.flatnonzero(T[r]):
-            u_sub, v_sub = inv_sub_edges[e_idx]
-            u = inv_relabel[u_sub]
-            v = inv_relabel[v_sub]
-            u_b_rows_arr[r, u] = (u_b_rows_arr[r, u] + 1) % 2
-            u_b_rows_arr[r, v] = (u_b_rows_arr[r, v] + 1) % 2
-        # bridge qubit r
-        u_b_rows_arr[r, n_interface + r] = 1
+    # Path-graph X-stabilizers on bridge qubits only.
+    u_b_x_rows = np.zeros((max(w - 1, 0), w), dtype=np.int_)
+    for i in range(w - 1):
+        u_b_x_rows[i, i] = 1
+        u_b_x_rows[i, i + 1] = 1
 
     return _BridgeSpec(
-        num_bridge_qubits=num_bridge_qubits,
-        u_b_rows=field(u_b_rows_arr),
-        interface_vertex_to_qubit=interface_vertex_to_qubit,
+        num_bridge_qubits=w,
+        u_b_x_rows=field(u_b_x_rows),
+        gadget1_extended_chi_row_in_v1=0,
+        gadget2_extended_chi_row_in_v1=0,
+        gadget1_bridge_qubit_idx=0,
+        gadget2_bridge_qubit_idx=w - 1,
     )
 
 
@@ -974,33 +923,28 @@ def _stitch_gadgets_with_bridge(
     *,
     pauli_type: Pauli,
 ) -> tuple[CSSCode, JointSurgeryLayout]:
-    """Combine two single-operator merged codes with bridge into a joint CSSCode.
+    """Combine two single-operator merged codes with a path-graph bridge.
 
-    Qubit register:
-        [ data qubits | layout1.ancilla | layout2.ancilla | bridge ]
-        n_data         n_anc_1            n_anc_2           n_bridge
+    Per Cross §3.6 + Webster paragraph: the bridge introduces w data
+    qubits with w-1 X-type stabilizers. One χ in each gadget is extended
+    with X on the corresponding bridge endpoint.
 
-    Construction (X-type joint, ``pauli_type=Pauli.X``):
-        - H_X rows: HX1 padded to the joint register, plus HX2's non-"data"
-          rows padded (the "data" X-checks of merged2 duplicate those of
-          merged1 on data columns and are zero on every ancilla, so they
-          are removed).
-        - H_Z rows: HZ1 padded + HZ2's non-"data" rows padded + U_B rows.
-          HZ2's "data" rows are subsumed by HZ1's "data" rows, but for each
-          j in ``layout2.c0_indices`` we splice in the gadget-2 ancilla
-          connection (identity on the κ_j_2 column) onto the corresponding
-          HZ1 row so the gadget-2 c0 connection isn't lost.
-        - Each U_B[r] row carries Z support on the joint register equal to
-          the SUM of the gadget data Z-checks at the path endpoints (i.e.
-          for endpoint vertex j in block 1: full ``HZ1`` row at C0-row
-          ``c0_1_to_row[j]``; for endpoint vertex k in block 2: the gadget-2
-          ancilla connection ``Z_{κ_k_2}`` plus the data Z-check S_{c0_2[k]}).
-          The "Z on bridge qubit r" lives on the bridge column. Because this
-          U_B is itself a SUM of existing data Z-stabilizers (which already
-          commute with both gadgets' X-stabilizers) plus a Z on a fresh
-          bridge qubit, CSS commutation is guaranteed.
+    Qubit register layout:
+        [ data | layout1.ancilla | layout2.ancilla | bridge ]
+        n_data  n_anc_1            n_anc_2           n_bridge
 
-    Returns the joint merged CSSCode and the JointSurgeryLayout.
+    H_X rows (in order):
+        - data X-checks (from data_code, identical between the two gadgets)
+        - layout1 V_1 X-check rows (with χ_0^(1) extended by X_{b_0})
+        - layout2 V_1 X-check rows (with χ_0^(2) extended by X_{b_{w-1}})
+        - bridge U_B X-stab path rows (w-1 rows)
+
+    H_Z rows:
+        - layout1's data + gadget Z rows (already correct: data Z extensions
+          onto layout1 κ_j; gauge-fix rows on layout1's C_L)
+        - layout2's gadget-side Z rows ONLY (data extension to layout2 κ_j;
+          gauge-fix on layout2's C_L); the non-C_0_2 data Z rows are
+          duplicates already in layout1's output and are dropped.
     """
     field = data_code.field
     n_data = data_code.num_qubits
@@ -1015,7 +959,6 @@ def _stitch_gadgets_with_bridge(
     HZ2 = np.asarray(merged2.matrix_z).astype(np.int_)
 
     def _pad_row(matrix: np.ndarray, *, ancilla_block: int) -> np.ndarray:
-        """Embed a row of merged_i into the joint register column layout."""
         out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
         out[:, :n_data] = matrix[:, :n_data]
         if ancilla_block == 0:
@@ -1029,86 +972,62 @@ def _stitch_gadgets_with_bridge(
     HZ1_padded = _pad_row(HZ1, ancilla_block=0)
     HZ2_padded = _pad_row(HZ2, ancilla_block=1)
 
-    # De-duplicate gadget2's "data" X-checks (they replicate gadget1's after
-    # padding — same on data columns, zero on every ancilla and bridge column).
-    is_data_hx_2 = layout2.hx_row_kind == "data"
-    HX2_padded = HX2_padded[~is_data_hx_2]
+    # Extend ONE χ row in each gadget's HX with X on the bridge endpoint.
+    # χ rows in HX1 are at indices where layout1.hx_row_kind == "ancilla_L1".
+    n_x_data = int(np.sum(layout1.hx_row_kind == "data"))
+    # χ_0^(1) is the first χ row after the data X-check rows.
+    chi_row_1 = n_x_data + bridge.gadget1_extended_chi_row_in_v1
+    chi_row_2 = int(np.sum(layout2.hx_row_kind == "data")) + bridge.gadget2_extended_chi_row_in_v1
+    bridge_col_start = n_data + n_anc_1 + n_anc_2
 
-    # Splice the gadget-2 κ_k_2 connection onto HZ1's c0_2 rows, then drop
-    # HZ2's "data" rows (now subsumed). For each j ∈ layout2.c0_indices, the
-    # k-th row of layout2.F maps to data Z-check row j of the data code; the
-    # j-th data row of HZ1_padded becomes (S_j on data) + Z_κ_j_1 (if j ∈
-    # c0_1, from merged1) + Z_κ_j_2 (newly added from merged2 connection).
-    n_z_data = int(data_code.matrix_z.shape[0])
+    HX1_padded[chi_row_1, bridge_col_start + bridge.gadget1_bridge_qubit_idx] = 1
+    HX2_padded[chi_row_2, bridge_col_start + bridge.gadget2_bridge_qubit_idx] = 1
+
+    # De-duplicate gadget2's data X-checks (= gadget1's).
+    is_data_hx_2 = layout2.hx_row_kind == "data"
+    HX2_padded_nondata = HX2_padded[~is_data_hx_2]
+
+    # Compose gadget1's data Z rows with gadget2's κ_2 extensions: for each
+    # j ∈ layout2.c0_indices, splice the κ_2 column onto HZ1's data row j so
+    # that the merged Z-stabilizer carries BOTH κ_1 (if j ∈ c0_1) and κ_2 (if
+    # j ∈ c0_2) extensions. This guarantees chi rows from BOTH gadgets commute
+    # with every Z-stabilizer (overlap on data is cancelled by overlap on the
+    # respective κ block).
     is_data_hz_1 = layout1.hz_row_kind == "data"
     data_hz1_row_indices = np.flatnonzero(is_data_hz_1)
-    # Map: data Z-check index j  ->  row index in HZ1_padded
-    # The "data" rows of HZ1 are the first n_z_data rows (see _assemble_merged_HZ).
+    n_z_data = int(data_code.matrix_z.shape[0])
     assert data_hz1_row_indices.size == n_z_data
     blocks2 = _build_layered_blocks(layout2.F, layout2.num_layers)
     c1_slice_2 = blocks2.ancilla_col_slice(1)
-    # offset of κ_k_2 within joint register
     kappa2_col_start = n_data + n_anc_1 + c1_slice_2.start
     for k, j in enumerate(layout2.c0_indices):
         row_in_hz1 = int(data_hz1_row_indices[j])
         HZ1_padded[row_in_hz1, kappa2_col_start + k] = 1
 
+    # Drop ALL of HZ2's data rows: the data Z stabilizers are now fully
+    # captured by HZ1_padded (with κ_1 + κ_2 extensions spliced in above).
     is_data_hz_2 = layout2.hz_row_kind == "data"
-    HZ2_padded = HZ2_padded[~is_data_hz_2]
+    HZ2_padded_filtered = HZ2_padded[~is_data_hz_2]
 
-    # U_B rows: bridge.u_b_rows has columns [n_kappa_1 | n_kappa_2 | n_bridge].
-    # Map each interface-vertex column to the FULL data Z-check of the matching
-    # gadget, so each U_B row is (sum of existing data Z-stabilizers of the two
-    # gadgets at the path endpoints) + Z on bridge qubit r. This is the only
-    # construction that preserves CSS commutation with chi_v X-checks of both
-    # gadgets (since each summand individually commutes with H_X).
-    n_k1 = layout1.F.shape[0]
-    n_k2 = layout2.F.shape[0]
-    u_b_arr = np.asarray(bridge.u_b_rows).astype(np.int_)
-    if u_b_arr.shape[1] != n_k1 + n_k2 + n_bridge:
-        raise ValueError(
-            f"bridge.u_b_rows width {u_b_arr.shape[1]} != n_kappa_1 + n_kappa_2 "
-            f"+ n_bridge ({n_k1} + {n_k2} + {n_bridge}); cannot stitch."
-        )
+    # Bridge U_B X-type stabilizers, padded onto joint register (zero on data,
+    # zero on both gadget ancillas, the X-stab pattern on bridge cols).
+    n_u_b = bridge.u_b_x_rows.shape[0]
+    u_b_x_arr = np.asarray(bridge.u_b_x_rows).astype(np.int_)
+    u_b_padded = np.zeros((n_u_b, n_merged), dtype=np.int_)
+    if n_u_b > 0:
+        u_b_padded[:, bridge_col_start : bridge_col_start + n_bridge] = u_b_x_arr
 
-    blocks1 = _build_layered_blocks(layout1.F, layout1.num_layers)
-    c1_slice_1 = blocks1.ancilla_col_slice(1)
-    kappa1_col_start = n_data + c1_slice_1.start
-
-    u_b_padded = np.zeros((u_b_arr.shape[0], n_merged), dtype=np.int_)
-    for r in range(u_b_arr.shape[0]):
-        # Each block-1 endpoint κ_j_1 contributes spliced HZ1's data row at
-        # c0_1[j]: this row carries S_{c0_1[j]} on data, Z_κ_j_1 on gadget-1
-        # ancilla, and (if c0_1[j] ∈ c0_2) Z_κ_{k}_2 on gadget-2 ancilla. It
-        # already commutes with chi rows of BOTH gadgets (see the splice
-        # analysis above), so any sum of such rows + Z on a fresh bridge qubit
-        # also commutes.
-        for j_in_k1 in range(n_k1):
-            if u_b_arr[r, j_in_k1] == 1:
-                row_in_hz1 = int(data_hz1_row_indices[layout1.c0_indices[j_in_k1]])
-                u_b_padded[r] = (u_b_padded[r] + HZ1_padded[row_in_hz1]) % 2
-        # Each block-2 endpoint κ_k_2 ALSO contributes spliced HZ1's data row
-        # at c0_2[k] — by the splice, this row carries Z_κ_k_2 on gadget-2
-        # ancilla (and S_{c0_2[k]} on data, and Z_κ_j_1 if c0_2[k] ∈ c0_1).
-        # Using the spliced row guarantees the cross-gadget commutation.
-        for k_in_k2 in range(n_k2):
-            if u_b_arr[r, n_k1 + k_in_k2] == 1:
-                row_in_hz1 = int(data_hz1_row_indices[layout2.c0_indices[k_in_k2]])
-                u_b_padded[r] = (u_b_padded[r] + HZ1_padded[row_in_hz1]) % 2
-        # Bridge qubit r.
-        for r2 in range(n_bridge):
-            if u_b_arr[r, n_k1 + n_k2 + r2] == 1:
-                u_b_padded[r, n_data + n_anc_1 + n_anc_2 + r2] ^= 1
-
-    HX_joint = field(np.vstack([HX1_padded, HX2_padded]))
-    HZ_joint = field(np.vstack([HZ1_padded, HZ2_padded, u_b_padded]))
+    HX_joint = field(np.vstack([HX1_padded, HX2_padded_nondata, u_b_padded]))
+    HZ_joint = field(np.vstack([HZ1_padded, HZ2_padded_filtered]))
 
     joint_merged = CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
 
-    bridge_slice = slice(n_data + n_anc_1 + n_anc_2, n_merged)
-    u_b_check_kind_mask = np.zeros(HZ_joint.shape[0], dtype=bool)
-    if u_b_arr.shape[0] > 0:
-        u_b_check_kind_mask[-u_b_arr.shape[0]:] = True
+    bridge_slice = slice(bridge_col_start, n_merged)
+    # u_b_check_kind_mask: True on the bridge X-stab rows in HX_joint
+    # (the bridge stabilizers are X-type in the joint-X measurement case).
+    u_b_check_kind_mask = np.zeros(HX_joint.shape[0], dtype=bool)
+    if n_u_b > 0:
+        u_b_check_kind_mask[-n_u_b:] = True
 
     joint_layout = JointSurgeryLayout(
         gadget_layouts=(layout1, layout2),

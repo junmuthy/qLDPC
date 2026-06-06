@@ -661,12 +661,17 @@ from qldpc.codes.surgery import _BridgeSpec, _build_bridge_via_skiptree
 
 
 def _two_overlapping_hgp_gadgets():
-    """Build two HGPCode gadgets that share some V_0 overlap."""
+    """Build two HGPCode gadgets with disjoint V_0 support.
+
+    Per Cross §3.6 + Webster path-bridge design, the bridge handles
+    DISJOINT logical-X support. We pick logical X reps [0] and [2] of
+    this HGP, which are supported on disjoint qubit sets.
+    """
     classical = codes.ClassicalCode.random(4, 2, seed=0)
     hgp = codes.HGPCode(classical)
     logicals_x = hgp.get_logical_ops(Pauli.X)
     arr1 = np.asarray(logicals_x[0]).astype(np.int_)
-    arr2 = np.asarray(logicals_x[1]).astype(np.int_)
+    arr2 = np.asarray(logicals_x[2]).astype(np.int_)
     _, lay1 = build_layered_surgery_code(hgp, arr1, num_layers=1)
     _, lay2 = build_layered_surgery_code(hgp, arr2, num_layers=1)
     return hgp, lay1, lay2
@@ -676,25 +681,52 @@ def test_build_bridge_returns_BridgeSpec() -> None:
     try:
         _, lay1, lay2 = _two_overlapping_hgp_gadgets()
     except ValueError:
-        pytest.skip("Random HGP gave disjoint V_0; need a better fixture")
-    try:
-        spec = _build_bridge_via_skiptree(lay1, lay2)
-    except ValueError:
-        pytest.skip("Random HGP gave disconnected interface graph; need a better fixture")
+        pytest.skip("Random HGP gave incompatible inputs")
+    spec = _build_bridge_via_skiptree(lay1, lay2)
     assert isinstance(spec, _BridgeSpec)
-    assert spec.num_bridge_qubits >= 0
+    assert spec.num_bridge_qubits == min(lay1.v0_indices.size, lay2.v0_indices.size)
 
 
-def test_build_bridge_u_b_rows_have_correct_width() -> None:
-    try:
-        _, lay1, lay2 = _two_overlapping_hgp_gadgets()
-        spec = _build_bridge_via_skiptree(lay1, lay2)
-    except ValueError:
-        pytest.skip("Test fixture produced incompatible inputs; see v2.9 plan")
+def test_build_bridge_u_b_x_rows_have_correct_shape() -> None:
+    _, lay1, lay2 = _two_overlapping_hgp_gadgets()
+    spec = _build_bridge_via_skiptree(lay1, lay2)
+    w = spec.num_bridge_qubits
+    assert spec.u_b_x_rows.shape == (max(w - 1, 0), w)
+    if w > 1:
+        # path-graph pattern: row i has 1 at cols i and i+1
+        for i in range(w - 1):
+            assert spec.u_b_x_rows[i, i] == 1
+            assert spec.u_b_x_rows[i, i + 1] == 1
+            row_int = np.asarray(spec.u_b_x_rows[i]).astype(int)
+            assert int(np.sum(row_int)) == 2
 
-    expected_width = lay1.F.shape[0] + lay2.F.shape[0] + spec.num_bridge_qubits
-    if spec.u_b_rows.shape[0] > 0:
-        assert spec.u_b_rows.shape[1] == expected_width
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_webster_table1_bridge_qubits(code_index: int) -> None:
+    """Webster Table I bridge qubits (11, 19, 31, 51) verification.
+
+    For each of the 4 Webster App. A codes, build gadgets for X̄_1 and
+    X̄_{k/2+1} and call _build_bridge_via_skiptree. The reported
+    num_bridge_qubits should equal min(wt(L_1), wt(L_2)), and the
+    Webster-style count (2 * num_bridge_qubits - 1) should equal the
+    Webster Table I 'Bridge qubits' column.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    assert len(x_seeds) >= 2
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    _, lay1 = build_layered_surgery_code(code, op1, num_layers=1, validate_logical_op=False)
+    _, lay2 = build_layered_surgery_code(code, op2, num_layers=1, validate_logical_op=False)
+    bridge = _build_bridge_via_skiptree(lay1, lay2)
+    w = bridge.num_bridge_qubits
+    webster_style = 2 * w - 1
+    expected_webster = data["expected_bridge_qubits_per_pair"]
+    assert webster_style == expected_webster, (
+        f"Code {data['name']}: w={w}, webster-style=2w-1={webster_style}, "
+        f"expected={expected_webster}"
+    )
 
 
 from qldpc.codes.surgery import _stitch_gadgets_with_bridge
@@ -709,7 +741,7 @@ def test_stitch_gadgets_returns_valid_css() -> None:
         pytest.skip("Random HGP gave incompatible inputs")
 
     arr1 = np.asarray(hgp.get_logical_ops(Pauli.X)[0]).astype(np.int_)
-    arr2 = np.asarray(hgp.get_logical_ops(Pauli.X)[1]).astype(np.int_)
+    arr2 = np.asarray(hgp.get_logical_ops(Pauli.X)[2]).astype(np.int_)
     merged1, _ = build_layered_surgery_code(hgp, arr1, num_layers=1)
     merged2, _ = build_layered_surgery_code(hgp, arr2, num_layers=1)
     try:
