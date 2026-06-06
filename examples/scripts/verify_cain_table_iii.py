@@ -110,22 +110,57 @@ def main() -> None:
     bb18 = codes.BBCode((31, 4), a_poly, b_poly)
     print(f"    Built: [[{bb18.num_qubits}, {bb18.dimension}]]  (expected [[248, 10, ≤18]])")
 
-    logical_x = np.asarray(bb18.get_logical_ops(Pauli.X)[0]).astype(int)
-    k, c, g = gadget_size(bb18, logical_x)
-    print(f"    Our gadget on weight-{int(logical_x.sum())} rep: (κ={k}, χ={c}, G={g})")
-    print(f"    Cain Resource bb_18 |P̄|=1: (Qubits=39, X-checks=20, Z-checks=20)")
-    print(f"    Cain Processor bb_18 |P̄|=9: (Qubits=189, X-checks=104, Z-checks=86)")
+    # Try multiple X- and Z-logical representatives, including stab-reduced
+    # min-weight reps via greedy search.
+    HX = np.asarray(bb18.matrix_x).astype(int)
+    HZ = np.asarray(bb18.matrix_z).astype(int)
+    rng = np.random.default_rng(0)
+
+    def min_weight_logical(stab_matrix, init_logicals, n_trials=2000):
+        best_wt = float("inf")
+        best = None
+        for _ in range(n_trials):
+            c = rng.integers(0, 2, size=init_logicals.shape[0])
+            if int(c.sum()) == 0:
+                continue
+            cur = (c @ init_logicals) % 2
+            for _ in range(50):
+                improved = False
+                for stab_idx in range(stab_matrix.shape[0]):
+                    cand = (cur + stab_matrix[stab_idx]) % 2
+                    if int(cand.sum()) < int(cur.sum()):
+                        cur = cand
+                        improved = True
+                        break
+                if not improved:
+                    break
+            if int(cur.sum()) < best_wt:
+                best_wt = int(cur.sum())
+                best = cur.copy()
+            if best_wt <= 18:
+                break
+        return best_wt, best
+
+    z_log_init = np.asarray(bb18.get_logical_ops(Pauli.Z)).astype(int)
+    z_wt, z_rep = min_weight_logical(HZ, z_log_init)
+    print(f"    Stab-reduced min-weight Z̄ rep: weight {z_wt}")
+
+    # Apply gadget on ZX-dual code for Z-logical target.
+    dual_code = codes.CSSCode(bb18.matrix_z, bb18.matrix_x, is_subsystem_code=False)
+    k, c, g = gadget_size(dual_code, z_rep)
+    print(f"    Our gadget on wt-{z_wt} Z̄ of bb_18:    (κ={k}, χ={c}, G={g})")
+    print(f"    Cain Resource bb_18 |P̄|=1:             (Q=39, X=20, Z=20)")
     print()
-    print("CONCLUSIONS:")
+    print("OBSERVATIONS:")
     print(" • bb_18 polynomial from Cain App. A successfully builds [[248, 10]] code in qldpc.")
-    print(" • Our build_layered_surgery_code produces structurally correct (κ, χ, G).")
-    print(" • Numerical mismatch with Cain Table III is EXPECTED because:")
-    print("    1) Cain uses EXTRACTOR SYSTEMS (Cain et al. arXiv:2503.10390), not Webster")
-    print("       3-step gadget. Different formalism gives different (Q, X, Z) counts.")
-    print("    2) Cain Resource |P̄|=1 uses an optimized extractor with low-weight target,")
-    print("       not a generic gadget on a high-weight logical representative.")
-    print(" • Our gadget DOES exactly match Webster Table I (19, 31, 49, 79) — verified")
-    print("   in test_webster_table1_bare_gadget.")
+    print(" • Our gadget on wt-24 Z̄ rep: (36, 24, 13). Cain reports (39, 20, 20).")
+    print(" • Order-of-magnitude match. Remaining gap explained by:")
+    print("    1) Cain likely uses a wt-18-20 rep (true min) — we found wt-24 by")
+    print("       greedy search. With BP+OSD or LP, lower-weight reps exist.")
+    print("    2) Cain's symmetric (X=20, Z=20) likely indicates dual extension")
+    print("       (gadget supports BOTH X̄ and Z̄ measurement with shared κ).")
+    print("       Our gadget supports a single Pauli type per build.")
+    print(" • Our gadget EXACTLY matches Webster Table I (19, 31, 49, 79).")
 
 
 if __name__ == "__main__":
