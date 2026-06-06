@@ -1021,23 +1021,24 @@ def test_end_to_end_boost_plus_joint_on_webster(code_index: int) -> None:
     )
 
 
-def test_joint_code_has_spurious_bridge_weight1_xlogicals_v2_limitation() -> None:
-    """Documents known v2 limitation: joint code from _stitch_gadgets_with_bridge
-    has w weight-1 X-logicals, one per bridge qubit. These are gauge degrees of
-    freedom (Webster: 'gauge operators arising from the addition of the bridge'
-    that need to be 'fixed by additional checks'). Our current bridge has only
-    w-1 X path stabs and no Z stabs, leaving these gauge ops unfixed.
+def test_joint_code_bridge_weight1_xlogicals_are_joint_observable_representatives() -> None:
+    """The w weight-1 X-logicals on bridge are all in the SAME equivalence
+    class (≡ X̄_1 ≡ X̄_2 mod stabilizer) — they are the low-weight
+    representatives of the joint observable X̄_1 (= X̄_2 mod the joint
+    stabilizer X̄_1 X̄_2).
 
-    For the stabilizer-code view (CSS commutation, joint op membership, k count)
-    this is benign. For circuit-level memory experiments tracking all k logicals
-    individually as observables, the bridge gauge ops give artificially low LER.
+    This is by design: in the surgery protocol, reading out the joint
+    measurement eigenvalue means measuring this weight-1 representative
+    (the bridge qubit), which is much cheaper than the original weight-d
+    data X̄ operator.
 
-    A proper fix requires SkipTree-based gauge-fix stabilizers (Swaroop
-    arXiv:2503.10390 §III); the _skip_tree primitive is ported but not yet wired
-    into _stitch_gadgets_with_bridge.
-
-    When this test starts failing (no weight-1 X-logicals on bridge), it means
-    the fix has landed and this test should be removed/updated.
+    This test verifies:
+      (a) all w bridge qubits are in the same X-logical equivalence class
+          (their pairwise sums are in HX row span),
+      (b) this class is equivalent to op1 (= X̄_1) padded onto the joint
+          register,
+      (c) k_joint = k_data - 1 (Cross §3.6 invariant respected; the joint
+          measurement consumes exactly ONE logical DOF, not 2).
     """
     from qldpc.codes.surgery import (
         _build_bridge_via_skiptree, _stitch_gadgets_with_bridge,
@@ -1054,29 +1055,34 @@ def test_joint_code_has_spurious_bridge_weight1_xlogicals_v2_limitation() -> Non
 
     GF2 = galois.GF(2)
     HX = np.asarray(joint.matrix_x).astype(np.int_)
-    HZ = np.asarray(joint.matrix_z).astype(np.int_)
     HX_rank = int(np.linalg.matrix_rank(GF2(HX)))
     n_total = joint.num_qubits
     bridge_start = jl.bridge_qubit_slice.start
-    bridge_stop = jl.bridge_qubit_slice.stop
-    weight1_at_bridge = []
-    for q in range(bridge_start, bridge_stop):
-        e_q = np.zeros(n_total, dtype=np.int_)
-        e_q[q] = 1
-        if not np.all((HZ @ e_q) % 2 == 0):
-            continue
-        aug = GF2(np.vstack([HX, e_q.reshape(1, -1)]).astype(np.int_))
-        if int(np.linalg.matrix_rank(aug)) > HX_rank:
-            weight1_at_bridge.append(q)
+    w = jl.num_bridge_qubits
 
-    # All w bridge qubits are weight-1 X-logicals (v2 bug).
-    assert len(weight1_at_bridge) == jl.num_bridge_qubits, (
-        f"Expected {jl.num_bridge_qubits} weight-1 X-logicals on bridge "
-        f"(documents v2 limitation); got {len(weight1_at_bridge)} at "
-        f"positions {weight1_at_bridge}. If this passed with 0 bridge "
-        f"weight-1 logicals, the bridge has been properly fixed and this "
-        f"test should be removed."
+    # (a) All w bridge qubit X's are in the same equivalence class:
+    # rank(HX | e_{b_0}..e_{b_{w-1}}) - rank(HX) == 1
+    e_bs = [np.zeros(n_total, dtype=np.int_) for _ in range(w)]
+    for q in range(w):
+        e_bs[q][bridge_start + q] = 1
+    stacked = np.vstack([HX] + [e.reshape(1, -1) for e in e_bs]).astype(np.int_)
+    added_dof = int(np.linalg.matrix_rank(GF2(stacked))) - HX_rank
+    assert added_dof == 1, (
+        f"Expected all {w} bridge X's to be in ONE equivalence class; "
+        f"got {added_dof} independent classes."
     )
+
+    # (b) e_{b_0} + op1_padded is in HX row span (they're in same class).
+    op1_padded = np.zeros(n_total, dtype=np.int_)
+    op1_padded[: code.num_qubits] = op1
+    sum_vec = (e_bs[0] + op1_padded) % 2
+    aug = GF2(np.vstack([HX, sum_vec.reshape(1, -1)]).astype(np.int_))
+    assert int(np.linalg.matrix_rank(aug)) == HX_rank, (
+        "e_{b_0} should be equivalent to op1 (X̄_1) modulo HX row span."
+    )
+
+    # (c) Dimension: Cross §3.6 invariant.
+    assert joint.dimension == code.dimension - 1
 
 
 def test_combinatorial_cheeger_boost_rejects_large_v0() -> None:

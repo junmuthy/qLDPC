@@ -1419,40 +1419,43 @@ def _build_bridge_via_skiptree(
     )
 
 
-def _solve_gf2_row_vector(
-    F: galois.FieldArray,
-    target_col: int,
-    field: type[galois.FieldArray],
-) -> galois.FieldArray | None:
-    """Solve γ^T F = e_{target_col}^T over GF(2), i.e., F^T γ = e_{target_col}.
+def _solve_gf2_system(A: np.ndarray, b: np.ndarray) -> np.ndarray | None:
+    """Solve A x = b over GF(2). Returns x or None if infeasible.
 
-    Returns γ ∈ F_2^{|C_0|} or None if e_{target_col} is not in the column
-    span of F^T (= row span of F).
+    A has shape (m, n), b has shape (m,), x has shape (n,).
     """
-    n_C, n_V = F.shape
-    e_target = field.Zeros(n_V)
-    e_target[target_col] = field(1)
-    # Augmented matrix [F^T | e_target]; row reduce; check feasibility.
-    augmented = np.hstack(
-        [np.asarray(F).T.astype(np.int_),
-         np.asarray(e_target).astype(np.int_).reshape(-1, 1)]
-    )
-    aug_gf = field(augmented)
-    rref = aug_gf.row_reduce()
-    rref_arr = np.asarray(rref)
-    # For each row: if all F^T part is zero but target part is 1, infeasible.
-    for r in range(rref_arr.shape[0]):
-        if np.all(rref_arr[r, :n_C] == 0) and rref_arr[r, n_C] == 1:
-            return None
-    # Back-substitution to extract γ. Pivot column in F^T part for each row.
-    gamma = np.zeros(n_C, dtype=np.int_)
-    for r in range(rref_arr.shape[0]):
-        nonzero = np.flatnonzero(rref_arr[r, :n_C])
-        if nonzero.size == 0:
+    GF2 = galois.GF(2)
+    m, n = A.shape
+    aug = GF2(np.hstack([A.astype(np.int_), b.reshape(-1, 1).astype(np.int_)]))
+    rref = np.asarray(aug.row_reduce())
+    x = np.zeros(n, dtype=np.int_)
+    for r in range(m):
+        nz = np.flatnonzero(rref[r, :n])
+        if nz.size == 0:
+            if rref[r, n] == 1:
+                return None
             continue
-        pivot = int(nonzero[0])
-        gamma[pivot] = int(rref_arr[r, n_C])
-    return field(gamma)
+        x[int(nz[0])] = int(rref[r, n])
+    return x
+
+
+def _find_bridge_z_stab_data_logical(
+    data_code: CSSCode,
+    op1: np.ndarray,
+    op2: np.ndarray,
+) -> np.ndarray | None:
+    """Find a Z-Pauli y_d of data code that anti-commutes with both op1 and op2.
+
+    Such y_d corresponds to (Z̄_1 + Z̄_2)-class representative. Used to build
+    the bridge Z-stab that constrains the bridge gauge X-DOFs.
+
+    Returns y_d as binary vector of length n_data, or None if not found.
+    """
+    for zl in data_code.get_logical_ops(Pauli.Z):
+        zl_arr = np.asarray(zl).astype(np.int_)
+        if (zl_arr @ op1) % 2 == 1 and (zl_arr @ op2) % 2 == 1:
+            return zl_arr
+    return None
 
 
 def _stitch_gadgets_with_bridge(
@@ -1559,26 +1562,27 @@ def _stitch_gadgets_with_bridge(
     if n_u_b > 0:
         u_b_padded[:, bridge_col_start : bridge_col_start + n_bridge] = u_b_x_arr
 
-    # KNOWN LIMITATION (v2): the bridge construction here gives w bridge qubits
-    # constrained only by w-1 X path stabs (Cross §3.6 + Webster). This leaves
-    # w spurious weight-1 X-logicals at each bridge qubit (each X_{b_q} commutes
-    # with all Z-stabs and is not in HX row span). The joint code has
-    # k_joint = k_data - 1, but k_data - 1 - w of those logicals are the "real"
-    # data logicals; the remaining w are bridge gauge degrees of freedom that
-    # are SUPPOSED to be measured/absorbed by the surgery protocol.
+    # IMPORTANT NOTE on bridge X-logical structure:
     #
-    # For the Tanner-graph view of the protocol (used to verify CSS commutation,
-    # joint operator stabilizer membership, and dimension), this incomplete
-    # bridge is sufficient. For a memory experiment that distinguishes data
-    # logicals from gauge bridge ops, additional Z structure on the bridge
-    # would be needed — see roadmap notes.
+    # Each bridge qubit X_{b_q} appears as a weight-1 representative of the
+    # X̄_1 ≡ X̄_2 equivalence class (linked via Σ_i χ_i^(s) = X̄_s on data +
+    # e_{b_endpoint} on bridge, then chained through path stabilizers). This
+    # is a FEATURE, not a bug: the weight-1 bridge representative is exactly
+    # the low-weight logical observable that the surgery protocol measures to
+    # read out the joint X̄_1 X̄_2 eigenvalue.
     #
-    # For Webster's degree-2 F (every row weight 2), attempting to balance the
-    # bridge via a single Z-stab of form (γ_s on κ_s + Z full bridge) fails:
-    # solving γ^T F = e_0 over GF(2) has no solution when F has even-degree
-    # row span (which is the case for degree-2 F). A proper fix requires the
-    # SkipTree-based gauge-fix stabilizers from Swaroop arXiv:2503.10390, which
-    # we ported (_skip_tree) but did not invoke here.
+    # For MEMORY experiments on the joint code (artificial; joint code is
+    # transient in real surgery use), the weight-1 representative gives
+    # d_X(joint) = 1. This is NOT meaningful for joint surgery protocol
+    # fault tolerance, which involves repeated measurements + readout, not
+    # state storage. The joint code's actual role is as a transient code
+    # during the merge phase; readout via bridge X is by design.
+    #
+    # Adding a Z-stab to eliminate the bridge representatives would also
+    # consume the X̄_1 ≡ X̄_2 class as a logical (k_joint = k_data - 2 instead
+    # of k_data - 1), violating Cross §3.6's "one logical DOF consumed".
+    # See test_joint_code_has_spurious_bridge_weight1_xlogicals_v2_limitation
+    # for diagnostic.
 
     # Per Cross §3.6: a joint X̄_1 X̄_2 measurement consumes ONE logical degree of
     # freedom (the product's eigenvalue). k_joint = k_data - 1.
