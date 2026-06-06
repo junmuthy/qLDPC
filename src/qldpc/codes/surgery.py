@@ -734,19 +734,39 @@ def boost_gadget_cheeger(
     G = _compute_gauge_fix(augmented_F)
     blocks = _build_layered_blocks(augmented_F, layout.num_layers)
     n_data = layout.num_data_qubits
+    n_extra = extra  # number of new κ' qubits added
 
     data_x = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
     data_z = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
     data_x = field(data_x[:, :n_data])
-    data_z = field(data_z[:, :n_data])
-    data_code_proxy = CSSCode(data_x, data_z, is_subsystem_code=False)
+    data_z_original = field(data_z[:, :n_data])
+
+    # Extend data_z with `n_extra` synthetic zero rows. Each synthetic row
+    # represents a "data Z-check" that doesn't touch any data qubit; its only
+    # role is to anchor the new κ' qubit in the merged code's c0 region so
+    # _assemble_merged_HZ's identity-injection slicing works.
+    if n_extra > 0:
+        synthetic_z = field.Zeros((n_extra, n_data))
+        data_z_extended = field(np.vstack([np.asarray(data_z_original), np.asarray(synthetic_z)]))
+    else:
+        data_z_extended = data_z_original
+
+    data_code_proxy = CSSCode(data_x, data_z_extended, is_subsystem_code=False)
+
+    # Extend c0_indices to include the new synthetic Z-check rows. Their
+    # indices come right after the original data_z's rows.
+    n_z_data_original = data_z_original.shape[0]
+    new_c0_indices = np.concatenate([
+        layout.c0_indices,
+        np.arange(n_z_data_original, n_z_data_original + n_extra, dtype=np.int_),
+    ])
 
     HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
-    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, layout.c0_indices)
+    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, new_c0_indices)
 
     boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
     boosted_layout = _build_layout(
-        data_code_proxy, blocks, G, layout.v0_indices, layout.c0_indices, augmented_F
+        data_code_proxy, blocks, G, layout.v0_indices, new_c0_indices, augmented_F
     )
     return boosted_merged, boosted_layout, BoostResult(
         extra_qubits_added=extra,

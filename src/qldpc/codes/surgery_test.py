@@ -815,3 +815,23 @@ def test_v2_reexports_from_qldpc_codes() -> None:
     ):
         assert hasattr(codes_module, name), f"missing re-export: {name}"
         assert name in codes_module.__all__, f"missing from __all__: {name}"
+
+
+def test_boost_gadget_cheeger_handles_added_qubits_on_webster_code() -> None:
+    """Regression: boost on Webster code 3 must not crash with shape mismatch
+    when target_h forces actual qubit additions."""
+    data = load_webster_seed_set(2)
+    code = _build_generalised_bicycle_code(
+        l=data["l"], A_set=data["A"], B_set=data["B"]
+    )
+    seed = data["seeds"][0]
+    op = _support_to_binary_vector(seed["L_support"], seed["R_support"], data["l"])
+    merged, layout = build_layered_surgery_code(
+        code, op, num_layers=1, validate_logical_op=False
+    )
+    boosted, b_layout, result = boost_gadget_cheeger(
+        merged, layout, target_h=1.0, max_extra_qubits=30, seed=42,
+    )
+    # Either we reached target, or we hit max — either is fine.
+    assert result.extra_qubits_added >= 0
+    assert result.terminated_by in ("target_reached", "max_qubits_exhausted", "no_progress")
