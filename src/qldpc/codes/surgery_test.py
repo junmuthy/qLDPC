@@ -1021,6 +1021,64 @@ def test_end_to_end_boost_plus_joint_on_webster(code_index: int) -> None:
     )
 
 
+def test_joint_code_has_spurious_bridge_weight1_xlogicals_v2_limitation() -> None:
+    """Documents known v2 limitation: joint code from _stitch_gadgets_with_bridge
+    has w weight-1 X-logicals, one per bridge qubit. These are gauge degrees of
+    freedom (Webster: 'gauge operators arising from the addition of the bridge'
+    that need to be 'fixed by additional checks'). Our current bridge has only
+    w-1 X path stabs and no Z stabs, leaving these gauge ops unfixed.
+
+    For the stabilizer-code view (CSS commutation, joint op membership, k count)
+    this is benign. For circuit-level memory experiments tracking all k logicals
+    individually as observables, the bridge gauge ops give artificially low LER.
+
+    A proper fix requires SkipTree-based gauge-fix stabilizers (Swaroop
+    arXiv:2503.10390 §III); the _skip_tree primitive is ported but not yet wired
+    into _stitch_gadgets_with_bridge.
+
+    When this test starts failing (no weight-1 X-logicals on bridge), it means
+    the fix has landed and this test should be removed/updated.
+    """
+    from qldpc.codes.surgery import (
+        _build_bridge_via_skiptree, _stitch_gadgets_with_bridge,
+    )
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    m1, l1 = build_layered_surgery_code(code, op1, num_layers=1, validate_logical_op=False)
+    m2, l2 = build_layered_surgery_code(code, op2, num_layers=1, validate_logical_op=False)
+    bridge = _build_bridge_via_skiptree(l1, l2)
+    joint, jl = _stitch_gadgets_with_bridge(code, m1, l1, m2, l2, bridge, pauli_type=Pauli.X)
+
+    GF2 = galois.GF(2)
+    HX = np.asarray(joint.matrix_x).astype(np.int_)
+    HZ = np.asarray(joint.matrix_z).astype(np.int_)
+    HX_rank = int(np.linalg.matrix_rank(GF2(HX)))
+    n_total = joint.num_qubits
+    bridge_start = jl.bridge_qubit_slice.start
+    bridge_stop = jl.bridge_qubit_slice.stop
+    weight1_at_bridge = []
+    for q in range(bridge_start, bridge_stop):
+        e_q = np.zeros(n_total, dtype=np.int_)
+        e_q[q] = 1
+        if not np.all((HZ @ e_q) % 2 == 0):
+            continue
+        aug = GF2(np.vstack([HX, e_q.reshape(1, -1)]).astype(np.int_))
+        if int(np.linalg.matrix_rank(aug)) > HX_rank:
+            weight1_at_bridge.append(q)
+
+    # All w bridge qubits are weight-1 X-logicals (v2 bug).
+    assert len(weight1_at_bridge) == jl.num_bridge_qubits, (
+        f"Expected {jl.num_bridge_qubits} weight-1 X-logicals on bridge "
+        f"(documents v2 limitation); got {len(weight1_at_bridge)} at "
+        f"positions {weight1_at_bridge}. If this passed with 0 bridge "
+        f"weight-1 logicals, the bridge has been properly fixed and this "
+        f"test should be removed."
+    )
+
+
 def test_combinatorial_cheeger_boost_rejects_large_v0() -> None:
     """|V_0| > 26 should raise (enumeration infeasible)."""
     F = galois.GF(2).Zeros((4, 27))
