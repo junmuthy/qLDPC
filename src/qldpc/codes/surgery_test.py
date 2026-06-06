@@ -40,3 +40,63 @@ def test_surgery_layout_construction() -> None:
     assert np.array_equal(layout.F, F)
     assert layout.G.shape == (0, 2)
     assert dataclasses.is_dataclass(layout) and layout.__dataclass_params__.frozen
+
+
+from qldpc.codes.surgery import _restrict_to_logical_support
+
+
+def _steane_logical_x() -> tuple[codes.SteaneCode, galois.FieldArray]:
+    """Return Steane code and one of its logical-X representatives."""
+    code = codes.SteaneCode()
+    logical_x = code.get_logical_ops(Pauli.X)[0]
+    return code, logical_x
+
+
+def test_restrict_returns_F_equal_to_HZ_restriction() -> None:
+    """F = H_Z[C_0, V_0] elementwise."""
+    code, logical_x = _steane_logical_x()
+    v0, c0, F = _restrict_to_logical_support(
+        code, np.asarray(logical_x).astype(np.int_), num_layers=1, validate_logical_op=False
+    )
+    expected = code.matrix_z[c0][:, v0]
+    assert np.array_equal(F, expected)
+    assert v0.size > 0 and c0.size > 0
+    assert F.shape == (c0.size, v0.size)
+
+
+def test_restrict_rejects_wrong_shape() -> None:
+    code, _ = _steane_logical_x()
+    with pytest.raises(ValueError, match="shape"):
+        _restrict_to_logical_support(code, np.zeros(5, dtype=np.int_), 1, False)
+
+
+def test_restrict_rejects_non_binary() -> None:
+    code, _ = _steane_logical_x()
+    bad = np.zeros(code.num_qubits, dtype=np.int_)
+    bad[0] = 2
+    with pytest.raises(ValueError, match="binary"):
+        _restrict_to_logical_support(code, bad, 1, False)
+
+
+def test_restrict_rejects_zero_vector() -> None:
+    code, _ = _steane_logical_x()
+    with pytest.raises(ValueError, match="empty"):
+        _restrict_to_logical_support(code, np.zeros(code.num_qubits, dtype=np.int_), 1, False)
+
+
+def test_restrict_rejects_even_num_layers() -> None:
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    with pytest.raises(ValueError, match="odd"):
+        _restrict_to_logical_support(code, arr, 2, False)
+    with pytest.raises(ValueError, match="odd"):
+        _restrict_to_logical_support(code, arr, 0, False)
+
+
+def test_restrict_rejects_non_commuting_op() -> None:
+    """A vector that anticommutes with H_Z must be rejected."""
+    code, _ = _steane_logical_x()
+    single = np.zeros(code.num_qubits, dtype=np.int_)
+    single[0] = 1
+    with pytest.raises(ValueError, match="commute"):
+        _restrict_to_logical_support(code, single, 1, False)

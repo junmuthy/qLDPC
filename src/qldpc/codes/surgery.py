@@ -27,6 +27,8 @@ import galois
 import numpy as np
 import numpy.typing as npt
 
+from .common import CSSCode
+
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class SurgeryLayout:
@@ -68,3 +70,63 @@ class SurgeryLayout:
     G: galois.FieldArray
     hx_row_kind: npt.NDArray
     hz_row_kind: npt.NDArray
+
+
+def _restrict_to_logical_support(
+    data_code: CSSCode,
+    logical_op: npt.ArrayLike,
+    num_layers: int,
+    validate_logical_op: bool,
+) -> tuple[np.ndarray, np.ndarray, galois.FieldArray]:
+    """Compute V_0, C_0, F per Cross 2024 §III Step 1, with input validation.
+
+    See spec §5 for the validation contract. Returns the indices V_0 (qubit
+    columns) and C_0 (Z-check rows) into the data code, plus the restriction
+    matrix F = H_Z[C_0, V_0] as a GF(2) ``galois.FieldArray``.
+
+    The expensive row-span check (rejecting stabilizers as logical operators)
+    is gated by ``validate_logical_op`` — see Task 3 / spec §5 item 6.
+    """
+    if data_code.is_subsystem_code:
+        raise ValueError(
+            "build_layered_surgery_code requires a stabilizer CSSCode, not a "
+            "subsystem code."
+        )
+    if num_layers < 1 or num_layers % 2 != 1:
+        raise ValueError(f"num_layers must be odd and >= 1, got {num_layers}.")
+
+    field = data_code.field
+    logical_op_arr = np.asarray(logical_op)
+    n_data = data_code.num_qubits
+
+    if logical_op_arr.shape != (n_data,):
+        raise ValueError(
+            f"logical_op has shape {logical_op_arr.shape}, expected ({n_data},)."
+        )
+    int_view = logical_op_arr.astype(np.int_, copy=False)
+    if not np.all((int_view == 0) | (int_view == 1)):
+        raise ValueError("logical_op must be binary (values in {0, 1}).")
+
+    v0_indices = np.flatnonzero(int_view)
+    if v0_indices.size == 0:
+        raise ValueError("logical_op support V_0 is empty (logical_op is the zero vector).")
+
+    logical_op_gf = field(int_view)
+    hz = data_code.matrix_z
+    # commutation with Z-stabilizers: H_Z @ X̄^T == 0 over GF(2)
+    if np.any(hz @ logical_op_gf != 0):
+        raise ValueError(
+            "logical_op does not commute with Z-stabilizers (H_Z @ logical_op != 0)."
+        )
+
+    # Identify C_0: Z-check rows whose support intersects V_0.
+    c0_mask = np.any(hz[:, v0_indices] != 0, axis=1)
+    c0_indices = np.flatnonzero(c0_mask)
+    if c0_indices.size == 0:
+        raise ValueError(
+            "No Z-checks of the data code touch V_0; the ancilla system cannot "
+            "be constructed (degenerate logical operator)."
+        )
+
+    F = hz[c0_indices][:, v0_indices]
+    return v0_indices, c0_indices, F
