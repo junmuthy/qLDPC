@@ -770,7 +770,7 @@ from qldpc.codes.surgery import build_joint_measurement_code
 
 
 def test_build_joint_small_hgp_X_css_valid() -> None:
-    """Joint X̄_1 X̄_2 measurement on a small HGP code: merged is CSS, k = k_data - 2."""
+    """Joint X̄_1 X̄_2 measurement on a small HGP code: merged is CSS, k = k_data - 1."""
     classical = codes.ClassicalCode.random(4, 2, seed=0)
     hgp = codes.HGPCode(classical)
     logicals = hgp.get_logical_ops(Pauli.X)
@@ -780,7 +780,10 @@ def test_build_joint_small_hgp_X_css_valid() -> None:
     joint, joint_layout = build_joint_measurement_code(hgp, arr1, arr2, num_layers=1)
     assert joint.is_subsystem_code is False
     assert np.all((joint.matrix_x @ joint.matrix_z.T) == 0)
-    assert joint.dimension == hgp.dimension - 2
+    assert joint.dimension == hgp.dimension - 1, (
+        f"joint X̄_1 X̄_2 measurement reduces k by 1 per Cross §3.6, got "
+        f"k_joint={joint.dimension} from k_data={hgp.dimension}"
+    )
     assert joint_layout.pauli_type == Pauli.X
     assert joint_layout.num_data_qubits == hgp.num_qubits
 

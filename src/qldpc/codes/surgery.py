@@ -1037,19 +1037,10 @@ def _stitch_gadgets_with_bridge(
     if n_u_b > 0:
         u_b_padded[:, bridge_col_start : bridge_col_start + n_bridge] = u_b_x_arr
 
-    # Full-bridge X-stabilizer: X on ALL w bridge qubits.
-    # The w-1 path stabs span only w-1 independent directions on the bridge register,
-    # leaving one unmeasured degree of freedom (a "bridge logical"). Adding
-    # X_{b_0}...X_{b_{w-1}} — which is NOT in the span of the path stabs over GF(2)
-    # for any w >= 2 — kills this residual degree of freedom and ensures
-    # k_joint = k_data - 2 (both L1 and L2 independently fixed) rather than
-    # k_data - 1 (only their product L1*L2 fixed).
-    # This row has support only on bridge cols, so it commutes trivially with all
-    # Z-stabilizers (HZ_joint has no bridge-col entries).
-    x_bridge_full = np.zeros((1, n_merged), dtype=np.int_)
-    x_bridge_full[0, bridge_col_start : bridge_col_start + n_bridge] = 1
-
-    HX_joint = field(np.vstack([HX1_padded, HX2_padded_nondata, u_b_padded, x_bridge_full]))
+    # Per Cross §3.6: a joint X̄_1 X̄_2 measurement consumes ONE logical degree of
+    # freedom (the product's eigenvalue). k_joint = k_data - 1. We do NOT add a
+    # full-bridge stabilizer; the w-1 path stabs are sufficient.
+    HX_joint = field(np.vstack([HX1_padded, HX2_padded_nondata, u_b_padded]))
     HZ_joint = field(np.vstack([HZ1_padded, HZ2_padded_filtered]))
 
     joint_merged = CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
@@ -1057,11 +1048,10 @@ def _stitch_gadgets_with_bridge(
     bridge_slice = slice(bridge_col_start, n_merged)
     # u_b_check_kind_mask: True on the bridge X-stab rows in HX_joint
     # (the bridge stabilizers are X-type in the joint-X measurement case).
-    # This includes both the path stab rows AND the full-bridge X-stab row.
     u_b_check_kind_mask = np.zeros(HX_joint.shape[0], dtype=bool)
     if n_u_b > 0:
-        # The bridge rows are the last n_u_b + 1 rows (path stabs + full-bridge stab).
-        u_b_check_kind_mask[-(n_u_b + 1) :] = True
+        # The bridge rows are the last n_u_b rows (path stabs only).
+        u_b_check_kind_mask[-n_u_b:] = True
 
     joint_layout = JointSurgeryLayout(
         gadget_layouts=(layout1, layout2),
@@ -1089,7 +1079,9 @@ def build_joint_measurement_code(
     single-operator gadgets via build_layered_surgery_code, connects them
     with a Cross §3.6-style bridge (path graph of w = min(wt(L_1), wt(L_2))
     data qubits + w-1 X-type path stabilizers + χ endpoint extension), and
-    stitches the result into a joint CSSCode of dimension k_data - 2.
+    stitches the result into a joint CSSCode of dimension k_data - 1
+    (per Cross §3.6: a joint X̄_1 X̄_2 measurement consumes one logical
+    degree of freedom).
 
     Args:
         data_code: stabilizer CSSCode with dimension >= 2.
