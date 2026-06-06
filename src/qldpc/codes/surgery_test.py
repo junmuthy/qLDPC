@@ -966,6 +966,61 @@ def test_combinatorial_cheeger_boost_meets_target_h_with_valid_css(
     assert boosted.dimension == code.dimension - 1
 
 
+@pytest.mark.parametrize("code_index", [0, 2])
+def test_end_to_end_boost_plus_joint_on_webster(code_index: int) -> None:
+    """End-to-end: bare gadget → greedy Cheeger boost (h>=1) → bridge → joint
+    code on Webster BB codes. Verifies the complete Webster pipeline produces
+    a CSS-valid joint code measuring X̄_1 X̄_2 with k_joint = k_data - 1.
+
+    Code 3 (l=255) excluded because the boost takes ~25s per gadget × 2 = 50s
+    per test, which is too slow for CI. The end-to-end path is verified
+    interactively (see commit message).
+    """
+    from qldpc.codes.surgery import (
+        _build_bridge_via_skiptree, _stitch_gadgets_with_bridge,
+    )
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+
+    m1, l1 = build_layered_surgery_code(code, op1, num_layers=1, validate_logical_op=False)
+    m2, l2 = build_layered_surgery_code(code, op2, num_layers=1, validate_logical_op=False)
+    m1b, l1b, _ = boost_gadget_cheeger_combinatorial(
+        m1, l1, target_h=1.0, max_extra_qubits=40, seed=42,
+    )
+    m2b, l2b, _ = boost_gadget_cheeger_combinatorial(
+        m2, l2, target_h=1.0, max_extra_qubits=40, seed=42,
+    )
+    bridge = _build_bridge_via_skiptree(l1b, l2b)
+    joint, joint_layout = _stitch_gadgets_with_bridge(
+        code, m1b, l1b, m2b, l2b, bridge, pauli_type=Pauli.X,
+    )
+
+    assert np.all((joint.matrix_x @ joint.matrix_z.T) == 0), (
+        f"Code {data['name']} boosted-joint violates CSS commutation."
+    )
+    assert joint.dimension == code.dimension - 1, (
+        f"Code {data['name']}: joint k={joint.dimension}, expected k_data-1="
+        f"{code.dimension - 1}."
+    )
+    n_total = joint.num_qubits
+    n_data = code.num_qubits
+    op_padded = np.zeros(n_total, dtype=np.int_)
+    op_padded[:n_data] = (op1 + op2) % 2
+    target = galois.GF(2)(op_padded)
+    HX = joint.matrix_x
+    rank_M = int(np.linalg.matrix_rank(HX))
+    augmented = galois.GF(2)(
+        np.vstack([np.asarray(HX), np.asarray(target).reshape(1, -1)]).astype(np.int_)
+    )
+    rank_aug = int(np.linalg.matrix_rank(augmented))
+    assert rank_aug == rank_M, (
+        f"Code {data['name']}: X̄_1 X̄_2 (padded) not in stabilizer of boosted-joint code."
+    )
+
+
 def test_combinatorial_cheeger_boost_rejects_large_v0() -> None:
     """|V_0| > 26 should raise (enumeration infeasible)."""
     F = galois.GF(2).Zeros((4, 27))
