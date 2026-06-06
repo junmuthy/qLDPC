@@ -441,3 +441,37 @@ def load_webster_seed_set(code_index: int) -> dict:
     with _WEBSTER_APP_A_PATH.open() as fh:
         data = _json.load(fh)
     return data["codes"][code_index]
+
+
+def _build_generalised_bicycle_code(l: int, A_set: list[int], B_set: list[int]) -> CSSCode:
+    """Build a generalised bicycle code from cyclic exponent sets A, B.
+
+    Per Kovalev-Pryadko (arXiv:1212.6703) and Swaroop's reference
+    implementation (https://github.com/eswaroop/adapters-LDPC-surgery,
+    ext/bivariate_bicyclic.py): given subsets A, B of Z_l, let A(x) =
+    sum(x^a for a in A_set) and B(x) = sum(x^b for b in B_set) as cyclic
+    matrices in F_2[Z_l]. Then H_X = [A | B] and H_Z = [B^T | A^T] define
+    the bicycle code on 2l data qubits.
+
+    Args:
+        l: cyclic group order.
+        A_set, B_set: subsets of {0, 1, ..., l-1}.
+
+    Returns:
+        CSSCode on 2l data qubits with check matrices [A | B] and
+        [B^T | A^T] over GF(2).
+    """
+    I_l = np.eye(l, dtype=np.int_)
+    # cyclic shift matrix S such that S^k is left-shift by k (zero-indexed)
+    S = np.roll(I_l, shift=-1, axis=0)
+    A = np.zeros((l, l), dtype=np.int_)
+    for a in A_set:
+        A = (A + np.linalg.matrix_power(S, a)) % 2
+    B = np.zeros((l, l), dtype=np.int_)
+    for b in B_set:
+        B = (B + np.linalg.matrix_power(S, b)) % 2
+
+    H_X = np.hstack([A, B])
+    H_Z = np.hstack([B.T, A.T])
+
+    return CSSCode(H_X, H_Z, is_subsystem_code=False)

@@ -387,3 +387,25 @@ def test_load_webster_seed_set_out_of_range_raises() -> None:
         load_webster_seed_set(4)
     with pytest.raises(IndexError):
         load_webster_seed_set(-1)
+
+
+from qldpc.codes.surgery import _build_generalised_bicycle_code
+
+
+def test_build_generalised_bicycle_code_dimension_and_shape() -> None:
+    """For l=31, A={0,6,15}, B={0,5,7} (Webster code 0), the constructed code
+    has 62 data qubits and dimension 10."""
+    code = _build_generalised_bicycle_code(l=31, A_set=[0, 6, 15], B_set=[0, 5, 7])
+    assert code.num_qubits == 62
+    assert code.dimension == 10
+    assert code.is_subsystem_code is False
+    # CSS commutation
+    assert np.all((code.matrix_x @ code.matrix_z.T) == 0)
+
+
+def test_build_generalised_bicycle_code_l3_smoke() -> None:
+    """Tiny l=3 case: A={0,1}, B={0,1} → known small bicycle code."""
+    code = _build_generalised_bicycle_code(l=3, A_set=[0, 1], B_set=[0, 1])
+    assert code.num_qubits == 6
+    assert code.is_subsystem_code is False
+    assert np.all((code.matrix_x @ code.matrix_z.T) == 0)
