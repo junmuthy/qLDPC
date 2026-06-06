@@ -119,6 +119,19 @@ def _restrict_to_logical_support(
             "logical_op does not commute with Z-stabilizers (H_Z @ logical_op != 0)."
         )
 
+    if validate_logical_op:
+        hx = data_code.matrix_x
+        # rank over GF(2): count nonzero rows of row-reduced form
+        rank_hx = int(np.sum(np.any(hx.row_reduce() != 0, axis=1)))
+        augmented = field(np.vstack([np.asarray(hx), logical_op_gf.reshape(1, -1)]))
+        rank_aug = int(np.sum(np.any(augmented.row_reduce() != 0, axis=1)))
+        if rank_aug == rank_hx:
+            raise ValueError(
+                "logical_op lies in the row span of H_X — it is a stabilizer, "
+                "not a logical operator. Pass validate_logical_op=False to skip "
+                "this check."
+            )
+
     # Identify C_0: Z-check rows whose support intersects V_0.
     c0_mask = np.any(hz[:, v0_indices] != 0, axis=1)
     c0_indices = np.flatnonzero(c0_mask)

@@ -100,3 +100,22 @@ def test_restrict_rejects_non_commuting_op() -> None:
     single[0] = 1
     with pytest.raises(ValueError, match="commute"):
         _restrict_to_logical_support(code, single, 1, False)
+
+
+def test_restrict_rejects_stabilizer_when_validating() -> None:
+    """A row of H_X is a stabilizer, not a logical operator."""
+    code, _ = _steane_logical_x()
+    stabilizer_row = np.asarray(code.matrix_x[0]).astype(np.int_)
+    with pytest.raises(ValueError, match="stabilizer"):
+        _restrict_to_logical_support(code, stabilizer_row, 1, validate_logical_op=True)
+
+
+def test_restrict_accepts_stabilizer_when_skipping_validation() -> None:
+    """With validate_logical_op=False, the row-span check is skipped."""
+    code, _ = _steane_logical_x()
+    stabilizer_row = np.asarray(code.matrix_x[0]).astype(np.int_)
+    v0, c0, F = _restrict_to_logical_support(
+        code, stabilizer_row, 1, validate_logical_op=False
+    )
+    assert v0.size > 0
+    assert F.shape == (c0.size, v0.size)
