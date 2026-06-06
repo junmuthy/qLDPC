@@ -920,7 +920,71 @@ def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
     )
 
 
-from qldpc.codes.surgery import boost_gadget_distance, DistanceBoostResult
+from qldpc.codes.surgery import (
+    boost_gadget_distance,
+    DistanceBoostResult,
+    boost_gadget_cheeger_combinatorial,
+    _exact_boundary_cheeger,
+)
+
+
+@pytest.mark.parametrize("code_index,expected_max_n", [(0, 0), (1, 0), (2, 8), (3, 20)])
+def test_combinatorial_cheeger_boost_meets_target_h_with_valid_css(
+    code_index: int, expected_max_n: int
+) -> None:
+    """Greedy combinatorial Cheeger boost on all 4 Webster codes:
+      (a) final h(F) >= 1.0 (Cross Thm 6 distance-preservation guarantee)
+      (b) merged code is CSS-valid (H_X @ H_Z.T == 0 over GF(2))
+      (c) +n is at most Webster Table I's reported value (greedy beats random)
+
+    The CSS commutation check (b) is critical: the boost adds new κ' ancilla
+    qubits that must NOT receive data-Z extensions (else the synthetic Z-stab
+    has odd overlap with χ on κ'). A regression would silently corrupt the
+    merged code.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    seed = data["seeds"][0]
+    op = _support_to_binary_vector(seed["L_support"], seed["R_support"], data["l"])
+    merged, layout = build_layered_surgery_code(
+        code, op, num_layers=1, validate_logical_op=False
+    )
+    boosted, b_layout, result = boost_gadget_cheeger_combinatorial(
+        merged, layout, target_h=1.0, max_extra_qubits=40, seed=42,
+    )
+    h_final, _ = _exact_boundary_cheeger(b_layout.F)
+    assert h_final >= 1.0, (
+        f"Code {data['name']}: greedy boost did not reach h>=1; got h={h_final}"
+    )
+    assert np.all((boosted.matrix_x @ boosted.matrix_z.T) == 0), (
+        f"Code {data['name']}: boosted merged code violates CSS commutation."
+    )
+    assert result.extra_qubits_added <= expected_max_n, (
+        f"Code {data['name']}: greedy +n={result.extra_qubits_added} > Webster "
+        f"+n={expected_max_n}. Greedy should match or beat random."
+    )
+    assert boosted.dimension == code.dimension - 1
+
+
+def test_combinatorial_cheeger_boost_rejects_large_v0() -> None:
+    """|V_0| > 26 should raise (enumeration infeasible)."""
+    F = galois.GF(2).Zeros((4, 27))
+    from qldpc.codes.surgery import SurgeryLayout
+    layout = SurgeryLayout(
+        num_data_qubits=27, num_ancilla_qubits=4, num_layers=1,
+        qubit_layer=np.zeros(31, dtype=np.int_),
+        v0_indices=np.arange(27, dtype=np.int_),
+        c0_indices=np.arange(4, dtype=np.int_),
+        F=F, G=galois.GF(2).Zeros((0, 4)),
+        hx_row_kind=np.array([], dtype=object),
+        hz_row_kind=np.array([], dtype=object),
+    )
+    # Dummy code (not used for shape check)
+    n_data = 27
+    classical = codes.ClassicalCode.random(4, 2, seed=0)
+    hgp = codes.HGPCode(classical)
+    with pytest.raises(ValueError, match=r"\|V_0\| = 27 > 26"):
+        boost_gadget_cheeger_combinatorial(hgp, layout, target_h=1.0)
 
 
 @pytest.mark.parametrize("code_index,d_target,expected_n", [(0, 6, 0), (1, 10, 0)])

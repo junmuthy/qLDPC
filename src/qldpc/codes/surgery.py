@@ -658,8 +658,13 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
             f"Use _spectral_cheeger_lower_bound for larger problems."
         )
 
-    F_cols = [F_arr[:, i].copy() for i in range(n_V)]
-    boundary = np.zeros(n_C, dtype=np.int8)
+    # Bit-pack F columns: F_col_ints[i] is a Python int with bit r set iff
+    # F[r, i] = 1. Boundary as Python int allows O(1) XOR + popcount.
+    F_col_ints = [
+        int.from_bytes(np.packbits(F_arr[:, i][::-1]).tobytes()[::-1], "little")
+        for i in range(n_V)
+    ]
+    boundary_int = 0
     subset_mask = 0
     half = n_V // 2
     best_h = float("inf")
@@ -669,13 +674,12 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     for k in range(1, total):
         bit = (k & -k).bit_length() - 1
         subset_mask ^= 1 << bit
-        boundary ^= F_cols[bit]
+        boundary_int ^= F_col_ints[bit]
         size = subset_mask.bit_count()
         if 1 <= size <= half:
-            cut = int(boundary.sum())
-            h = cut / size
-            if h < best_h:
-                best_h = h
+            cut = boundary_int.bit_count()
+            if cut < best_h * size:
+                best_h = cut / size
                 best_mask = subset_mask
 
     v_star = np.zeros(n_V, dtype=np.int8)
@@ -862,40 +866,69 @@ def _reassemble_gadget_with_new_F(
 ) -> tuple[CSSCode, SurgeryLayout]:
     """Rebuild merged code + layout from an augmented restriction matrix.
 
-    Helper shared by both Cheeger-boost and distance-boost code paths.
-    Wraps the matrix re-assembly logic from boost_gadget_cheeger so the
-    distance boost can reuse it without duplication.
+    Boost-added κ' qubits (rows beyond the original C_0) are GAUGE qubits:
+    they have no data-Z extension (no S_j in C_0 to extend). Their Z-stab
+    contribution comes purely through the augmented gauge-fix matrix
+    G_aug = basis of left null space of F_aug.
+
+    CSS commutation derivation:
+      - chi_i restricted to κ_aug = F_aug[:, i].
+      - data Z S_j (j in original C_0) restricted to κ_aug = e_j on κ_orig,
+        zero on κ'.
+      - overlap = [q_i in S_j] + F_aug[j, i] = 0 (mod 2, by F[j, i] def).
+      - chi_i ⋅ gauge_fix γ ∈ G_aug = γ ⋅ F_aug[:, i] = 0 (mod 2,
+        by γ in ker(F_aug^T)).
     """
     field = augmented_F.__class__
-    G = _compute_gauge_fix(augmented_F)
+    G_aug = _compute_gauge_fix(augmented_F)
     blocks = _build_layered_blocks(augmented_F, layout.num_layers)
     n_data = layout.num_data_qubits
 
-    data_x = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
-    data_z = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
-    data_x_gf = field(data_x[:, :n_data])
-    data_z_original = field(data_z[:, :n_data])
+    data_x_arr = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
+    data_z_arr = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
+    data_x_gf = field(data_x_arr[:, :n_data])
+    data_z_gf = field(data_z_arr[:, :n_data])
 
-    if n_extra > 0:
-        synthetic_z = field.Zeros((n_extra, n_data))
-        data_z_extended = field(np.vstack([np.asarray(data_z_original), np.asarray(synthetic_z)]))
-    else:
-        data_z_extended = data_z_original
-
-    data_code_proxy = CSSCode(data_x_gf, data_z_extended, is_subsystem_code=False)
-
-    n_z_data_original = data_z_original.shape[0]
-    new_c0_indices = np.concatenate([
-        layout.c0_indices,
-        np.arange(n_z_data_original, n_z_data_original + n_extra, dtype=np.int_),
-    ])
+    data_code_proxy = CSSCode(data_x_gf, data_z_gf, is_subsystem_code=False)
 
     HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
-    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, new_c0_indices)
+
+    # Manually build HZ_new (instead of _assemble_merged_HZ) so that the new
+    # κ' qubits get NO data-Z extension — only G_aug rows mention them.
+    n_merged = n_data + blocks.total_ancilla
+    n_kappa_orig = int(layout.F.shape[0])
+
+    old_z = field.Zeros((data_z_gf.shape[0], n_merged))
+    old_z[:, :n_data] = data_z_gf
+    c1_slice = blocks.ancilla_col_slice(1)
+    I_partial = field.Identity(n_kappa_orig)
+    # Place identity at (original c0_indices) x (original κ columns) only.
+    old_z[layout.c0_indices, n_data + c1_slice.start : n_data + c1_slice.start + n_kappa_orig] = I_partial
+
+    even_rows = []
+    for i in range(2, blocks.num_layers, 2):
+        row_block = field.Zeros((blocks.n_c0, n_merged))
+        prev_slice = blocks.ancilla_col_slice(i - 1)
+        cur_slice = blocks.ancilla_col_slice(i)
+        next_slice = blocks.ancilla_col_slice(i + 1)
+        I_c0_full = field.Identity(blocks.n_c0)
+        row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_c0_full
+        row_block[:, n_data + cur_slice.start : n_data + cur_slice.stop] = blocks.F
+        row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_c0_full
+        even_rows.append(row_block)
+
+    gauge_rows: list[galois.FieldArray] = []
+    if G_aug.shape[0] > 0:
+        gf = field.Zeros((G_aug.shape[0], n_merged))
+        cL_slice = blocks.ancilla_col_slice(blocks.num_layers)
+        gf[:, n_data + cL_slice.start : n_data + cL_slice.stop] = G_aug
+        gauge_rows.append(gf)
+
+    HZ_new = field(np.vstack([old_z, *even_rows, *gauge_rows]))
 
     boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
     boosted_layout = _build_layout(
-        data_code_proxy, blocks, G, layout.v0_indices, new_c0_indices, augmented_F
+        data_code_proxy, blocks, G_aug, layout.v0_indices, layout.c0_indices, augmented_F
     )
     return boosted_merged, boosted_layout
 
@@ -944,6 +977,173 @@ def _augment_F_with_random_edges(
     if not new_rows:
         return F
     return np.vstack([F, np.stack(new_rows)])
+
+
+def boost_gadget_cheeger_combinatorial(
+    merged: CSSCode,
+    layout: SurgeryLayout,
+    *,
+    target_h: float = 1.0,
+    max_extra_qubits: int = 50,
+    seed: int | None = None,
+) -> tuple[CSSCode, SurgeryLayout, BoostResult]:
+    """Greedy combinatorial Cheeger boost — deterministic distance guarantee.
+
+    Computes the exact boundary Cheeger constant h(F) via subset enumeration
+    (Webster Def 1 / Cross Def 3). When h < target_h, identifies the worst
+    cut v* and adds a κ qubit (degree-2 row of F) with one endpoint in v*
+    and one outside, which monotonically increases |∂v*| by 1 without
+    decreasing any other |∂v|.
+
+    By Cross §III Thm 6, h(F) >= 1 implies d_merged >= d_data, so reaching
+    target_h = 1.0 GUARANTEES distance preservation (no decoder verification
+    needed). Tractable for |V_0| <= 26 (Webster's family up to l=255).
+
+    Compared with boost_gadget_distance (BP+OSD-verified): this method
+    provides a deterministic mathematical guarantee at the cost of possibly
+    over-adding edges (since h >= 1 is sufficient but not necessary). For
+    Webster's BB-code seeds, |V_0| = wt(X̄) is small (6, 10, 16, 26).
+
+    Args:
+        merged: merged CSSCode from build_layered_surgery_code.
+        layout: associated SurgeryLayout (used to read F).
+        target_h: Cheeger target. Default 1.0 (Cross Thm 6 threshold).
+        max_extra_qubits: cap on additions. Default 50.
+        seed: RNG seed for tie-breaking in edge selection.
+
+    Returns:
+        (boosted_merged, boosted_layout, BoostResult). final_h_lower_bound
+        field holds the EXACT achieved h, not a lower bound.
+
+    Raises:
+        ValueError: |V_0| > 26 (enumeration infeasible) or target_h <= 0.
+    """
+    if target_h <= 0:
+        raise ValueError(f"target_h must be positive, got {target_h}.")
+    if max_extra_qubits < 0:
+        raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
+
+    rng = np.random.default_rng(seed)
+    field = layout.F.__class__
+    F = np.asarray(layout.F).astype(np.int_).copy()
+    n_V = F.shape[1]
+    if n_V > 26:
+        raise ValueError(
+            f"|V_0| = {n_V} > 26; exact Cheeger enumeration infeasible. "
+            f"Use boost_gadget_distance (BP+OSD) instead."
+        )
+    if n_V < 2:
+        return merged, layout, BoostResult(
+            extra_qubits_added=0, final_h_lower_bound=float("inf"),
+            iterations=0, terminated_by="target_reached",
+        )
+
+    half = n_V // 2
+    # Phase 1: Gray-code enumerate all 1 <= |v| <= half subsets, recording
+    # (mask, |v|, |∂v|) into flat arrays for vectorized incremental updates.
+    F_col_ints = [
+        int.from_bytes(
+            np.packbits(F[:, i][::-1]).tobytes()[::-1], "little"
+        ) for i in range(n_V)
+    ]
+    total = 1 << n_V
+    masks_buf: list[int] = []
+    sizes_buf: list[int] = []
+    cuts_buf: list[int] = []
+    boundary_int = 0
+    subset_mask = 0
+    for k in range(1, total):
+        bit = (k & -k).bit_length() - 1
+        subset_mask ^= 1 << bit
+        boundary_int ^= F_col_ints[bit]
+        size = subset_mask.bit_count()
+        if 1 <= size <= half:
+            masks_buf.append(subset_mask)
+            sizes_buf.append(size)
+            cuts_buf.append(boundary_int.bit_count())
+
+    masks = np.array(masks_buf, dtype=np.uint64)
+    sizes = np.array(sizes_buf, dtype=np.int32)
+    cuts = np.array(cuts_buf, dtype=np.int32)
+
+    def _existing_pairs(arr: np.ndarray) -> set[tuple[int, int]]:
+        pairs: set[tuple[int, int]] = set()
+        for row in arr:
+            ones = np.flatnonzero(row)
+            for a in range(len(ones)):
+                for b in range(a + 1, len(ones)):
+                    pairs.add((int(ones[a]), int(ones[b])))
+        return pairs
+
+    extra = 0
+    iterations = 0
+    terminated_by = "no_progress"
+
+    while True:
+        iterations += 1
+        # Find min h = cuts/sizes via vectorized search.
+        # Use cuts * sizes_max comparison to avoid float division.
+        h_num = cuts.astype(np.int64)
+        h_den = sizes.astype(np.int64)
+        # ratio = h_num / h_den; pick argmin
+        idx = int(np.argmin(h_num / h_den))
+        h = float(h_num[idx] / h_den[idx])
+        worst_mask = int(masks[idx])
+
+        if h >= target_h:
+            terminated_by = "target_reached"
+            break
+        if extra >= max_extra_qubits:
+            terminated_by = "max_qubits_exhausted"
+            break
+
+        v_star_arr = np.array(
+            [(worst_mask >> i) & 1 for i in range(n_V)], dtype=np.int8
+        )
+        inside = np.flatnonzero(v_star_arr).tolist()
+        outside = np.flatnonzero(1 - v_star_arr).tolist()
+        if not inside or not outside:
+            terminated_by = "no_progress"
+            break
+
+        rng.shuffle(inside)
+        rng.shuffle(outside)
+        pairs = _existing_pairs(F)
+        chosen = None
+        for i in inside:
+            for j in outside:
+                a, b = (i, j) if i < j else (j, i)
+                if (a, b) not in pairs:
+                    chosen = (a, b)
+                    break
+            if chosen is not None:
+                break
+        if chosen is None:
+            terminated_by = "no_progress"
+            break
+
+        new_row = np.zeros(n_V, dtype=np.int_)
+        new_row[chosen[0]] = 1
+        new_row[chosen[1]] = 1
+        F = np.vstack([F, new_row])
+        extra += 1
+
+        # Vectorized cut update: for each subset, cut += parity of
+        # |v ∩ {i, j}| = bit_i XOR bit_j of the subset mask.
+        bit_i = ((masks >> chosen[0]) & np.uint64(1)).astype(np.int32)
+        bit_j = ((masks >> chosen[1]) & np.uint64(1)).astype(np.int32)
+        cuts += (bit_i ^ bit_j)
+
+    augmented_F = field(F)
+    boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
+        merged, layout, augmented_F, extra
+    )
+    return boosted_merged, boosted_layout, BoostResult(
+        extra_qubits_added=extra,
+        final_h_lower_bound=float(h),
+        iterations=iterations,
+        terminated_by=terminated_by,
+    )
 
 
 def boost_gadget_distance(
