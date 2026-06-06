@@ -619,6 +619,72 @@ class BoostResult:
     terminated_by: str  # "target_reached" | "max_qubits_exhausted" | "no_progress"
 
 
+def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
+    """Exact boundary Cheeger constant of F per Webster §II.A Definition 1.
+
+    Helper / sanity-check tool. NOT used by ``boost_gadget_cheeger`` (which
+    follows Williamson-Yoder / Webster: random edge addition + distance
+    verification). Kept for diagnostic use to debug the cut structure
+    when a boost run is unexpectedly long.
+
+    For bipartite incidence F: V -> C (V = X-check χ_i indices, C = κ_j
+    indices), the boundary ∂v of v ⊆ V is the subset of C with an odd
+    number of neighbours in v. The boundary Cheeger constant is
+
+        h(F) = min_{v ⊆ V, 1 ≤ |v| ≤ |V|/2} |∂v| / |v|.
+
+    Computes h(F) exactly by Gray-code enumeration over all subsets v.
+    Tractable for |V| ≤ 26 (≈ 67M subsets; ~5-30 s in numpy). Raises if
+    |V| > 26.
+
+    Args:
+        F: GF(2) restriction matrix of shape (|C|, |V|).
+
+    Returns:
+        (h, v_star_indicator) where v_star_indicator is a length-|V|
+        binary numpy array marking the worst cut. If |V| < 2, returns
+        (inf, zero vector) — boost is not applicable.
+
+    Raises:
+        ValueError: if |V| > 26 (exhaustive enumeration is infeasible).
+    """
+    F_arr = np.asarray(F).astype(np.int8)
+    n_C, n_V = F_arr.shape
+    if n_V < 2:
+        return float("inf"), np.zeros(n_V, dtype=np.int8)
+    if n_V > 26:
+        raise ValueError(
+            f"_exact_boundary_cheeger requires |V| ≤ 26; got |V|={n_V}. "
+            f"Use _spectral_cheeger_lower_bound for larger problems."
+        )
+
+    F_cols = [F_arr[:, i].copy() for i in range(n_V)]
+    boundary = np.zeros(n_C, dtype=np.int8)
+    subset_mask = 0
+    half = n_V // 2
+    best_h = float("inf")
+    best_mask = 0
+    total = 1 << n_V
+
+    for k in range(1, total):
+        bit = (k & -k).bit_length() - 1
+        subset_mask ^= 1 << bit
+        boundary ^= F_cols[bit]
+        size = subset_mask.bit_count()
+        if 1 <= size <= half:
+            cut = int(boundary.sum())
+            h = cut / size
+            if h < best_h:
+                best_h = h
+                best_mask = subset_mask
+
+    v_star = np.zeros(n_V, dtype=np.int8)
+    for i in range(n_V):
+        if best_mask & (1 << i):
+            v_star[i] = 1
+    return best_h, v_star
+
+
 def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
     """Spectral lower bound on the boundary Cheeger constant of F.
 
@@ -773,6 +839,226 @@ def boost_gadget_cheeger(
         final_h_lower_bound=float(h_lb),
         iterations=iterations,
         terminated_by=terminated_by,
+    )
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class DistanceBoostResult:
+    """Statistics about a Williamson-Yoder / Webster distance-verify boost run."""
+
+    extra_qubits_added: int
+    target_distance: int
+    final_d_x_bound: int | float
+    final_d_z_bound: int | float
+    trials_attempted: int
+    terminated_by: str  # "target_reached" | "max_qubits_exhausted" | "no_progress"
+
+
+def _reassemble_gadget_with_new_F(
+    merged: CSSCode,
+    layout: SurgeryLayout,
+    augmented_F: galois.FieldArray,
+    n_extra: int,
+) -> tuple[CSSCode, SurgeryLayout]:
+    """Rebuild merged code + layout from an augmented restriction matrix.
+
+    Helper shared by both Cheeger-boost and distance-boost code paths.
+    Wraps the matrix re-assembly logic from boost_gadget_cheeger so the
+    distance boost can reuse it without duplication.
+    """
+    field = augmented_F.__class__
+    G = _compute_gauge_fix(augmented_F)
+    blocks = _build_layered_blocks(augmented_F, layout.num_layers)
+    n_data = layout.num_data_qubits
+
+    data_x = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
+    data_z = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
+    data_x_gf = field(data_x[:, :n_data])
+    data_z_original = field(data_z[:, :n_data])
+
+    if n_extra > 0:
+        synthetic_z = field.Zeros((n_extra, n_data))
+        data_z_extended = field(np.vstack([np.asarray(data_z_original), np.asarray(synthetic_z)]))
+    else:
+        data_z_extended = data_z_original
+
+    data_code_proxy = CSSCode(data_x_gf, data_z_extended, is_subsystem_code=False)
+
+    n_z_data_original = data_z_original.shape[0]
+    new_c0_indices = np.concatenate([
+        layout.c0_indices,
+        np.arange(n_z_data_original, n_z_data_original + n_extra, dtype=np.int_),
+    ])
+
+    HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
+    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, new_c0_indices)
+
+    boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
+    boosted_layout = _build_layout(
+        data_code_proxy, blocks, G, layout.v0_indices, new_c0_indices, augmented_F
+    )
+    return boosted_merged, boosted_layout
+
+
+def _augment_F_with_random_edges(
+    F_base: np.ndarray,
+    n_new_edges: int,
+    rng: np.random.Generator,
+) -> np.ndarray | None:
+    """Add n_new_edges random degree-2 rows to F (each connects two distinct
+    columns not already directly connected via another existing row).
+
+    Returns None if a collision-free sample could not be drawn within the
+    attempt budget.
+    """
+    F = F_base.copy()
+    n_X = F.shape[1]
+    if n_X < 2:
+        return None
+
+    def _existing_pairs(arr: np.ndarray) -> set[tuple[int, int]]:
+        pairs: set[tuple[int, int]] = set()
+        for row in arr:
+            ones = np.flatnonzero(row)
+            for i in range(len(ones)):
+                for j in range(i + 1, len(ones)):
+                    pairs.add((int(ones[i]), int(ones[j])))
+        return pairs
+
+    pairs = _existing_pairs(F)
+    new_rows: list[np.ndarray] = []
+    for _ in range(n_new_edges):
+        candidate = None
+        for _attempt in range(n_X * 4):
+            i, j = sorted(int(x) for x in rng.choice(n_X, 2, replace=False))
+            if (i, j) not in pairs:
+                candidate = (i, j)
+                break
+        if candidate is None:
+            return None
+        pairs.add(candidate)
+        row = np.zeros(n_X, dtype=np.int_)
+        row[candidate[0]] = 1
+        row[candidate[1]] = 1
+        new_rows.append(row)
+    if not new_rows:
+        return F
+    return np.vstack([F, np.stack(new_rows)])
+
+
+def boost_gadget_distance(
+    merged: CSSCode,
+    layout: SurgeryLayout,
+    *,
+    target_distance: int,
+    max_extra_qubits: int = 30,
+    num_trials_per_step: int = 20,
+    decoder_trials: int = 10,
+    seed: int | None = None,
+) -> tuple[CSSCode, SurgeryLayout, DistanceBoostResult]:
+    """Williamson-Yoder / Webster distance-verifying gadget boost.
+
+    Per the procedure described in Cain et al. arXiv:2503.10390 and adopted
+    by Webster: iteratively add small random batches of degree-2 edges to F,
+    use BP+OSD upper-bound on merged code distance to fast-reject any
+    augmentation whose deformed code falls below the target distance.
+
+    Starts from n_extra = 0 (verify bare gadget already meets target). For
+    each n_extra, samples ``num_trials_per_step`` random degree-2 augmentations
+    and returns the first one that passes the BP+OSD test for BOTH X and Z
+    distances (each tested with ``decoder_trials`` random trials).
+
+    Args:
+        merged: merged CSSCode returned by build_layered_surgery_code.
+        layout: associated SurgeryLayout.
+        target_distance: minimum X- and Z-distance required for acceptance
+            (usually the data code's distance d_data).
+        max_extra_qubits: cap on number of new κ' qubits to consider.
+        num_trials_per_step: how many random augmentations to try per
+            n_extra value before incrementing.
+        decoder_trials: trials for each get_distance_bound_with_decoder call.
+        seed: RNG seed for reproducibility.
+
+    Returns:
+        (boosted_merged, boosted_layout, DistanceBoostResult).
+
+    Raises:
+        ValueError: target_distance <= 0 or max_extra_qubits < 0.
+
+    Notes:
+        BP+OSD gives an UPPER bound on distance. ``d_bound >= target_distance``
+        means the decoder could not find a logical operator of weight below
+        target; with enough trials this is a strong heuristic that
+        d_merged >= target_distance, but not a proof. For exact verification,
+        post-process accepted candidates with ``merged.get_distance_exact()``.
+    """
+    from qldpc.objects import Pauli as _Pauli
+
+    if target_distance <= 0:
+        raise ValueError(f"target_distance must be positive, got {target_distance}.")
+    if max_extra_qubits < 0:
+        raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
+
+    rng = np.random.default_rng(seed)
+    field = layout.F.__class__
+    F_base = np.asarray(layout.F).astype(np.int_)
+
+    trials_attempted = 0
+
+    def _passes_decoder(code: CSSCode) -> tuple[bool, int | float, int | float]:
+        bx = code.get_distance_bound_with_decoder(_Pauli.X, num_trials=decoder_trials)
+        if bx < target_distance:
+            return False, bx, -1
+        bz = code.get_distance_bound_with_decoder(_Pauli.Z, num_trials=decoder_trials)
+        return (bz >= target_distance), bx, bz
+
+    # n_extra = 0: test bare gadget first.
+    ok, bx0, bz0 = _passes_decoder(merged)
+    trials_attempted += 1
+    if ok:
+        return merged, layout, DistanceBoostResult(
+            extra_qubits_added=0,
+            target_distance=target_distance,
+            final_d_x_bound=bx0,
+            final_d_z_bound=bz0,
+            trials_attempted=trials_attempted,
+            terminated_by="target_reached",
+        )
+
+    for n_extra in range(1, max_extra_qubits + 1):
+        best_bx: int | float = -1
+        best_bz: int | float = -1
+        for _trial in range(num_trials_per_step):
+            trials_attempted += 1
+            F_aug = _augment_F_with_random_edges(F_base, n_extra, rng)
+            if F_aug is None:
+                continue
+            try:
+                boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
+                    merged, layout, field(F_aug), n_extra
+                )
+            except Exception:
+                continue
+            ok, bx, bz = _passes_decoder(boosted_merged)
+            best_bx = max(best_bx, bx)
+            best_bz = max(best_bz, bz) if bz != -1 else best_bz
+            if ok:
+                return boosted_merged, boosted_layout, DistanceBoostResult(
+                    extra_qubits_added=n_extra,
+                    target_distance=target_distance,
+                    final_d_x_bound=bx,
+                    final_d_z_bound=bz,
+                    trials_attempted=trials_attempted,
+                    terminated_by="target_reached",
+                )
+
+    return merged, layout, DistanceBoostResult(
+        extra_qubits_added=0,
+        target_distance=target_distance,
+        final_d_x_bound=bx0,
+        final_d_z_bound=bz0,
+        trials_attempted=trials_attempted,
+        terminated_by="max_qubits_exhausted",
     )
 
 

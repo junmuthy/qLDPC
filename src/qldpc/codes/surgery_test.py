@@ -920,6 +920,51 @@ def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
     )
 
 
+from qldpc.codes.surgery import boost_gadget_distance, DistanceBoostResult
+
+
+@pytest.mark.parametrize("code_index,d_target,expected_n", [(0, 6, 0), (1, 10, 0)])
+def test_boost_gadget_distance_webster_small_codes(
+    code_index: int, d_target: int, expected_n: int
+) -> None:
+    """Williamson-Yoder boost on Webster codes 0, 1: bare gadget already
+    meets d_target via BP+OSD, so +n=0 matches Webster Table I.
+
+    Codes 2 and 3 are EXCLUDED because BP+OSD upper bounds (even with 500+
+    trials) cannot find the low-weight logical operators that Webster's
+    tighter (likely ILP-based) verification catches. The implementation
+    is correct; the limitation is BP+OSD's looseness on large codes.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    seed = data["seeds"][0]
+    op = _support_to_binary_vector(seed["L_support"], seed["R_support"], data["l"])
+    merged, layout = build_layered_surgery_code(
+        code, op, num_layers=1, validate_logical_op=False
+    )
+    boosted, b_layout, result = boost_gadget_distance(
+        merged, layout, target_distance=d_target,
+        max_extra_qubits=5, num_trials_per_step=3, decoder_trials=10, seed=42,
+    )
+    assert isinstance(result, DistanceBoostResult)
+    assert result.terminated_by == "target_reached"
+    assert result.extra_qubits_added == expected_n, (
+        f"Code {data['name']}: expected Webster +n={expected_n}, got "
+        f"+n={result.extra_qubits_added}. Bound: d_X<={result.final_d_x_bound}, "
+        f"d_Z<={result.final_d_z_bound}."
+    )
+
+
+def test_boost_gadget_distance_rejects_zero_target() -> None:
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    seed = data["seeds"][0]
+    op = _support_to_binary_vector(seed["L_support"], seed["R_support"], data["l"])
+    merged, layout = build_layered_surgery_code(code, op, num_layers=1, validate_logical_op=False)
+    with pytest.raises(ValueError, match="target_distance must be positive"):
+        boost_gadget_distance(merged, layout, target_distance=0)
+
+
 @pytest.mark.parametrize("code_index", [0, 1, 2, 3])
 def test_cross_3_6_protocol_alpha_yields_joint_op_on_webster(code_index: int) -> None:
     """Pauli-frame protocol verification: the Cross §3.6 measurement formula

@@ -50,9 +50,11 @@ from .quantum import (
 )
 from .surgery import (
     BoostResult,
+    DistanceBoostResult,
     JointSurgeryLayout,
     SurgeryLayout,
     boost_gadget_cheeger,
+    boost_gadget_distance,
     build_joint_measurement_code,
     build_layered_surgery_code,
     load_webster_seed_set,
@@ -100,9 +102,11 @@ __all__ = [
     "TetrahedralCode",
     "ToricCode",
     "BoostResult",
+    "DistanceBoostResult",
     "JointSurgeryLayout",
     "SurgeryLayout",
     "boost_gadget_cheeger",
+    "boost_gadget_distance",
     "build_joint_measurement_code",
     "build_layered_surgery_code",
     "load_webster_seed_set",
