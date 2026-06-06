@@ -9,7 +9,7 @@
       "n_data_qubits": 62,
       "k_logical": 10,
       "distance": 6,
-      "expected_bare_gadget_qubits_per_seed": 19,
+      "expected_bare_gadget_qubits_per_seed": 9,
       "expected_bridge_qubits_per_pair": 11,
       "expected_cheeger_boost_qubits": 0,
       "seeds": [
@@ -27,7 +27,7 @@
       "n_data_qubits": 126,
       "k_logical": 12,
       "distance": 10,
-      "expected_bare_gadget_qubits_per_seed": 31,
+      "expected_bare_gadget_qubits_per_seed": 15,
       "expected_bridge_qubits_per_pair": 19,
       "expected_cheeger_boost_qubits": 0,
       "seeds": [
@@ -45,7 +45,7 @@
       "n_data_qubits": 254,
       "k_logical": 14,
       "distance": 16,
-      "expected_bare_gadget_qubits_per_seed": 49,
+      "expected_bare_gadget_qubits_per_seed": 24,
       "expected_bridge_qubits_per_pair": 31,
       "expected_cheeger_boost_qubits": 8,
       "seeds": [
@@ -63,7 +63,7 @@
       "n_data_qubits": 510,
       "k_logical": 16,
       "distance": 24,
-      "expected_bare_gadget_qubits_per_seed": 79,
+      "expected_bare_gadget_qubits_per_seed": 39,
       "expected_bridge_qubits_per_pair": 51,
       "expected_cheeger_boost_qubits": 20,
       "seeds": [

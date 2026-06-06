@@ -409,3 +409,44 @@ def test_build_generalised_bicycle_code_l3_smoke() -> None:
     assert code.num_qubits == 6
     assert code.is_subsystem_code is False
     assert np.all((code.matrix_x @ code.matrix_z.T) == 0)
+
+
+def _support_to_binary_vector(L_support: list[int], R_support: list[int], l: int) -> np.ndarray:
+    """Convert Webster's (L_support, R_support) per-block lists to a single
+    binary support vector of length 2l."""
+    vec = np.zeros(2 * l, dtype=np.int_)
+    for i in L_support:
+        vec[i] = 1
+    for i in R_support:
+        vec[l + i] = 1
+    return vec
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_webster_table1_bare_gadget(code_index: int) -> None:
+    """Webster Table I bare-gadget verification.
+
+    For each of the 4 codes (l ∈ {31, 63, 127, 255}) and each of its 4
+    seed operators, build the gadget via build_layered_surgery_code and
+    assert num_ancilla_qubits equals the bare-gadget number from Table I.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(
+        l=data["l"], A_set=data["A"], B_set=data["B"]
+    )
+    expected = data["expected_bare_gadget_qubits_per_seed"]
+    for seed in data["seeds"]:
+        op = _support_to_binary_vector(seed["L_support"], seed["R_support"], data["l"])
+        # For Z-type seeds, use the ZX-dual code: swap H_X and H_Z. Then logical
+        # Z of original = logical X of dual, and gadget structure is symmetric.
+        if seed["pauli_type"] == "X":
+            target_code = code
+        else:
+            target_code = codes.CSSCode(
+                code.matrix_z, code.matrix_x, is_subsystem_code=False
+            )
+        _, layout = build_layered_surgery_code(target_code, op, num_layers=1, validate_logical_op=False)
+        assert layout.num_ancilla_qubits == expected, (
+            f"Code {data['name']} seed {seed['name']}: expected "
+            f"{expected} ancilla qubits, got {layout.num_ancilla_qubits}"
+        )
