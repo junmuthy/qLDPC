@@ -42,7 +42,7 @@ def test_surgery_layout_construction() -> None:
     assert dataclasses.is_dataclass(layout) and layout.__dataclass_params__.frozen
 
 
-from qldpc.codes.surgery import _restrict_to_logical_support
+from qldpc.codes.surgery import _restrict_to_logical_support, _compute_gauge_fix
 
 
 def _steane_logical_x() -> tuple[codes.SteaneCode, galois.FieldArray]:
@@ -119,3 +119,25 @@ def test_restrict_accepts_stabilizer_when_skipping_validation() -> None:
     )
     assert v0.size > 0
     assert F.shape == (c0.size, v0.size)
+
+
+def test_compute_gauge_fix_left_nulls_F() -> None:
+    """G satisfies G @ F == 0 with shape (rank(left_null(F)), |C_0|)."""
+    code, logical_x = _steane_logical_x()
+    _, _, F = _restrict_to_logical_support(
+        code, np.asarray(logical_x).astype(np.int_), 1, False
+    )
+    G = _compute_gauge_fix(F)
+    assert G.shape[1] == F.shape[0]
+    if G.shape[0] > 0:
+        assert np.all(G @ F == 0)
+    rank_F = int(np.sum(np.any(F.row_reduce() != 0, axis=1)))
+    assert G.shape[0] == F.shape[0] - rank_F
+
+
+def test_compute_gauge_fix_handles_full_rank_F() -> None:
+    """When F has full row rank, G is empty (0 × |C_0|)."""
+    field = galois.GF(2)
+    F = field([[1, 0, 1], [0, 1, 1]])  # rank 2, |C_0| = 2 → G is 0 × 2
+    G = _compute_gauge_fix(F)
+    assert G.shape == (0, 2)

@@ -143,3 +143,13 @@ def _restrict_to_logical_support(
 
     F = hz[c0_indices][:, v0_indices]
     return v0_indices, c0_indices, F
+
+
+def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
+    """Compute G whose rows form a basis of the left null space of F.
+
+    Cross 2024 §III Step 4: ``null(F) = {c : c @ F == 0}``. We promote the
+    CKBB gauge operators to stabilizers by introducing ``rank(null(F))`` new
+    Z-checks U_L connected via G. Returns G with shape (rank, |C_0|).
+    """
+    return F.left_null_space()
