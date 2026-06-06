@@ -48,6 +48,10 @@ from .quantum import (
     TetrahedralCode,
     ToricCode,
 )
+from .surgery import (
+    SurgeryLayout,
+    build_layered_surgery_code,
+)
 
 __all__ = [
     "BCHCode",
@@ -90,6 +94,8 @@ __all__ = [
     "TBCode",
     "TetrahedralCode",
     "ToricCode",
+    "build_layered_surgery_code",
+    "SurgeryLayout",
     "get_distance_classical",
     "get_distance_quantum",
 ]

@@ -354,3 +354,13 @@ def test_webster_observable_equals_logical_x_on_data() -> None:
         "Webster Eq. (1): XOR of chi_i restricted to ancilla should be zero "
         "(every Z-check of the data code touches V_0 in an even number of qubits)"
     )
+
+
+def test_surgery_reexport_from_qldpc_codes() -> None:
+    """``build_layered_surgery_code`` and ``SurgeryLayout`` are re-exported."""
+    from qldpc import codes as codes_module
+
+    assert hasattr(codes_module, "build_layered_surgery_code")
+    assert hasattr(codes_module, "SurgeryLayout")
+    assert "build_layered_surgery_code" in codes_module.__all__
+    assert "SurgeryLayout" in codes_module.__all__
