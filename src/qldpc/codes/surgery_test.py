@@ -512,3 +512,23 @@ def test_cellulate_long_cycles_breaks_8cycle() -> None:
     for cyc in cycles:
         assert len(cyc) <= 4, f"Cycle of length {len(cyc)} remains: {cyc}"
     assert len(new_edges) >= 1
+
+
+from qldpc.codes.surgery import _spectral_cheeger_lower_bound
+
+
+def test_spectral_cheeger_lower_bound_positive_on_connected_F() -> None:
+    """For a connected non-trivial F, the spectral lower bound is positive."""
+    field = galois.GF(2)
+    F = field([[1, 1, 0], [0, 1, 1]])  # |C_0|=2, |V_0|=3
+    h_lb = _spectral_cheeger_lower_bound(F)
+    assert h_lb > 0
+    assert isinstance(h_lb, float)
+
+
+def test_spectral_cheeger_lower_bound_zero_on_disconnected_F() -> None:
+    """A disconnected F (zero matrix) gives lambda_2 = 0."""
+    field = galois.GF(2)
+    F = field([[0, 0, 0, 0], [0, 0, 0, 0]])  # all zeros -> degenerate
+    h_lb = _spectral_cheeger_lower_bound(F)
+    assert h_lb == pytest.approx(0.0, abs=1e-10)

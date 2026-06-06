@@ -605,3 +605,26 @@ def _cellulate_long_cycles(
             next_edge_index += 1
 
     return new_edges, edge_qubit_to_vertices, vert_to_edge, G_mat
+
+
+def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
+    """Spectral lower bound on the boundary Cheeger constant of F.
+
+    Returns ``lambda_2(F_float @ F_float.T) / 2.0``, where F_float =
+    F.astype(np.float64). This is a tractable lower bound based on the
+    discrete Cheeger inequality and is what boost_gadget_cheeger uses to
+    decide when to stop adding augmentation qubits.
+
+    Args:
+        F: GF(2) restriction matrix of shape (|C_0|, |V_0|).
+
+    Returns:
+        Non-negative float lower bound on h(F).
+    """
+    F_float = np.asarray(F).astype(np.float64)
+    if F_float.shape[0] < 2:
+        return 0.0
+    M = F_float @ F_float.T
+    eigenvalues = np.linalg.eigvalsh(M)
+    lambda_2 = float(eigenvalues[1])
+    return max(0.0, lambda_2 / 2.0)
