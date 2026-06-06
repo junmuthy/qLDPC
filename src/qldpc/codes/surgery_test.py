@@ -620,3 +620,38 @@ def test_joint_surgery_layout_construction() -> None:
     assert joint.num_data_qubits == 7
     assert joint.num_bridge_qubits == 1
     assert dataclasses.is_dataclass(joint) and joint.__dataclass_params__.frozen
+
+
+def test_validate_joint_logical_ops_X_pair_returns_X_type() -> None:
+    from qldpc.codes.surgery import _validate_joint_logical_ops
+
+    seed = 0
+    classical = codes.ClassicalCode.random(4, 2, seed=seed)
+    hgp = codes.HGPCode(classical)
+    logical_x = np.asarray(hgp.get_logical_ops(Pauli.X)[0]).astype(np.int_)
+    arr1 = logical_x.copy()
+    arr2 = logical_x.copy()
+    pauli_type = _validate_joint_logical_ops(hgp, arr1, arr2)
+    assert pauli_type == Pauli.X
+
+
+def test_validate_joint_logical_ops_rejects_low_k_data() -> None:
+    from qldpc.codes.surgery import _validate_joint_logical_ops
+
+    code, logical_x = _steane_logical_x()  # k=1
+    arr = np.asarray(logical_x).astype(np.int_)
+    with pytest.raises(ValueError, match="at least 2 logical qubits"):
+        _validate_joint_logical_ops(code, arr, arr)
+
+
+def test_validate_joint_logical_ops_rejects_mixed_type() -> None:
+    """An X-type op and a Z-type op should be rejected."""
+    from qldpc.codes.surgery import _validate_joint_logical_ops
+
+    seed = 0
+    classical = codes.ClassicalCode.random(4, 2, seed=seed)
+    hgp = codes.HGPCode(classical)
+    logical_x = np.asarray(hgp.get_logical_ops(Pauli.X)[0]).astype(np.int_)
+    logical_z = np.asarray(hgp.get_logical_ops(Pauli.Z)[0]).astype(np.int_)
+    with pytest.raises(ValueError, match="same Pauli type"):
+        _validate_joint_logical_ops(hgp, logical_x, logical_z)

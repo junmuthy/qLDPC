@@ -783,3 +783,52 @@ class JointSurgeryLayout:
     num_bridge_qubits: int
     bridge_qubit_slice: slice
     u_b_check_kind_mask: npt.NDArray[np.bool_]
+
+
+def _validate_joint_logical_ops(
+    data_code: CSSCode,
+    op1: np.ndarray,
+    op2: np.ndarray,
+) -> Pauli:
+    """Validate joint-measurement inputs and return the detected Pauli type.
+
+    Detects whether (op1, op2) are both logical-X (commute with H_Z) or
+    both logical-Z (commute with H_X), and rejects mixed types.
+
+    Raises:
+        ValueError: data_code.dimension < 2, mixed Pauli types, or either
+            op fails the v1 single-operator validation contract.
+    """
+    if data_code.dimension < 2:
+        raise ValueError(
+            f"joint measurement requires at least 2 logical qubits, got "
+            f"data_code.dimension={data_code.dimension}."
+        )
+
+    field = data_code.field
+
+    def _is_x_type(op: np.ndarray) -> bool:
+        gf_op = field(op)
+        return bool(np.all((data_code.matrix_z @ gf_op) == 0))
+
+    def _is_z_type(op: np.ndarray) -> bool:
+        gf_op = field(op)
+        return bool(np.all((data_code.matrix_x @ gf_op) == 0))
+
+    op1_x = _is_x_type(op1)
+    op2_x = _is_x_type(op2)
+    op1_z = _is_z_type(op1)
+    op2_z = _is_z_type(op2)
+
+    if op1_x and op2_x and not (op1_z and op2_z):
+        return Pauli.X
+    if op1_z and op2_z and not (op1_x and op2_x):
+        return Pauli.Z
+    if op1_x and op2_z and not op2_x:
+        raise ValueError("op1 and op2 must be the same Pauli type (op1 is X, op2 is Z).")
+    if op1_z and op2_x and not op1_x:
+        raise ValueError("op1 and op2 must be the same Pauli type (op1 is Z, op2 is X).")
+    raise ValueError(
+        "Could not detect a consistent Pauli type for op1 and op2; check that "
+        "each is a valid logical operator of data_code."
+    )
