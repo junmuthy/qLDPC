@@ -208,3 +208,58 @@ def _build_layered_blocks(F: galois.FieldArray, num_layers: int) -> _LayeredBloc
         n_v0=int(F.shape[1]),
         n_c0=int(F.shape[0]),
     )
+
+
+def _assemble_merged_HX(
+    data_code: CSSCode,
+    blocks: _LayeredBlocks,
+    v0_indices: np.ndarray,
+) -> galois.FieldArray:
+    """Assemble the merged H_X per spec §4.2 / §4.4.
+
+    Block-row order: old data X-checks (zero-padded on ancilla), then new
+    X-check rows from each odd layer i in {1, 3, ..., L}, |V_0| rows each.
+
+    For layer i=1 the data-column block is the V_0 injection matrix Π_V_0;
+    for i >= 3 the previous-layer block is identity on the V_{i-1} ancilla
+    columns. Every odd-layer block has F^T on its own C_i columns and (if
+    i+1 <= L) identity on the next V_{i+1} ancilla columns.
+    """
+    field = data_code.field
+    n_data = data_code.num_qubits
+    n_ancilla = blocks.total_ancilla
+    n_merged = n_data + n_ancilla
+
+    hx = data_code.matrix_x
+    n_x_data = int(hx.shape[0])
+
+    # Old data X-checks padded with zeros.
+    old_x = field.Zeros((n_x_data, n_merged))
+    old_x[:, :n_data] = hx
+
+    # New X-check rows.
+    I_v0 = field.Identity(blocks.n_v0)
+    rows_per_layer = []
+    for i in range(1, blocks.num_layers + 1, 2):  # odd i
+        row_block = field.Zeros((blocks.n_v0, n_merged))
+
+        if i == 1:
+            # Π_V_0: identity-like injection from V_1 X-checks onto V_0 data qubits
+            row_block[np.arange(blocks.n_v0), v0_indices] = 1
+        else:
+            # Identity on V_{i-1} ancilla columns (V_{i-1} has size |V_0|).
+            prev_slice = blocks.ancilla_col_slice(i - 1)
+            row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_v0
+
+        # F^T on C_i ancilla columns.
+        ci_slice = blocks.ancilla_col_slice(i)
+        row_block[:, n_data + ci_slice.start : n_data + ci_slice.stop] = blocks.F_T
+
+        # Identity on V_{i+1} ancilla columns if the layer exists.
+        if i + 1 <= blocks.num_layers:
+            next_slice = blocks.ancilla_col_slice(i + 1)
+            row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_v0
+
+        rows_per_layer.append(row_block)
+
+    return field(np.vstack([old_x, *rows_per_layer]))

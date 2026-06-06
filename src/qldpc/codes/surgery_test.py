@@ -168,3 +168,38 @@ def test_layered_blocks_L3_sizes_and_slices() -> None:
     assert blocks.ancilla_col_slice(2) == slice(2, 5)
     assert blocks.ancilla_col_slice(3) == slice(5, 7)
     assert np.array_equal(blocks.F_T, F.T)
+
+
+from qldpc.codes.surgery import _assemble_merged_HX
+
+
+def test_assemble_HX_steane_L1_shape_and_structure() -> None:
+    """For Steane L=1, H_X^merged has correct shape and per-row support pattern."""
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    v0, _, F = _restrict_to_logical_support(code, arr, 1, False)
+    blocks = _build_layered_blocks(F, 1)
+
+    HX = _assemble_merged_HX(code, blocks, v0)
+
+    n_x_data = code.matrix_x.shape[0]
+    n_ancilla = blocks.total_ancilla  # = |C_0|
+    expected_rows = n_x_data + blocks.n_v0
+    expected_cols = code.num_qubits + n_ancilla
+    assert HX.shape == (expected_rows, expected_cols)
+
+    # Old data X-checks: zero on ancilla columns.
+    assert np.all(HX[:n_x_data, code.num_qubits:] == 0)
+    assert np.array_equal(HX[:n_x_data, :code.num_qubits], code.matrix_x)
+
+    # V_1 X-check rows: Π_V_0 on data columns (1s at v0_indices, rows = identity)
+    v1_rows = HX[n_x_data:]
+    data_block = v1_rows[:, :code.num_qubits]
+    # row v of data_block should have exactly a 1 at column v0[v]
+    assert np.all(np.sum(data_block, axis=1) == 1)
+    for v in range(blocks.n_v0):
+        assert data_block[v, v0[v]] == 1
+
+    # V_1 X-check rows: F^T on C_1 ancilla columns
+    c1_block = v1_rows[:, code.num_qubits:]
+    assert np.array_equal(c1_block, F.T)
