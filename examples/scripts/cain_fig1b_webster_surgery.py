@@ -22,6 +22,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sinter
 
+import stim
+
 from qldpc import circuits, codes, decoders
 from qldpc.codes.surgery import (
     _build_bridge_via_skiptree,
@@ -72,23 +74,56 @@ def build_webster_code_0() -> tuple[codes.CSSCode, codes.CSSCode]:
     return data_code, joint
 
 
+def _keep_only_observables(circuit: stim.Circuit, keep_indices: set[int]) -> stim.Circuit:
+    """Strip all OBSERVABLE_INCLUDE instructions except those in keep_indices,
+    renumbered consecutively starting from 0.
+    """
+    new = stim.Circuit()
+    index_map: dict[int, int] = {}
+    for inst in circuit.flattened():
+        if inst.name == "OBSERVABLE_INCLUDE":
+            old_idx = int(inst.gate_args_copy()[0])
+            if old_idx not in keep_indices:
+                continue
+            if old_idx not in index_map:
+                index_map[old_idx] = len(index_map)
+            new.append("OBSERVABLE_INCLUDE", inst.targets_copy(), [index_map[old_idx]])
+        else:
+            new.append(inst.name, inst.targets_copy(), inst.gate_args_copy())
+    return new
+
+
 def run_sweep(
     data_code: codes.CSSCode,
     joint_code: codes.CSSCode,
+    joint_observable_idx: int,
+    data_observable_idx: int,
     error_rates: list[float],
     num_rounds: int,
     max_shots: int,
     max_errors: int,
     num_workers: int,
 ) -> list[sinter.TaskStats]:
-    """Run sinter sweep on (data, joint) × error_rates."""
+    """Run sinter sweep, tracking ONE observable per code.
+
+    Per Cain et al. §IV.C surgery experiment: for joint code we track the
+    joint X̄_1 X̄_2 target observable (weight-1 representative X̄_{joint_observable_idx}
+    = X_{b_0}). For data code baseline we track ONE data X-logical
+    (X̄_{data_observable_idx}). This isolates the surgery readout error from
+    other logical-preservation errors, giving a clean Cain Fig 1b-style
+    LER vs p curve.
+    """
     tasks = []
-    for code, label in [(data_code, "data"), (joint_code, "joint")]:
+    for code, label, keep_idx in [
+        (data_code, "data X̄_0 memory", data_observable_idx),
+        (joint_code, "joint X̄_1 X̄_2 readout (= X_{b_0})", joint_observable_idx),
+    ]:
         for p in error_rates:
             noise = circuits.DepolarizingNoiseModel(p, include_idling_error=False)
             circuit = circuits.get_memory_experiment(
                 code, basis=Pauli.X, num_rounds=num_rounds, noise_model=noise,
             )
+            circuit = _keep_only_observables(circuit, {keep_idx})
             tasks.append(
                 sinter.Task(
                     circuit=circuit,
@@ -108,7 +143,7 @@ def run_sweep(
 
 
 def plot_results(stats: list[sinter.TaskStats], output_path: Path, num_rounds: int) -> None:
-    by_code: dict[str, list[tuple[float, float, int, int]]] = {"data": [], "joint": []}
+    by_code: dict[str, list[tuple[float, float, int, int]]] = {}
     for s in stats:
         meta = s.json_metadata
         label = meta["code"]
@@ -116,15 +151,12 @@ def plot_results(stats: list[sinter.TaskStats], output_path: Path, num_rounds: i
         if s.shots == 0:
             continue
         ler = s.errors / s.shots
-        by_code[label].append((p, ler, s.shots, s.errors))
+        by_code.setdefault(label, []).append((p, ler, s.shots, s.errors))
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    colors = {"data": "tab:blue", "joint": "tab:red"}
-    markers = {"data": "o", "joint": "s"}
-    labels = {
-        "data": "data code [[62, 10, 6]] (X memory)",
-        "joint": "joint surgery [[86, 9]] (X̄_1 X̄_2 readout)",
-    }
+    colors = {"data X̄_0 memory": "tab:blue", "joint X̄_1 X̄_2 readout (= X_{b_0})": "tab:red"}
+    markers = {"data X̄_0 memory": "o", "joint X̄_1 X̄_2 readout (= X_{b_0})": "s"}
+    labels = colors  # for label lookup
     for code_label, data in by_code.items():
         if not data:
             continue
@@ -135,7 +167,7 @@ def plot_results(stats: list[sinter.TaskStats], output_path: Path, num_rounds: i
         errors = [d[3] for d in data]
         ax.loglog(
             ps, lers, marker=markers[code_label], color=colors[code_label],
-            label=labels[code_label], linewidth=1.5, markersize=7,
+            label=code_label, linewidth=1.5, markersize=7,
         )
         for p, ler, sh, err in data:
             print(f"  {code_label}: p={p:.4f}, LER={ler:.5f}, errors={err}/{sh}")
@@ -180,6 +212,14 @@ def main() -> None:
         max_shots = 50_000
         max_errors = 100
 
+    # Per Cain §IV.C: track the target operator. For joint code, the
+    # weight-1 representative X_{b_0} is the joint X̄_1 X̄_2 observable
+    # (qldpc returns this as X-logical index 8 — verified empirically).
+    joint_obs_idx = joint.dimension - 1  # last X-logical = joint observable
+    data_obs_idx = 0  # any data X-logical; pick index 0 for fair comparison
+    print(f"Tracking joint observable index {joint_obs_idx} (= X_{{b_0}}, weight 1)")
+    print(f"Tracking data observable index {data_obs_idx} (one X̄ of data code)")
+
     num_workers = max(1, (os.cpu_count() or 4) - 1)
     print(
         f"Running sinter sweep: {len(error_rates)} noise rates × 2 codes × "
@@ -187,7 +227,10 @@ def main() -> None:
     )
     t0 = time.time()
     stats = run_sweep(
-        data_code, joint, error_rates,
+        data_code, joint,
+        joint_observable_idx=joint_obs_idx,
+        data_observable_idx=data_obs_idx,
+        error_rates=error_rates,
         num_rounds=args.num_rounds,
         max_shots=max_shots,
         max_errors=max_errors,
