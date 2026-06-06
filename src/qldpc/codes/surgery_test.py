@@ -532,3 +532,51 @@ def test_spectral_cheeger_lower_bound_zero_on_disconnected_F() -> None:
     F = field([[0, 0, 0, 0], [0, 0, 0, 0]])  # all zeros -> degenerate
     h_lb = _spectral_cheeger_lower_bound(F)
     assert h_lb == pytest.approx(0.0, abs=1e-10)
+
+
+from qldpc.codes.surgery import BoostResult, boost_gadget_cheeger
+
+
+def test_boost_gadget_cheeger_increases_lower_bound_or_terminates() -> None:
+    """Boost on Steane terminates either by reaching target or hitting max."""
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+
+    boosted_merged, boosted_layout, result = boost_gadget_cheeger(
+        merged, layout, target_h=0.5, max_extra_qubits=20, seed=42,
+    )
+    assert isinstance(result, BoostResult)
+    assert result.extra_qubits_added >= 0
+    assert result.terminated_by in ("target_reached", "max_qubits_exhausted", "no_progress")
+    if result.terminated_by == "target_reached":
+        assert result.final_h_lower_bound >= 0.5
+
+
+def test_boost_gadget_cheeger_reproducible_with_seed() -> None:
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+
+    _, _, r1 = boost_gadget_cheeger(merged, layout, target_h=2.0, max_extra_qubits=5, seed=42)
+    _, _, r2 = boost_gadget_cheeger(merged, layout, target_h=2.0, max_extra_qubits=5, seed=42)
+    assert r1.extra_qubits_added == r2.extra_qubits_added
+    assert r1.terminated_by == r2.terminated_by
+
+
+def test_boost_gadget_cheeger_respects_max_extra_qubits() -> None:
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+    _, _, result = boost_gadget_cheeger(
+        merged, layout, target_h=100.0, max_extra_qubits=3, seed=0,
+    )
+    assert result.extra_qubits_added <= 3
+
+
+def test_boost_gadget_cheeger_invalid_target_raises() -> None:
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+    with pytest.raises(ValueError, match="target_h"):
+        boost_gadget_cheeger(merged, layout, target_h=-1.0)

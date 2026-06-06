@@ -607,6 +607,16 @@ def _cellulate_long_cycles(
     return new_edges, edge_qubit_to_vertices, vert_to_edge, G_mat
 
 
+@dataclasses.dataclass(frozen=True, eq=False)
+class BoostResult:
+    """Statistics about a Cheeger boost run."""
+
+    extra_qubits_added: int
+    final_h_lower_bound: float
+    iterations: int
+    terminated_by: str  # "target_reached" | "max_qubits_exhausted" | "no_progress"
+
+
 def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
     """Spectral lower bound on the boundary Cheeger constant of F.
 
@@ -628,3 +638,117 @@ def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
     eigenvalues = np.linalg.eigvalsh(M)
     lambda_2 = float(eigenvalues[1])
     return max(0.0, lambda_2 / 2.0)
+
+
+def boost_gadget_cheeger(
+    merged: CSSCode,
+    layout: SurgeryLayout,
+    *,
+    target_h: float = 1.0,
+    max_extra_qubits: int | None = None,
+    seed: int | None = None,
+) -> tuple[CSSCode, SurgeryLayout, BoostResult]:
+    """Heuristic Cheeger augmentation by random degree-2 edge addition.
+
+    Implements Webster (arXiv:2511.15989) §II.A end's "+n" trick:
+    iteratively add new κ' ancilla qubits to the gadget, each connecting
+    a random pair of X-checks (χ_i, χ_j) not already directly connected
+    via another κ, until the spectral lower bound on the boundary Cheeger
+    constant of F reaches target_h.
+
+    Args:
+        merged: merged CSSCode returned by build_layered_surgery_code.
+        layout: the associated SurgeryLayout (used to read F).
+        target_h: target Cheeger lower bound. Default 1.0.
+        max_extra_qubits: cap on additions. None = unbounded.
+        seed: RNG seed for reproducibility.
+
+    Returns:
+        (boosted_merged, boosted_layout, result).
+
+    Raises:
+        ValueError: target_h <= 0, max_extra_qubits < 0, or F too small.
+    """
+    if target_h <= 0:
+        raise ValueError(f"target_h must be positive, got {target_h}.")
+    if max_extra_qubits is not None and max_extra_qubits < 0:
+        raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
+    if layout.F.shape[1] < 2:
+        raise ValueError(
+            f"F has {layout.F.shape[1]} columns; need >= 2 X-checks to add an edge."
+        )
+
+    rng = np.random.default_rng(seed)
+    field = layout.F.__class__
+    F = np.asarray(layout.F).astype(np.int_).copy()
+    n_X = F.shape[1]
+
+    def _existing_pairs(F_arr: np.ndarray) -> set[tuple[int, int]]:
+        pairs: set[tuple[int, int]] = set()
+        for row in F_arr:
+            ones = np.flatnonzero(row)
+            for i in range(len(ones)):
+                for j in range(i + 1, len(ones)):
+                    pairs.add((int(ones[i]), int(ones[j])))
+        return pairs
+
+    extra = 0
+    iterations = 0
+    terminated_by = "no_progress"
+    h_lb = _spectral_cheeger_lower_bound(field(F))
+    max_iter_inner = 10 * n_X * n_X
+
+    while True:
+        iterations += 1
+        h_lb = _spectral_cheeger_lower_bound(field(F))
+        if h_lb >= target_h:
+            terminated_by = "target_reached"
+            break
+        if max_extra_qubits is not None and extra >= max_extra_qubits:
+            terminated_by = "max_qubits_exhausted"
+            break
+        if iterations > max_iter_inner:
+            terminated_by = "no_progress"
+            break
+
+        pairs = _existing_pairs(F)
+        candidate = None
+        for _attempt in range(n_X * 2):
+            i, j = sorted(int(x) for x in rng.choice(n_X, 2, replace=False))
+            if (i, j) not in pairs:
+                candidate = (i, j)
+                break
+        if candidate is None:
+            terminated_by = "no_progress"
+            break
+
+        new_row = np.zeros(n_X, dtype=np.int_)
+        new_row[candidate[0]] = 1
+        new_row[candidate[1]] = 1
+        F = np.vstack([F, new_row])
+        extra += 1
+
+    augmented_F = field(F)
+    G = _compute_gauge_fix(augmented_F)
+    blocks = _build_layered_blocks(augmented_F, layout.num_layers)
+    n_data = layout.num_data_qubits
+
+    data_x = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
+    data_z = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
+    data_x = field(data_x[:, :n_data])
+    data_z = field(data_z[:, :n_data])
+    data_code_proxy = CSSCode(data_x, data_z, is_subsystem_code=False)
+
+    HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
+    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, layout.c0_indices)
+
+    boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
+    boosted_layout = _build_layout(
+        data_code_proxy, blocks, G, layout.v0_indices, layout.c0_indices, augmented_F
+    )
+    return boosted_merged, boosted_layout, BoostResult(
+        extra_qubits_added=extra,
+        final_h_lower_bound=float(h_lb),
+        iterations=iterations,
+        terminated_by=terminated_by,
+    )
