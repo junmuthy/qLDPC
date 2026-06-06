@@ -487,3 +487,28 @@ def test_skip_tree_star_graph_5_vertices() -> None:
     assert P.shape == (5, 5)
     assert np.all(P.sum(axis=0) == 1)
     assert np.all(P.sum(axis=1) == 1)
+
+
+from qldpc.codes.surgery import _cellulate_long_cycles
+
+
+def test_cellulate_long_cycles_breaks_8cycle() -> None:
+    """An 8-cycle: cellulate with max_len=4 should add at least one chord
+    so that no cycle of length > 4 remains in the cycle basis."""
+    G = nx.Graph()
+    edges_8cycle = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 0)]
+    G.add_edges_from(edges_8cycle)
+    edge_qubit_to_vertices = {i: tuple(sorted(e)) for i, e in enumerate(edges_8cycle)}
+    vert_to_edge = {v: k for k, v in edge_qubit_to_vertices.items()}
+    G_mat = np.zeros((len(edges_8cycle), 8), dtype=np.int_)
+    for i, (u, v) in enumerate(edges_8cycle):
+        G_mat[i, u] = 1
+        G_mat[i, v] = 1
+
+    new_edges, edge_qubit_to_vertices, vert_to_edge, G_mat = _cellulate_long_cycles(
+        G, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=4
+    )
+    cycles = nx.cycle_basis(G)
+    for cyc in cycles:
+        assert len(cyc) <= 4, f"Cycle of length {len(cyc)} remains: {cyc}"
+    assert len(new_edges) >= 1
