@@ -1017,7 +1017,19 @@ def _stitch_gadgets_with_bridge(
     if n_u_b > 0:
         u_b_padded[:, bridge_col_start : bridge_col_start + n_bridge] = u_b_x_arr
 
-    HX_joint = field(np.vstack([HX1_padded, HX2_padded_nondata, u_b_padded]))
+    # Full-bridge X-stabilizer: X on ALL w bridge qubits.
+    # The w-1 path stabs span only w-1 independent directions on the bridge register,
+    # leaving one unmeasured degree of freedom (a "bridge logical"). Adding
+    # X_{b_0}...X_{b_{w-1}} — which is NOT in the span of the path stabs over GF(2)
+    # for any w >= 2 — kills this residual degree of freedom and ensures
+    # k_joint = k_data - 2 (both L1 and L2 independently fixed) rather than
+    # k_data - 1 (only their product L1*L2 fixed).
+    # This row has support only on bridge cols, so it commutes trivially with all
+    # Z-stabilizers (HZ_joint has no bridge-col entries).
+    x_bridge_full = np.zeros((1, n_merged), dtype=np.int_)
+    x_bridge_full[0, bridge_col_start : bridge_col_start + n_bridge] = 1
+
+    HX_joint = field(np.vstack([HX1_padded, HX2_padded_nondata, u_b_padded, x_bridge_full]))
     HZ_joint = field(np.vstack([HZ1_padded, HZ2_padded_filtered]))
 
     joint_merged = CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
@@ -1025,9 +1037,11 @@ def _stitch_gadgets_with_bridge(
     bridge_slice = slice(bridge_col_start, n_merged)
     # u_b_check_kind_mask: True on the bridge X-stab rows in HX_joint
     # (the bridge stabilizers are X-type in the joint-X measurement case).
+    # This includes both the path stab rows AND the full-bridge X-stab row.
     u_b_check_kind_mask = np.zeros(HX_joint.shape[0], dtype=bool)
     if n_u_b > 0:
-        u_b_check_kind_mask[-n_u_b:] = True
+        # The bridge rows are the last n_u_b + 1 rows (path stabs + full-bridge stab).
+        u_b_check_kind_mask[-(n_u_b + 1) :] = True
 
     joint_layout = JointSurgeryLayout(
         gadget_layouts=(layout1, layout2),
@@ -1037,5 +1051,64 @@ def _stitch_gadgets_with_bridge(
         num_bridge_qubits=n_bridge,
         bridge_qubit_slice=bridge_slice,
         u_b_check_kind_mask=u_b_check_kind_mask,
+    )
+    return joint_merged, joint_layout
+
+
+def build_joint_measurement_code(
+    data_code: CSSCode,
+    op1: npt.ArrayLike,
+    op2: npt.ArrayLike,
+    *,
+    num_layers: int = 1,
+    validate: bool = True,
+) -> tuple[CSSCode, JointSurgeryLayout]:
+    """Construct a merged stabilizer code measuring op1 · op2 by lattice surgery.
+
+    Implements the same-block joint X̄X̄' (or Z̄Z̄') measurement: builds two
+    single-operator gadgets via build_layered_surgery_code, connects them
+    with a Cross §3.6-style bridge (path graph of w = min(wt(L_1), wt(L_2))
+    data qubits + w-1 X-type path stabilizers + χ endpoint extension), and
+    stitches the result into a joint CSSCode of dimension k_data - 2.
+
+    Args:
+        data_code: stabilizer CSSCode with dimension >= 2.
+        op1, op2: same-Pauli-type logical operator support vectors,
+            length data_code.num_qubits each.
+        num_layers: layer count for each component gadget.
+        validate: if True, run all validation checks.
+
+    Returns:
+        (merged_code, joint_layout).
+
+    Raises:
+        ValueError: per spec §5 v2 validation rules.
+    """
+    op1_arr = np.asarray(op1).astype(np.int_)
+    op2_arr = np.asarray(op2).astype(np.int_)
+
+    if validate:
+        pauli_type = _validate_joint_logical_ops(data_code, op1_arr, op2_arr)
+    else:
+        pauli_type = Pauli.X
+
+    if pauli_type == Pauli.X:
+        target_code = data_code
+    else:
+        # For Z-type joint, work on the ZX-dual.
+        target_code = CSSCode(
+            data_code.matrix_z, data_code.matrix_x, is_subsystem_code=False
+        )
+
+    merged1, layout1 = build_layered_surgery_code(
+        target_code, op1_arr, num_layers=num_layers, validate_logical_op=validate
+    )
+    merged2, layout2 = build_layered_surgery_code(
+        target_code, op2_arr, num_layers=num_layers, validate_logical_op=validate
+    )
+
+    bridge = _build_bridge_via_skiptree(layout1, layout2)
+    joint_merged, joint_layout = _stitch_gadgets_with_bridge(
+        target_code, merged1, layout1, merged2, layout2, bridge, pauli_type=pauli_type,
     )
     return joint_merged, joint_layout

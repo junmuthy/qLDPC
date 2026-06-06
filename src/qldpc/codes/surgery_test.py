@@ -760,3 +760,43 @@ def test_stitch_gadgets_returns_valid_css() -> None:
     assert isinstance(joint_layout, JointSurgeryLayout)
     assert joint_layout.num_data_qubits == hgp.num_qubits
     assert joint_layout.num_bridge_qubits == bridge.num_bridge_qubits
+
+
+# ---------------------------------------------------------------------------
+# v2.11 integration tests for build_joint_measurement_code
+# ---------------------------------------------------------------------------
+
+from qldpc.codes.surgery import build_joint_measurement_code
+
+
+def test_build_joint_small_hgp_X_css_valid() -> None:
+    """Joint X̄_1 X̄_2 measurement on a small HGP code: merged is CSS, k = k_data - 2."""
+    classical = codes.ClassicalCode.random(4, 2, seed=0)
+    hgp = codes.HGPCode(classical)
+    logicals = hgp.get_logical_ops(Pauli.X)
+    arr1 = np.asarray(logicals[0]).astype(np.int_)
+    # Use a non-adjacent logical to ensure disjoint V_0 (matches new bridge design).
+    arr2 = np.asarray(logicals[2]).astype(np.int_)
+    joint, joint_layout = build_joint_measurement_code(hgp, arr1, arr2, num_layers=1)
+    assert joint.is_subsystem_code is False
+    assert np.all((joint.matrix_x @ joint.matrix_z.T) == 0)
+    assert joint.dimension == hgp.dimension - 2
+    assert joint_layout.pauli_type == Pauli.X
+    assert joint_layout.num_data_qubits == hgp.num_qubits
+
+
+def test_build_joint_rejects_low_k_data() -> None:
+    """Steane has k=1, can't joint-measure."""
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    with pytest.raises(ValueError, match="at least 2 logical qubits"):
+        build_joint_measurement_code(code, arr, arr)
+
+
+def test_build_joint_invalid_mixed_type_raises() -> None:
+    classical = codes.ClassicalCode.random(4, 2, seed=0)
+    hgp = codes.HGPCode(classical)
+    logical_x = np.asarray(hgp.get_logical_ops(Pauli.X)[0]).astype(np.int_)
+    logical_z = np.asarray(hgp.get_logical_ops(Pauli.Z)[0]).astype(np.int_)
+    with pytest.raises(ValueError, match="same Pauli type"):
+        build_joint_measurement_code(hgp, logical_x, logical_z)
