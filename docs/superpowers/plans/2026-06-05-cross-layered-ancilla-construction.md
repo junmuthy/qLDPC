@@ -1049,6 +1049,42 @@ def test_build_surgery_small_hgp_L1() -> None:
     _assert_css_and_logical_count(merged, hgp)
     assert layout.num_layers == 1
     assert layout.num_data_qubits == hgp.num_qubits
+
+
+def test_webster_observable_equals_logical_x_on_data() -> None:
+    """Webster Eq. (1) algebraic identity for the noise-free observable.
+
+    Claim: with gadget qubits κ_j initialized to |0⟩, measuring the merged
+    code's stabilizers and taking the product of the χ_i (new X-check)
+    outcomes equals the X̄_M eigenvalue. The proof is purely algebraic:
+
+        Π_i χ_i = (Π_{i ∈ V_0} X_{q_i}) · Π_j X_{κ_j}^{|S_j ∩ supp(L)| mod 2}
+
+    and |S_j ∩ supp(L)| ≡ 0 mod 2 for every Z-stabilizer S_j of the data
+    code (because Z-stabilizers commute with the logical X X̄_M). So the
+    second factor is identity and the first factor is X̄_M on data qubits.
+
+    Equivalently, the XOR of all χ_i rows of merged.matrix_x, restricted
+    to data columns, equals logical_op, and restricted to ancilla columns
+    equals 0. This is a pure GF(2) identity and is the noise-free core
+    that the §7 notebook's logical observable definition relies on.
+    """
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    merged, layout = build_layered_surgery_code(code, arr, num_layers=1)
+
+    chi_mask = layout.hx_row_kind == "ancilla_L1"
+    chi_rows = np.asarray(merged.matrix_x[chi_mask]).astype(np.int_)
+    product = chi_rows.sum(axis=0) % 2  # XOR of all χ_i rows
+
+    n_data = layout.num_data_qubits
+    assert np.array_equal(product[:n_data], arr), (
+        "Webster Eq. (1): XOR of χ_i restricted to data should equal logical_op"
+    )
+    assert np.all(product[n_data:] == 0), (
+        "Webster Eq. (1): XOR of χ_i restricted to ancilla should be zero "
+        "(every Z-check of the data code touches V_0 in an even number of qubits)"
+    )
 ```
 
 - [ ] **Step 8.2: Run integration tests to verify they fail**

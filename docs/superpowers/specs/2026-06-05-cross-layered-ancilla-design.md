@@ -262,6 +262,7 @@ Unit tests in `src/qldpc/codes/surgery_test.py`. All use `galois.GF(2)` for dete
 | `test_layout_partition_consistency` | Steane | 1, 3 | `qubit_layer` block sizes match merged column count; `hx_row_kind` / `hz_row_kind` lengths match row counts |
 | `test_small_hgp_L1` | small HGPCode | 1 | CSS validity, logical count on a non-Steane code |
 | `test_invalid_inputs_raise` | Steane | — | Wrong shape, even L, L=0, stabilizer input (rejected with `validate_logical_op=True`), trivial input, non-binary, subsystem code — each raises `ValueError` with a distinct message |
+| `test_webster_observable_equals_logical_x_on_data` | Steane | 1 | Webster Eq. (1) algebraic identity: the XOR of all χ_i rows (= rows tagged `"ancilla_L1"` in `layout.hx_row_kind`) restricted to data qubits equals `logical_op`, and restricted to ancilla qubits is zero. This holds because `|S_j ∩ supp(L)| ≡ 0 mod 2` for every Z-stabilizer S_j (Z's commute with logical X), so the X_{κ_j} terms in Π χ_i cancel pairwise — a pure GF(2) identity that confirms the observable definition used in the §7 notebook is correct. Stronger than `test_steane_L1_css_valid` because it covers the noise-free measurement semantics, not just code commutation. |
 
 The internal helper sanity tests (`F`, `G`, layout consistency) go beyond the user-required validation surface (stabilizer + logical count) but are inexpensive and isolate helper bugs that the top-level CSS check would mask.
 
