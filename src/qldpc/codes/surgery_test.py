@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from qldpc import codes
-from qldpc.codes.surgery import SurgeryLayout
+from qldpc.codes.surgery import SurgeryLayout, load_webster_seed_set
 from qldpc.objects import Pauli
 
 
@@ -364,3 +364,26 @@ def test_surgery_reexport_from_qldpc_codes() -> None:
     assert hasattr(codes_module, "SurgeryLayout")
     assert "build_layered_surgery_code" in codes_module.__all__
     assert "SurgeryLayout" in codes_module.__all__
+
+
+def test_load_webster_seed_set_returns_4_codes() -> None:
+    """Each call to load_webster_seed_set with code_index in 0..3 returns a dict
+    with the expected schema."""
+    for code_index in range(4):
+        data = load_webster_seed_set(code_index)
+        assert data["l"] in (31, 63, 127, 255)
+        assert isinstance(data["A"], list)
+        assert isinstance(data["B"], list)
+        assert len(data["seeds"]) == 4
+        for seed in data["seeds"]:
+            assert seed["name"] in ("X_bar_1", "Z_bar_1", "X_bar_k2p1", "Z_bar_k2p1")
+            assert seed["pauli_type"] in ("X", "Z")
+            assert isinstance(seed["L_support"], list)
+            assert isinstance(seed["R_support"], list)
+
+
+def test_load_webster_seed_set_out_of_range_raises() -> None:
+    with pytest.raises(IndexError):
+        load_webster_seed_set(4)
+    with pytest.raises(IndexError):
+        load_webster_seed_set(-1)

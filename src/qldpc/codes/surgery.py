@@ -413,3 +413,31 @@ def _build_layout(
         hx_row_kind=hx_row_kind,
         hz_row_kind=hz_row_kind,
     )
+
+
+import json as _json
+import pathlib as _pathlib
+
+
+_WEBSTER_APP_A_PATH = _pathlib.Path(__file__).resolve().parents[3] / "examples" / "webster_app_a.json"
+
+
+def load_webster_seed_set(code_index: int) -> dict:
+    """Load Webster (arXiv:2511.15989) Appendix A data for code index 0..3.
+
+    The 4 codes are generalised bicycle codes with l in {31, 63, 127, 255},
+    each having 4 seed operators (X_bar_1, Z_bar_1, X_bar_{k/2+1}, Z_bar_{k/2+1}).
+    The data is read from ``examples/webster_app_a.json``.
+
+    Returns:
+        A dict matching the JSON schema.
+
+    Raises:
+        IndexError: if code_index is not in 0..3.
+        FileNotFoundError: if the JSON fixture is missing.
+    """
+    if not 0 <= code_index <= 3:
+        raise IndexError(f"code_index must be in 0..3, got {code_index}")
+    with _WEBSTER_APP_A_PATH.open() as fh:
+        data = _json.load(fh)
+    return data["codes"][code_index]
