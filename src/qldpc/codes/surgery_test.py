@@ -921,6 +921,66 @@ def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
 
 
 @pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_cross_3_6_protocol_alpha_yields_joint_op_on_webster(code_index: int) -> None:
+    """Pauli-frame protocol verification: the Cross §3.6 measurement formula
+
+        α* · HX_joint = X̄_1 ⊗ X̄_2  (padded with zeros on ancilla and bridge)
+
+    where α* has 1 on EVERY χ row from both gadgets AND every U_B bridge
+    path-stabilizer row, and 0 on the data X-stabilizer rows.
+
+    This α* tells the surgery protocol: 'to read out the joint eigenvalue,
+    XOR the new measurement outcomes from χ^(1) ∪ χ^(2) ∪ U_B'. Verifying
+    this specific α (not just *some* α) confirms the construction encodes
+    the Cross §3.6 protocol literally.
+
+    Derivation (commit message Cross 2024 §III + bridge stitching):
+      Σ χ^(1) = op1 ⊗ 0_κ_1 ⊗ X_{b_0}   (κ_1 sum cancels by V_0 ∩ S_j even)
+      Σ χ^(2) = op2 ⊗ 0_κ_2 ⊗ X_{b_{w-1}}
+      Σ U_B   = 0 ⊗ 0 ⊗ (X_{b_0} + X_{b_{w-1}})
+      Sum     = (op1 + op2) ⊗ 0 ⊗ 0 ⊗ 0 ✓
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    joint, layout = build_joint_measurement_code(code, op1, op2, num_layers=1, validate=False)
+
+    layout1, layout2 = layout.gadget_layouts
+    n_x_data = int(np.sum(layout1.hx_row_kind == "data"))
+    n_chi_1 = int(np.sum(layout1.hx_row_kind != "data"))
+    n_chi_2 = int(np.sum(layout2.hx_row_kind != "data"))
+    n_u_b = int(np.sum(layout.u_b_check_kind_mask))
+    expected_rows = n_x_data + n_chi_1 + n_chi_2 + n_u_b
+    assert joint.matrix_x.shape[0] == expected_rows, (
+        f"HX_joint has {joint.matrix_x.shape[0]} rows, expected layout "
+        f"breakdown sum = {expected_rows} (data={n_x_data}, χ1={n_chi_1}, "
+        f"χ2={n_chi_2}, U_B={n_u_b})."
+    )
+
+    GF2 = galois.GF(2)
+    alpha = np.zeros(expected_rows, dtype=np.int_)
+    alpha[n_x_data : n_x_data + n_chi_1 + n_chi_2] = 1
+    alpha[n_x_data + n_chi_1 + n_chi_2 :] = 1
+    alpha_gf = GF2(alpha)
+
+    product = alpha_gf @ joint.matrix_x
+
+    n_data = layout.num_data_qubits
+    expected = np.zeros(joint.num_qubits, dtype=np.int_)
+    expected[:n_data] = (op1 + op2) % 2
+    expected_gf = GF2(expected)
+
+    assert np.array_equal(np.asarray(product), np.asarray(expected_gf)), (
+        f"Code {data['name']}: Cross §3.6 formula α (all-1 on χ ∪ U_B, "
+        f"0 on data rows) does NOT yield (op1+op2, 0_anc, 0_bridge). "
+        f"Mismatch at columns: "
+        f"{np.flatnonzero(np.asarray(product) ^ np.asarray(expected_gf))[:20]}..."
+    )
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
 def test_joint_dimension_equals_k_data_minus_1_on_webster(code_index: int) -> None:
     """CSSCode.dimension of the merged joint code equals k_data - 1.
 
