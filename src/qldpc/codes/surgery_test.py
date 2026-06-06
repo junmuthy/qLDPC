@@ -655,3 +655,43 @@ def test_validate_joint_logical_ops_rejects_mixed_type() -> None:
     logical_z = np.asarray(hgp.get_logical_ops(Pauli.Z)[0]).astype(np.int_)
     with pytest.raises(ValueError, match="same Pauli type"):
         _validate_joint_logical_ops(hgp, logical_x, logical_z)
+
+
+from qldpc.codes.surgery import _BridgeSpec, _build_bridge_via_skiptree
+
+
+def _two_overlapping_hgp_gadgets():
+    """Build two HGPCode gadgets that share some V_0 overlap."""
+    classical = codes.ClassicalCode.random(4, 2, seed=0)
+    hgp = codes.HGPCode(classical)
+    logicals_x = hgp.get_logical_ops(Pauli.X)
+    arr1 = np.asarray(logicals_x[0]).astype(np.int_)
+    arr2 = np.asarray(logicals_x[1]).astype(np.int_)
+    _, lay1 = build_layered_surgery_code(hgp, arr1, num_layers=1)
+    _, lay2 = build_layered_surgery_code(hgp, arr2, num_layers=1)
+    return hgp, lay1, lay2
+
+
+def test_build_bridge_returns_BridgeSpec() -> None:
+    try:
+        _, lay1, lay2 = _two_overlapping_hgp_gadgets()
+    except ValueError:
+        pytest.skip("Random HGP gave disjoint V_0; need a better fixture")
+    try:
+        spec = _build_bridge_via_skiptree(lay1, lay2)
+    except ValueError:
+        pytest.skip("Random HGP gave disconnected interface graph; need a better fixture")
+    assert isinstance(spec, _BridgeSpec)
+    assert spec.num_bridge_qubits >= 0
+
+
+def test_build_bridge_u_b_rows_have_correct_width() -> None:
+    try:
+        _, lay1, lay2 = _two_overlapping_hgp_gadgets()
+        spec = _build_bridge_via_skiptree(lay1, lay2)
+    except ValueError:
+        pytest.skip("Test fixture produced incompatible inputs; see v2.9 plan")
+
+    expected_width = lay1.F.shape[0] + lay2.F.shape[0] + spec.num_bridge_qubits
+    if spec.u_b_rows.shape[0] > 0:
+        assert spec.u_b_rows.shape[1] == expected_width

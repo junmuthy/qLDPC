@@ -832,3 +832,133 @@ def _validate_joint_logical_ops(
         "Could not detect a consistent Pauli type for op1 and op2; check that "
         "each is a valid logical operator of data_code."
     )
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class _BridgeSpec:
+    """Internal output of _build_bridge_via_skiptree.
+
+    Attributes:
+        num_bridge_qubits: number of bridge qubits introduced.
+        u_b_rows: shape (n_u_b, |C_0_1| + |C_0_2| + num_bridge_qubits)
+            GF(2) matrix. Each row is one U_B Z-stabilizer over
+            (κ_j_1, κ_j_2, bridge) qubits.
+        interface_vertex_to_qubit: dict mapping interface-graph vertex
+            index → (block, kappa_index) where block ∈ {0, 1}.
+    """
+
+    num_bridge_qubits: int
+    u_b_rows: galois.FieldArray
+    interface_vertex_to_qubit: dict[int, tuple[int, int]]
+
+
+def _build_bridge_via_skiptree(
+    layout1: SurgeryLayout,
+    layout2: SurgeryLayout,
+) -> _BridgeSpec:
+    """Construct the same-block joint-measurement bridge.
+
+    Algorithm:
+    1. Interface graph S = (V, E):
+       V = κ_j_1 vertices (one per layout1.c0_indices) ∪ κ_j_2 vertices.
+       E = pairs (κ_j_1, κ_k_2) where data Z-checks indexed j and k share
+           at least one qubit in supp(op1) ∩ supp(op2).
+    2. Add chord edges via _cellulate_long_cycles(S, max_len=6).
+    3. Run _skip_tree(S, root=0) → T (n-1, |E|) and P (n, n).
+    4. Bridge qubits = n - 1.
+       For row r of T, U_B stabilizer acts on:
+         interface vertices that appear an ODD number of times in T[r]
+         (i.e., XOR of endpoints of all edges in T[r])
+         plus the bridge qubit r.
+
+    Raises:
+        ValueError: if the interface graph has no edges or is disconnected.
+    """
+    n_kappa_1 = layout1.F.shape[0]
+    n_kappa_2 = layout2.F.shape[0]
+    field = layout1.F.__class__
+
+    S = nx.Graph()
+    S.add_nodes_from(range(n_kappa_1 + n_kappa_2))
+    interface_vertex_to_qubit: dict[int, tuple[int, int]] = {}
+    for j_idx in range(n_kappa_1):
+        interface_vertex_to_qubit[j_idx] = (0, j_idx)
+    for k_idx in range(n_kappa_2):
+        interface_vertex_to_qubit[n_kappa_1 + k_idx] = (1, k_idx)
+
+    F1 = np.asarray(layout1.F).astype(np.int_)
+    F2 = np.asarray(layout2.F).astype(np.int_)
+    v0_1 = layout1.v0_indices
+    v0_2 = layout2.v0_indices
+    common_qubits = np.intersect1d(v0_1, v0_2)
+
+    edge_qubit_to_vertices: dict[int, tuple[int, int]] = {}
+    vert_to_edge: dict[tuple[int, int], int] = {}
+    next_edge_index = 0
+    for q in common_qubits:
+        col1 = int(np.where(v0_1 == q)[0][0])
+        col2 = int(np.where(v0_2 == q)[0][0])
+        j_indices = np.flatnonzero(F1[:, col1])
+        k_indices = np.flatnonzero(F2[:, col2])
+        for j in j_indices:
+            for k in k_indices:
+                u, v = sorted((int(j), int(n_kappa_1 + k)))
+                if (u, v) not in vert_to_edge:
+                    S.add_edge(u, v)
+                    edge_qubit_to_vertices[next_edge_index] = (u, v)
+                    vert_to_edge[(u, v)] = next_edge_index
+                    next_edge_index += 1
+
+    if next_edge_index == 0:
+        raise ValueError(
+            "interface graph has no edges; gadgets' V_0 supports do not overlap "
+            "via any data Z-check, so no same-block bridge is possible."
+        )
+    if not nx.is_connected(S.subgraph([v for v in S.nodes if S.degree(v) > 0])):
+        raise ValueError(
+            "interface graph between the two gadgets is disconnected; "
+            "same-block joint-measurement bridge requires a connected interface."
+        )
+
+    G_mat = np.zeros((next_edge_index, n_kappa_1 + n_kappa_2), dtype=np.int_)
+    for ei, (u, v) in edge_qubit_to_vertices.items():
+        G_mat[ei, u] = 1
+        G_mat[ei, v] = 1
+    _, edge_qubit_to_vertices, vert_to_edge, G_mat = _cellulate_long_cycles(
+        S, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=6
+    )
+
+    # Restrict S to vertices with degree > 0 for SkipTree (the algorithm needs a connected component)
+    connected_vertices = sorted([v for v in S.nodes if S.degree(v) > 0])
+    if len(connected_vertices) < 2:
+        raise ValueError("interface graph has fewer than 2 connected vertices.")
+    # _skip_tree assumes vertices are labeled 0..n-1; relabel and translate back at the end.
+    relabel_map = {v: i for i, v in enumerate(connected_vertices)}
+    inv_relabel = {i: v for v, i in relabel_map.items()}
+    S_sub = nx.relabel_nodes(S.subgraph(connected_vertices).copy(), relabel_map)
+    root = relabel_map[connected_vertices[0]]
+
+    T, P = _skip_tree(S_sub, root=root)
+    num_bridge_qubits = T.shape[0]
+    n_interface = n_kappa_1 + n_kappa_2
+    u_b_rows_arr = np.zeros((num_bridge_qubits, n_interface + num_bridge_qubits), dtype=np.int_)
+    # Build an edge_to_index map for the subgraph, then translate vertices back to the original S labels.
+    sub_edge_index_verts = {tuple(sorted(e)): i for i, e in enumerate(S_sub.edges())}
+    inv_sub_edges = {i: tuple(sorted(e)) for e, i in sub_edge_index_verts.items()}
+
+    for r in range(num_bridge_qubits):
+        # Edges on this row's shortest path in S_sub
+        for e_idx in np.flatnonzero(T[r]):
+            u_sub, v_sub = inv_sub_edges[e_idx]
+            u = inv_relabel[u_sub]
+            v = inv_relabel[v_sub]
+            u_b_rows_arr[r, u] = (u_b_rows_arr[r, u] + 1) % 2
+            u_b_rows_arr[r, v] = (u_b_rows_arr[r, v] + 1) % 2
+        # bridge qubit r
+        u_b_rows_arr[r, n_interface + r] = 1
+
+    return _BridgeSpec(
+        num_bridge_qubits=num_bridge_qubits,
+        u_b_rows=field(u_b_rows_arr),
+        interface_vertex_to_qubit=interface_vertex_to_qubit,
+    )
