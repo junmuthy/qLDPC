@@ -141,3 +141,30 @@ def test_compute_gauge_fix_handles_full_rank_F() -> None:
     F = field([[1, 0, 1], [0, 1, 1]])  # rank 2, |C_0| = 2 → G is 0 × 2
     G = _compute_gauge_fix(F)
     assert G.shape == (0, 2)
+
+
+from qldpc.codes.surgery import _build_layered_blocks
+
+
+def test_layered_blocks_L1_sizes() -> None:
+    field = galois.GF(2)
+    F = field([[1, 0, 1], [0, 1, 1]])  # |C_0|=2, |V_0|=3
+    blocks = _build_layered_blocks(F, num_layers=1)
+    assert blocks.n_v0 == 3
+    assert blocks.n_c0 == 2
+    assert blocks.ancilla_layer_sizes == [2]  # C_1 only
+    assert blocks.total_ancilla == 2
+    assert blocks.ancilla_col_slice(1) == slice(0, 2)
+
+
+def test_layered_blocks_L3_sizes_and_slices() -> None:
+    field = galois.GF(2)
+    F = field([[1, 0, 1], [0, 1, 1]])
+    blocks = _build_layered_blocks(F, num_layers=3)
+    # L=3: layers 1 (C, |C_0|=2), 2 (V, |V_0|=3), 3 (C, |C_0|=2)
+    assert blocks.ancilla_layer_sizes == [2, 3, 2]
+    assert blocks.total_ancilla == 7
+    assert blocks.ancilla_col_slice(1) == slice(0, 2)
+    assert blocks.ancilla_col_slice(2) == slice(2, 5)
+    assert blocks.ancilla_col_slice(3) == slice(5, 7)
+    assert np.array_equal(blocks.F_T, F.T)

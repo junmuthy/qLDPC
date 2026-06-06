@@ -153,3 +153,58 @@ def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
     Z-checks U_L connected via G. Returns G with shape (rank, |C_0|).
     """
     return F.left_null_space()
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class _LayeredBlocks:
+    """Internal structural summary of an L-layer ancilla system.
+
+    Holds F, F^T (cached), per-layer ancilla qubit sizes, and convenient
+    column slices into the ancilla portion of the merged-code qubit register.
+    Consumed by ``_assemble_merged_HX`` / ``_assemble_merged_HZ``.
+    """
+
+    F: galois.FieldArray
+    F_T: galois.FieldArray
+    num_layers: int
+    n_v0: int
+    n_c0: int
+
+    @property
+    def ancilla_layer_sizes(self) -> list[int]:
+        """Sizes of ancilla qubit groups, indexed by layer i in 1..L.
+
+        Odd i contribute |C_0| qubits (C_i in Cross notation);
+        Even i contribute |V_0| qubits (V_i).
+        """
+        return [
+            self.n_c0 if i % 2 == 1 else self.n_v0
+            for i in range(1, self.num_layers + 1)
+        ]
+
+    @property
+    def total_ancilla(self) -> int:
+        return sum(self.ancilla_layer_sizes)
+
+    def ancilla_col_slice(self, layer: int) -> slice:
+        """Column slice for layer's ancilla qubits, relative to the ancilla block.
+
+        Layer indexing is 1-based. Returns a slice into the ancilla columns
+        (NOT including the n_data offset).
+        """
+        if layer < 1 or layer > self.num_layers:
+            raise IndexError(f"layer must be in 1..{self.num_layers}, got {layer}")
+        offset = sum(self.ancilla_layer_sizes[: layer - 1])
+        size = self.ancilla_layer_sizes[layer - 1]
+        return slice(offset, offset + size)
+
+
+def _build_layered_blocks(F: galois.FieldArray, num_layers: int) -> _LayeredBlocks:
+    """Build the structural summary of the L-layer ancilla system."""
+    return _LayeredBlocks(
+        F=F,
+        F_T=F.T,
+        num_layers=num_layers,
+        n_v0=int(F.shape[1]),
+        n_c0=int(F.shape[0]),
+    )
