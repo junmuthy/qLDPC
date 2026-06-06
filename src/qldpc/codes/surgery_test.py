@@ -838,3 +838,104 @@ def test_boost_gadget_cheeger_handles_added_qubits_on_webster_code() -> None:
     # Either we reached target, or we hit max — either is fine.
     assert result.extra_qubits_added >= 0
     assert result.terminated_by in ("target_reached", "max_qubits_exhausted", "no_progress")
+
+
+# ---------------------------------------------------------------------------
+# Correctness tests: joint X̄_1 X̄_2 is a stabilizer; singletons are not.
+# ---------------------------------------------------------------------------
+
+
+def _gf2_in_row_span(matrix: galois.FieldArray, target: galois.FieldArray) -> bool:
+    """Return True iff `target` lies in the GF(2) row span of `matrix`."""
+    GF2 = galois.GF(2)
+    M = GF2(np.asarray(matrix).astype(np.int_))
+    t = GF2(np.asarray(target).astype(np.int_)).reshape(1, -1)
+    rank_M = int(np.linalg.matrix_rank(M))
+    augmented = GF2(np.vstack([np.asarray(M), np.asarray(t)]).astype(np.int_))
+    rank_aug = int(np.linalg.matrix_rank(augmented))
+    return rank_aug == rank_M
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_joint_xx_in_stabilizer_on_webster(code_index: int) -> None:
+    """For each Webster code, X̄_1 ⊗ X̄_{k/2+1} (padded with zeros on ancilla
+    and bridge) must lie in the GF(2) row span of the merged code's H_X.
+
+    Together with the singleton negative test, this is the stabilizer-
+    membership criterion for joint measurement: the merged code accepts
+    X̄_1 X̄_2 as a stabilizer, while accepting neither X̄_1 nor X̄_2 alone.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    joint, layout = build_joint_measurement_code(code, op1, op2, num_layers=1, validate=False)
+
+    n_data = layout.num_data_qubits
+    n_total = joint.num_qubits
+    assert n_total == n_data + layout.num_ancilla_qubits + layout.num_bridge_qubits
+
+    GF2 = galois.GF(2)
+    op1_padded = np.zeros(n_total, dtype=np.int_)
+    op1_padded[:n_data] = op1
+    op2_padded = np.zeros(n_total, dtype=np.int_)
+    op2_padded[:n_data] = op2
+    joint_op = GF2((op1_padded + op2_padded) % 2)
+
+    assert _gf2_in_row_span(joint.matrix_x, joint_op), (
+        f"Code {data['name']}: X̄_1 ⊗ X̄_2 is NOT in the X-stabilizer row "
+        f"span of the merged code. Construction is broken."
+    )
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
+    """Negative: X̄_1 alone (padded) must NOT lie in the X-stabilizer row
+    span of the merged code. Otherwise the surgery would have measured X̄_1
+    individually rather than the joint product, violating Cross §3.6.
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    joint, layout = build_joint_measurement_code(code, op1, op2, num_layers=1, validate=False)
+
+    n_data = layout.num_data_qubits
+    n_total = joint.num_qubits
+    GF2 = galois.GF(2)
+    op1_padded = np.zeros(n_total, dtype=np.int_)
+    op1_padded[:n_data] = op1
+    op2_padded = np.zeros(n_total, dtype=np.int_)
+    op2_padded[:n_data] = op2
+
+    assert not _gf2_in_row_span(joint.matrix_x, GF2(op1_padded)), (
+        f"Code {data['name']}: X̄_1 alone IS in the X-stabilizer row span. "
+        f"This means the merged code stabilizes X̄_1 directly — single-"
+        f"operator measurement, not joint."
+    )
+    assert not _gf2_in_row_span(joint.matrix_x, GF2(op2_padded)), (
+        f"Code {data['name']}: X̄_2 alone IS in the X-stabilizer row span."
+    )
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_joint_dimension_equals_k_data_minus_1_on_webster(code_index: int) -> None:
+    """CSSCode.dimension of the merged joint code equals k_data - 1.
+
+    Cross §3.6: a joint X̄_1 X̄_2 measurement consumes exactly one logical
+    degree of freedom. This re-derives k via the CSSCode rank computation
+    (independent of our internal HX/HZ row-count bookkeeping).
+    """
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(l=data["l"], A_set=data["A"], B_set=data["B"])
+    x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]
+    op1 = _support_to_binary_vector(x_seeds[0]["L_support"], x_seeds[0]["R_support"], data["l"])
+    op2 = _support_to_binary_vector(x_seeds[1]["L_support"], x_seeds[1]["R_support"], data["l"])
+    joint, _ = build_joint_measurement_code(code, op1, op2, num_layers=1, validate=False)
+
+    assert joint.dimension == code.dimension - 1, (
+        f"Code {data['name']}: joint.dimension={joint.dimension}, expected "
+        f"k_data - 1 = {code.dimension - 1}"
+    )
