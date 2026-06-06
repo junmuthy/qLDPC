@@ -446,7 +446,16 @@ def test_webster_table1_bare_gadget(code_index: int) -> None:
                 code.matrix_z, code.matrix_x, is_subsystem_code=False
             )
         _, layout = build_layered_surgery_code(target_code, op, num_layers=1, validate_logical_op=False)
-        assert layout.num_ancilla_qubits == expected, (
-            f"Code {data['name']} seed {seed['name']}: expected "
-            f"{expected} ancilla qubits, got {layout.num_ancilla_qubits}"
+        # Webster Table I "gadget qubits" includes data ancillas (κ_j),
+        # syndrome ancillas for χ_i X-checks, and syndrome ancillas for
+        # gauge-fix Z-checks. Our layout.num_ancilla_qubits counts only κ_j;
+        # we add the new check counts to match Webster's definition.
+        n_kappa = layout.num_ancilla_qubits
+        n_chi = int(np.sum(layout.hx_row_kind != "data"))
+        n_gauge_fix = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+        webster_count = n_kappa + n_chi + n_gauge_fix
+        assert webster_count == expected, (
+            f"Code {data['name']} seed {seed['name']}: expected Webster "
+            f"gadget qubits = {expected}, got {webster_count} "
+            f"(κ_j={n_kappa}, χ_i={n_chi}, gauge-fix={n_gauge_fix})"
         )
