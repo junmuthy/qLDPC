@@ -203,3 +203,41 @@ def test_assemble_HX_steane_L1_shape_and_structure() -> None:
     # V_1 X-check rows: F^T on C_1 ancilla columns
     c1_block = v1_rows[:, code.num_qubits:]
     assert np.array_equal(c1_block, F.T)
+
+
+from qldpc.codes.surgery import _assemble_merged_HZ
+
+
+def test_assemble_HZ_steane_L1_shape_and_structure() -> None:
+    """For Steane L=1: data Z-checks with C_0 extension + (possibly empty) gauge-fix."""
+    code, logical_x = _steane_logical_x()
+    arr = np.asarray(logical_x).astype(np.int_)
+    v0, c0, F = _restrict_to_logical_support(code, arr, 1, False)
+    G = _compute_gauge_fix(F)
+    blocks = _build_layered_blocks(F, 1)
+
+    HZ = _assemble_merged_HZ(code, blocks, G, c0)
+
+    n_z_data = code.matrix_z.shape[0]
+    n_ancilla = blocks.total_ancilla
+    expected_rows = n_z_data + G.shape[0]  # no even ancilla layers for L=1
+    expected_cols = code.num_qubits + n_ancilla
+    assert HZ.shape == (expected_rows, expected_cols)
+
+    # Old data Z-checks: original H_Z on data columns
+    assert np.array_equal(HZ[:n_z_data, :code.num_qubits], code.matrix_z)
+
+    # C_0 rows have identity entries on the corresponding C_1 ancilla columns.
+    c1_slice = blocks.ancilla_col_slice(1)
+    ancilla_block_z = HZ[:n_z_data, code.num_qubits:]
+    for j, c_idx in enumerate(c0):
+        assert ancilla_block_z[c_idx, c1_slice.start + j] == 1
+    # Non-C_0 rows have zero on all ancilla columns.
+    non_c0 = np.setdiff1d(np.arange(n_z_data), c0)
+    assert np.all(ancilla_block_z[non_c0] == 0)
+
+    # Gauge-fix rows (if any): zero on data, G on C_1.
+    if G.shape[0] > 0:
+        gauge_rows = HZ[n_z_data:]
+        assert np.all(gauge_rows[:, :code.num_qubits] == 0)
+        assert np.array_equal(gauge_rows[:, code.num_qubits:], G)

@@ -263,3 +263,56 @@ def _assemble_merged_HX(
         rows_per_layer.append(row_block)
 
     return field(np.vstack([old_x, *rows_per_layer]))
+
+
+def _assemble_merged_HZ(
+    data_code: CSSCode,
+    blocks: _LayeredBlocks,
+    G: galois.FieldArray,
+    c0_indices: np.ndarray,
+) -> galois.FieldArray:
+    """Assemble the merged H_Z per spec §4.2 / §4.4.
+
+    Block-row order:
+        1. All old data Z-checks. Rows in ¬C_0 have zeros on every ancilla
+           column; rows in C_0 get an identity-pattern extension on C_1.
+        2. New Z-checks from each even layer i in {2, 4, ..., L-1}, |C_0|
+           rows each. Pattern: I on C_{i-1}, F on V_i, I on C_{i+1}.
+        3. Gauge-fix rows U_L: G on C_L, zero elsewhere.
+    """
+    field = data_code.field
+    n_data = data_code.num_qubits
+    n_ancilla = blocks.total_ancilla
+    n_merged = n_data + n_ancilla
+
+    hz = data_code.matrix_z
+    n_z_data = int(hz.shape[0])
+
+    # Old data Z-checks, with C_0 extension on C_1 ancilla columns.
+    old_z = field.Zeros((n_z_data, n_merged))
+    old_z[:, :n_data] = hz
+    c1_slice = blocks.ancilla_col_slice(1)
+    I_c0 = field.Identity(blocks.n_c0)
+    old_z[c0_indices, n_data + c1_slice.start : n_data + c1_slice.stop] = I_c0
+
+    # New Z-checks from even ancilla layers (i = 2, 4, ..., L-1).
+    even_rows = []
+    for i in range(2, blocks.num_layers, 2):
+        row_block = field.Zeros((blocks.n_c0, n_merged))
+        prev_slice = blocks.ancilla_col_slice(i - 1)
+        cur_slice = blocks.ancilla_col_slice(i)
+        next_slice = blocks.ancilla_col_slice(i + 1)
+        row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_c0
+        row_block[:, n_data + cur_slice.start : n_data + cur_slice.stop] = blocks.F
+        row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_c0
+        even_rows.append(row_block)
+
+    # Gauge-fix rows on C_L.
+    gauge_rows: list[galois.FieldArray] = []
+    if G.shape[0] > 0:
+        gf = field.Zeros((G.shape[0], n_merged))
+        cL_slice = blocks.ancilla_col_slice(blocks.num_layers)
+        gf[:, n_data + cL_slice.start : n_data + cL_slice.stop] = G
+        gauge_rows.append(gf)
+
+    return field(np.vstack([old_z, *even_rows, *gauge_rows]))
