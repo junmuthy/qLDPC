@@ -53,8 +53,6 @@ def _stitch_to_joint_csscode(
 
     Per Cross §3.6 + math.md §2.5–2.6.
     """
-    import galois
-
     data_code = g1.code
     field = data_code.field
 
@@ -130,8 +128,7 @@ def build_joint_ppm_circuit(
 ) -> tuple[stim.Circuit, CSSCode]:
     """Stim circuit + merged joint CSS code for two-PPM joint measurement.
 
-    Handles both intra-code (g1.code is g2.code) and inter-code paths via the
-    `bridge.intercode` flag.
+    Intra-code path (g1.code is g2.code). Inter-code support is added in Task 16.
     """
     joint_code = _stitch_to_joint_csscode(g1, g2, bridge)
     circuit = get_memory_experiment(
