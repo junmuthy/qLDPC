@@ -69,9 +69,13 @@ def test_step2_gauge_fix_basis_property():
 
 
 def test_step2_gauge_fix_deterministic():
-    """Same F twice → byte-identical G."""
+    """Same F twice → byte-identical G (non-trivial: rank-deficient F → non-empty G)."""
     from qldpc.codes.surgery.gadget import _step2_gauge_fix
-    F = np.array([[1, 0, 1, 1], [0, 1, 1, 1]], dtype=np.uint8)
+    # 3x3 matrix with rank 2 (row 0 + row 1 = row 2 over GF(2)), so G has 1 row.
+    F = np.array([[1, 0, 1], [0, 1, 1], [1, 1, 0]], dtype=np.uint8)
     G1 = _step2_gauge_fix(F)
     G2 = _step2_gauge_fix(F)
+    assert G1.shape == (1, 3), f"expected G shape (1,3), got {G1.shape}"
     assert np.array_equal(G1, G2)
+    # And sanity-check the basis property holds on this F too.
+    assert np.array_equal((G1 @ F) % 2, np.zeros((1, F.shape[1]), dtype=np.uint8))
