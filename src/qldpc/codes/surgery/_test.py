@@ -673,3 +673,29 @@ def test_alpha_star_yields_joint_op_on_webster(code_index: int) -> None:
         f"Code {data.get('name', code_index)}: α* · HX_joint != (op1+op2, 0, 0). "
         f"Mismatch at columns: {np.flatnonzero(product ^ expected)[:20]}"
     )
+
+
+@pytest.mark.skipif(
+    not __import__("qldpc.codes._ide_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
+    reason="Ide Zenodo fixtures not installed",
+)
+def test_load_ide_BB_input_with_operator_returns_csscode_and_op():
+    from qldpc.codes._ide_fixtures import load_ide_BB_input_with_operator
+    code, x = load_ide_BB_input_with_operator()
+    # The operator vector must have nontrivial support
+    assert x.sum() > 0
+    # The operator must commute with all Z-stabilizers (so build_gadget accepts it)
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    assert ((HZ @ x) % 2 == 0).all(), "x is not in ker(HZ); build_gadget will reject it"
+
+
+@pytest.mark.skipif(
+    not __import__("qldpc.codes._ide_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
+    reason="Ide Zenodo fixtures not installed",
+)
+def test_load_ide_LP_input_with_operator_returns_csscode_and_op():
+    from qldpc.codes._ide_fixtures import load_ide_LP_input_with_operator
+    code, x = load_ide_LP_input_with_operator()
+    assert x.sum() > 0
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    assert ((HZ @ x) % 2 == 0).all()

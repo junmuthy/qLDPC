@@ -59,6 +59,13 @@ IDE_BB_LP_PORT = {
     41: 7, 17: 8, 37: 9, 13: 10, 50: 11, 51: 12, 31: 13,
 }
 
+#: LP V_0^(2) qubits for Ide's §VII.B Z̄_2 single PPM. Recovered from the
+#: 14 cross-block Vl rows in `Hz_LP_200_20_10_aux-graph-Z_2-deformed-code.mtx`
+#: (each row has data-weight 1; their support is V_0^(2)). These are NOT
+#: the same as `IDE_BB_LP_PORT.values()` — the port relabels them to
+#: {0..13} on the LP side of the joint code.
+IDE_LP_V0_2 = (24, 25, 26, 29, 30, 56, 58, 59, 60, 61, 90, 93, 94, 121)
+
 #: BB κ_1 edges in Ide's cellulated G_1 (23 edges = 21 spanning-tree + 2 cellulation).
 #: Maps κ_1 ancilla index → (v_a, v_b) ∈ V_0_1 × V_0_1 (sorted).
 IDE_BB_KAPPA1_EDGES = {
@@ -104,6 +111,64 @@ def build_joint_from_ide_fixture(example: str) -> CSSCode:
     import galois
     GF2 = galois.GF(2)
     return CSSCode(GF2(HX), GF2(HZ), is_subsystem_code=False)
+
+
+def load_ide_BB_input_with_operator() -> tuple[CSSCode, np.ndarray]:
+    """Return BB INPUT code (n=98) + pinned Z̄_1 logical operator (Ide §VII.B).
+
+    The operator support V_0^(1) is the set of vertices appearing in
+    `IDE_BB_KAPPA1_EDGES`. Z̄_1 is a Z-type logical, so its support
+    commutes with the X-stabilizers (HX @ V_0 = 0). The surgery framework
+    in this package expects ``x`` to be the support of an X-type logical
+    (so that ``HZ @ x = 0``); to use Ide's Z̄_1 directly we swap HX↔HZ
+    when constructing the CSSCode, turning the Z-logical surgery problem
+    into the equivalent X-logical one.
+    """
+    if not fixtures_available():
+        raise FileNotFoundError(
+            f"Zenodo fixtures not found at {_FIXTURE_ROOT}."
+        )
+    HX = load_mtx("BB_98_6_12/original_codes/Hx_BB_98_6_12_original-code-canonicalbasis.mtx")
+    HZ = load_mtx("BB_98_6_12/original_codes/Hz_BB_98_6_12_original-code-canonicalbasis.mtx")
+    import galois
+    GF2 = galois.GF(2)
+    # Swap HX <-> HZ so Ide's Z̄_1 support becomes an X-logical of the
+    # CSSCode (matches the framework's HZ @ x == 0 convention).
+    code = CSSCode(GF2(HZ.tolist()), GF2(HX.tolist()), is_subsystem_code=False)
+
+    V0 = sorted({v for edge in IDE_BB_KAPPA1_EDGES.values() for v in edge})
+    x = np.zeros(code.num_qudits, dtype=np.uint8)
+    for v in V0:
+        x[v] = 1
+    return code, x
+
+
+def load_ide_LP_input_with_operator() -> tuple[CSSCode, np.ndarray]:
+    """Return LP INPUT code (n=200) + pinned Z̄_2 logical operator (Ide §VII.B).
+
+    The operator support V_0^(2) is the constant `IDE_LP_V0_2` — the data
+    qubits appearing on the 14 Vl rows of Ide's published LP Z̄_2 single
+    deformed code. ``IDE_BB_LP_PORT.values()`` are *not* V_0^(2); they
+    are the relabelled positions {0..13} used on the LP side of the joint
+    code. As with the BB loader we swap HX↔HZ so Ide's Z̄_2 becomes an
+    X-logical of the returned CSSCode (matches the framework's
+    HZ @ x == 0 convention).
+    """
+    if not fixtures_available():
+        raise FileNotFoundError(
+            f"Zenodo fixtures not found at {_FIXTURE_ROOT}."
+        )
+    HX = load_mtx("LP_200_20_10/original_codes/Hx_LP_200_20_10_original-code.mtx")
+    HZ = load_mtx("LP_200_20_10/original_codes/Hz_LP_200_20_10_original-code.mtx")
+    import galois
+    GF2 = galois.GF(2)
+    # Swap HX <-> HZ (see load_ide_BB_input_with_operator for rationale).
+    code = CSSCode(GF2(HZ.tolist()), GF2(HX.tolist()), is_subsystem_code=False)
+
+    x = np.zeros(code.num_qudits, dtype=np.uint8)
+    for v in IDE_LP_V0_2:
+        x[v] = 1
+    return code, x
 
 
 def load_ide_skiptree_TPG(path: str) -> dict[str, np.ndarray]:
