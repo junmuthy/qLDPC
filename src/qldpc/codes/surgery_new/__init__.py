@@ -9,13 +9,8 @@ from qldpc.codes.surgery import (
     # public
     SurgeryLayout,
     JointSurgeryLayout,
-    BoostResult,
-    DistanceBoostResult,
     build_layered_surgery_code,
     build_joint_measurement_code,
-    boost_gadget_cheeger,
-    boost_gadget_cheeger_combinatorial,
-    boost_gadget_distance,
     load_webster_seed_set,
     # internals used by tests
     _restrict_to_logical_support,
@@ -24,8 +19,15 @@ from qldpc.codes.surgery import (
     _assemble_merged_HX,
     _assemble_merged_HZ,
     _build_generalised_bicycle_code,
-    _spectral_cheeger_lower_bound,
 )
 
 from .cellulation import _cellulate_long_cycles  # noqa: F401
 from .skiptree import _skip_tree  # noqa: F401
+from .cheeger import (  # noqa: F401
+    BoostResult,
+    DistanceBoostResult,
+    boost_gadget_cheeger,
+    boost_gadget_cheeger_combinatorial,
+    boost_gadget_distance,
+    _spectral_cheeger_lower_bound,
+)
