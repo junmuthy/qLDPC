@@ -112,3 +112,56 @@ To replicate Ide's joint stab group exactly:
 
 Total remaining: ~4-5 hours of focused reverse engineering. The decoded
 pieces above are durable artifacts even if the full decode isn't completed.
+
+## 8. Why LP-side is impossible to derive Webster-style (deeper investigation)
+
+After further analysis, the LP-side gap is **architectural**, not just a row
+basis difference:
+
+### Min-weight Z̄_2 of joint LP-side is weight 1
+
+Computing the minimum-weight Z-logical of joint H_X restricted to LP data
+cols (mod LP_original H_Z) yields a **weight-1 representative** at LP qubit
+**10** — which is one of the Vl port targets {0..13}.
+
+This means Ide's joint code does NOT preserve LP single Z̄_2 as a subcode.
+Instead:
+- The joint code's "logical Z̄_2 class" is collapsed to single-qubit Z on
+  one of the port LP qubits via the cross-block Vl stabs.
+- LP single Z̄_2's specific weight-14 representative is irrelevant to the
+  joint construction.
+
+### What Ide actually does on LP-side (interpreted)
+
+Ide's LP gadget is **gauge-fixed within the joint context**. Original LP
+X-stabs are deformed onto bridge qubits 341..354 (gaining bridge support
+to commute with the Vl rows). The 14 LP qubits {0..13} serve as the
+"adapter port" through which BB V_0_1 vertices connect.
+
+The construction does NOT build an independent LP single Z_2 gadget. The
+LP-side structure is integral to the joint code; it can't be projected out
+to recover LP single Z_2's deformed code.
+
+### Implications for our v3
+
+A Webster-style construction (build_layered_surgery_code per gadget +
+combine via bridge) **cannot match Ide's joint stab group**. Ide uses a
+different construction philosophy:
+
+> Build the joint code in one pass, with the gadget structure emerging
+> from the combined HX/HZ, rather than composing pre-built single-gadget
+> components.
+
+For project users:
+- **General inter-code joint** (works for any two codes): use
+  `build_joint_measurement_code_intercode(code1, op1, code2, op2,
+  cellulate=True)`. Produces [[n, k, d]] valid joint with k = k_1 + k_2 - 1.
+  Not stab-group-equivalent to Ide.
+- **Ide's specific paper code**: use `build_joint_from_ide_fixture("BB_LP")`
+  to load the Zenodo `.mtx` directly. The only practical path to
+  byte-equivalence with the paper.
+
+To algorithmically reproduce Ide's construction in general, one would need
+to derive the "deform original X-stabs to absorb the Vl/Vr role" algorithm
+from scratch, requiring careful analysis of Lemma 10's structure plus
+unwritten implementation details.
