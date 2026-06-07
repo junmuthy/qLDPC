@@ -1771,3 +1771,22 @@ def test_set_valued_port_qubits_not_in_any_support_omitted():
     assert 0 in port.qubit_to_gadgets
     assert 1 not in port.qubit_to_gadgets
     assert port.gadgets_for_qubit(1) == []
+
+
+def test_multi_surgery_layout_dataclass_fields():
+    from qldpc.codes.surgery import (
+        MultiSurgeryLayout, SetValuedPort, SurgeryLayout,
+    )
+    # Construct minimal placeholder values for the fields
+    base = None  # SurgeryLayout instance; placeholder for isolation test
+    port = SetValuedPort(qubit_to_gadgets={})
+    layout = MultiSurgeryLayout(
+        base_layout=base,
+        logical_ops=(np.zeros(5, dtype=int),),
+        set_valued_port=port,
+        chi_group_per_logical=((0,),),
+    )
+    assert layout.base_layout is base
+    assert layout.logical_ops[0].shape == (5,)
+    assert layout.set_valued_port is port
+    assert layout.chi_group_per_logical == ((0,),)

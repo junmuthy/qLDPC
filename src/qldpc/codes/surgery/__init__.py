@@ -52,3 +52,4 @@ from .joint import (  # noqa: F401
     _extend_chi_rows_with_bridge,
 )
 from .port import SetValuedPort  # noqa: F401
+from .multi import MultiSurgeryLayout  # noqa: F401
