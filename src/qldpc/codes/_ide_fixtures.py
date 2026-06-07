@@ -43,6 +43,33 @@ def load_ide_joint_BB_intracode() -> tuple[np.ndarray, np.ndarray]:
     return HX, HZ
 
 
+# =============================================================================
+# Reverse-engineered structural data from Ide BB-LP joint mtx (Zenodo).
+# See docs/superpowers/notes/2026-06-07-ide-reverse-engineering.md for full
+# decode notes. These constants encode the §VII B port function and the
+# BB-side X-stab deformation rule for the specific BB_1 Z̄_1 × LP_2 Z̄_2
+# example. They are not derivable from the paper text alone.
+# =============================================================================
+
+#: Port function (BB V_0_1 qubit → LP qubit at corresponding label) for the
+#: BB_1 Z̄_1 × LP_2 Z̄_2 inter-code joint. Recovered from the 14 cross-block
+#: HZ rows in the published joint matrix.
+IDE_BB_LP_PORT = {
+    6: 0, 8: 1, 32: 2, 33: 3, 93: 4, 35: 5, 36: 6,
+    41: 7, 17: 8, 37: 9, 13: 10, 50: 11, 51: 12, 31: 13,
+}
+
+#: BB κ_1 edges in Ide's cellulated G_1 (23 edges = 21 spanning-tree + 2 cellulation).
+#: Maps κ_1 ancilla index → (v_a, v_b) ∈ V_0_1 × V_0_1 (sorted).
+IDE_BB_KAPPA1_EDGES = {
+    0: (6, 50),   1: (6, 51),   2: (13, 93),  3: (13, 31),  4: (8, 32),
+    5: (8, 33),   6: (17, 35),  7: (36, 50),  8: (37, 51),  9: (17, 41),
+    10: (31, 32), 11: (32, 33), 12: (33, 93), 13: (6, 31),  14: (8, 50),
+    15: (41, 51), 16: (35, 41), 17: (35, 36), 18: (36, 37), 19: (13, 37),
+    20: (17, 93), 21: (33, 37), 22: (8, 13),
+}
+
+
 def build_joint_from_ide_fixture(example: str) -> CSSCode:
     """Return a CSSCode for one of Ide's two published joint deformed codes.
 
