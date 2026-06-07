@@ -46,4 +46,5 @@ from .joint import (  # noqa: F401
     _label_inverse,
     canonical_HR,
     _running_xor_b_c,
+    _chi_z_compatibility_check,
 )

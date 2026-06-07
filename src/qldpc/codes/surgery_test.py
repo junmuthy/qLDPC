@@ -1351,3 +1351,51 @@ def test_running_xor_b_c_solves_HRt_b_eq_Tcol():
     assert b[0] == 0
     product = (H_R @ b) % 2
     assert np.array_equal(product, T_col)
+
+
+@pytest.mark.skipif(not fixtures_available(), reason="Zenodo fixtures not present")
+def test_chi_z_compatibility_lemma_on_BB_LP():
+    """Numerically probe §4.7 lemma on BB_1 Z̄_1 + LP_2 Z̄_2.
+
+    Outcome decides Task 10 strategy:
+    - All violators == 0: Path A (simple alpha_v = e_label[v]).
+    - Any violator: Path B (linear-solve fallback).
+
+    The test does NOT assert ok==True; it records the outcome via print.
+    """
+    from qldpc.codes.surgery.joint import (
+        _build_auxiliary_graph,
+        _chi_z_compatibility_check,
+        _label_inverse,
+    )
+    from qldpc.codes.surgery import _skip_tree_hr
+
+    x, y = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), x**3 + y**3 + y**4, y**6 + x**2 + x**5)
+    z1 = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1[q] = 1
+    dual = codes.CSSCode(bb.matrix_z, bb.matrix_x, is_subsystem_code=False)
+    _, layout1 = build_layered_surgery_code(dual, z1, num_layers=1, validate_logical_op=False)
+    F1 = np.asarray(layout1.F).astype(int)
+
+    G1, edge_qubit_map_1 = _build_auxiliary_graph(F1)
+    span1 = nx.minimum_spanning_tree(G1)
+    T1, P1 = _skip_tree_hr(span1, root=0)
+    T1 = T1.astype(int)
+    P1 = P1.astype(int)
+    label_inv_1 = _label_inverse(P1)
+
+    ok, violators = _chi_z_compatibility_check(T1, label_inv_1)
+    total_pairs = len(label_inv_1) * T1.shape[1]
+    print(
+        f"\n=== chi-Z compatibility probe: BB_1 Z_1 ===\n"
+        f"  vertices in V_0: {len(label_inv_1)}\n"
+        f"  edges in G_1 (= T_1 cols): {T1.shape[1]}\n"
+        f"  total (v, c) pairs: {total_pairs}\n"
+        f"  violators: {len(violators)}\n"
+        f"  lemma holds: {ok}\n"
+    )
+    if not ok:
+        print(f"  First 10 violators: {violators[:10]}")
+    # Deliberately NOT asserting ok==True; the outcome informs Task 10.

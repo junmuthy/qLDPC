@@ -506,3 +506,44 @@ def _running_xor_b_c(T_col: np.ndarray) -> np.ndarray:
     for l in range(1, w):
         b[l] = (b[l - 1] + int(T_col[l - 1])) % 2
     return b
+
+
+def _chi_z_compatibility_check(
+    T_s: np.ndarray,
+    label_inv: list[int],
+) -> tuple[bool, list[tuple[int, int]]]:
+    """Numerical verification of the chi-Z bridge compatibility lemma (§4.7).
+
+    With alpha_v = e_{label[v]} (single-bit indicator on bridge) and
+    b_c[l] = running XOR of T_s[:l, c], chi-Z compatibility requires
+    b_c[label[v]] = 0 for every (v in V_0_s, c in C_0_s).
+
+    Equivalently: column c of T_s, when running-XOR'd, must have a zero
+    at every label-position. This determines whether the simple
+    single-bit chi extension suffices, or whether a linear-solve fallback
+    is needed (see Task 10 of the v3 plan).
+
+    Args:
+        T_s: shape (w-1, n_E). Output of SkipTree applied to G_s.
+        label_inv: list where label_inv[l] = vertex v in V_0_s.
+
+    Returns:
+        (all_zero, violators): all_zero is True iff b_c[label[v]] = 0 for all
+        (v, c). violators is a list of (v_idx, c_idx) pairs where the
+        identity fails.
+    """
+    w = T_s.shape[0] + 1
+    n_E = T_s.shape[1]
+    # B[l, c] = b_c[l] = running XOR of T_s[:l, c]
+    B = np.zeros((w, n_E), dtype=np.int_)
+    for c in range(n_E):
+        B[:, c] = _running_xor_b_c(T_s[:, c])
+    violators: list[tuple[int, int]] = []
+    for l, v in enumerate(label_inv):
+        # Iterating enumerate(label_inv) gives (l, v=label_inv[l]). We then
+        # check B[l, c] = 0 for each c, since b_c[label[v]] = b_c[l] when
+        # v = label_inv[l]. The reported pair is (v_idx, c_idx).
+        for c in range(n_E):
+            if B[l, c] != 0:
+                violators.append((v, c))
+    return len(violators) == 0, violators
