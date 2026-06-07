@@ -8,7 +8,7 @@ import galois
 import numpy as np
 
 from qldpc.codes.common import CSSCode
-from qldpc.codes.surgery import (  # NOTE: temporary — fixed in Task 5
+from .layered import (
     SurgeryLayout,
     _assemble_merged_HX,
     _assemble_merged_HZ,

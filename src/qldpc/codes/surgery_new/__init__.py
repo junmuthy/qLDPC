@@ -7,12 +7,16 @@ Public API is re-exported here for backwards compatibility with
 # Will be populated as modules are split out.
 from qldpc.codes.surgery import (
     # public
-    SurgeryLayout,
     JointSurgeryLayout,
-    build_layered_surgery_code,
     build_joint_measurement_code,
+)
+
+from .cellulation import _cellulate_long_cycles  # noqa: F401
+from .skiptree import _skip_tree  # noqa: F401
+from .layered import (  # noqa: F401
+    SurgeryLayout,
+    build_layered_surgery_code,
     load_webster_seed_set,
-    # internals used by tests
     _restrict_to_logical_support,
     _compute_gauge_fix,
     _build_layered_blocks,
@@ -20,9 +24,6 @@ from qldpc.codes.surgery import (
     _assemble_merged_HZ,
     _build_generalised_bicycle_code,
 )
-
-from .cellulation import _cellulate_long_cycles  # noqa: F401
-from .skiptree import _skip_tree  # noqa: F401
 from .cheeger import (  # noqa: F401
     BoostResult,
     DistanceBoostResult,
