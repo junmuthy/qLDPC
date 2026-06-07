@@ -42,4 +42,8 @@ from .joint import (  # noqa: F401
     _stitch_gadgets_with_bridge,
     _find_bridge_z_stab_data_logical,
     _solve_gf2_system,
+    _build_auxiliary_graph,
+    _label_inverse,
+    canonical_HR,
+    _running_xor_b_c,
 )

@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 
 import galois
+import networkx as nx
 import numpy as np
 import numpy.typing as npt
 
@@ -431,3 +432,74 @@ def build_joint_measurement_code(
         target_code, merged1, layout1, merged2, layout2, bridge, pauli_type=pauli_type,
     )
     return joint_merged, joint_layout
+
+
+# ---------------------------------------------------------------------------
+# v3 SkipTree bridge construction helpers (Tasks 8+ of v3 plan).
+# These are stateless helpers used by the v3 build_joint_measurement_code
+# implementation introduced in Task 13.
+# ---------------------------------------------------------------------------
+
+
+def _build_auxiliary_graph(
+    F: np.ndarray | galois.FieldArray,
+) -> tuple[nx.Graph, dict[int, tuple[int, int]]]:
+    """Build aux graph G_s from Webster F matrix.
+
+    Vertices = V_0_s (columns of F).
+    Edges = rows of F with weight exactly 2 (one per kappa_s ancilla qubit).
+    Returns G and a dict mapping kappa_s qubit index -> sorted (u, v) vertex pair.
+    """
+    F_arr = np.asarray(F).astype(int)
+    n_V = F_arr.shape[1]
+    G = nx.Graph()
+    G.add_nodes_from(range(n_V))
+    edge_qubit_to_vertices: dict[int, tuple[int, int]] = {}
+    for i, row in enumerate(F_arr):
+        eps = sorted(np.flatnonzero(row).tolist())
+        if len(eps) == 2:
+            u, v = eps[0], eps[1]
+            edge_qubit_to_vertices[i] = (u, v)
+            if not G.has_edge(u, v):
+                G.add_edge(u, v)
+    return G, edge_qubit_to_vertices
+
+
+def _label_inverse(P: np.ndarray) -> list[int]:
+    """Return list ``inv[l] = vertex v`` such that P[v, l] = 1.
+
+    P is a permutation matrix with exactly one 1 per row and per column.
+    """
+    n = P.shape[0]
+    inv = [-1] * n
+    for v in range(n):
+        for l in range(n):
+            if P[v, l] == 1:
+                inv[l] = v
+                break
+    return inv
+
+
+def canonical_HR(w: int) -> np.ndarray:
+    """Canonical (w-1) x w parity-check matrix of the length-w repetition code.
+
+    Row l: 1 at columns l and l+1, 0 elsewhere.
+    """
+    H = np.zeros((w - 1, w), dtype=np.int_)
+    for l in range(w - 1):
+        H[l, l] = 1
+        H[l, l + 1] = 1
+    return H
+
+
+def _running_xor_b_c(T_col: np.ndarray) -> np.ndarray:
+    """Compute b in F_2^w from T_col in F_2^{w-1} via running XOR.
+
+    Solves H_R^T b = T_col with the canonical choice b[0] = 0.
+    """
+    w_minus_1 = T_col.shape[0]
+    w = w_minus_1 + 1
+    b = np.zeros(w, dtype=np.int_)
+    for l in range(1, w):
+        b[l] = (b[l - 1] + int(T_col[l - 1])) % 2
+    return b

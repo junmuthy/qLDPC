@@ -11,6 +11,7 @@ import dataclasses
 import galois
 import numpy as np
 import pytest
+import sympy
 
 from qldpc import codes
 from qldpc.codes._ide_fixtures import (
@@ -1297,3 +1298,56 @@ def test_skip_tree_hr_gives_HR_basis():
         H_R[l, l + 1] = 1
     product = (T.astype(int) @ G_mat @ P.astype(int)) % 2
     assert np.array_equal(product, H_R)
+
+
+def test_build_auxiliary_graph_returns_simple_graph_of_V0():
+    """For BB_1 Z̄_1 wt 14, aux graph G_1 has 14 vertices."""
+    from qldpc.codes.surgery import build_layered_surgery_code
+    from qldpc.codes.surgery.joint import _build_auxiliary_graph
+    x, y = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), x**3 + y**3 + y**4, y**6 + x**2 + x**5)
+    z1_support = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1_support[q] = 1
+    dual = codes.CSSCode(bb.matrix_z, bb.matrix_x, is_subsystem_code=False)
+    _, layout = build_layered_surgery_code(dual, z1_support, num_layers=1, validate_logical_op=False)
+    G, edge_qubit_to_vertices = _build_auxiliary_graph(layout.F)
+    assert G.number_of_nodes() == 14
+    # Each edge_qubit_to_vertices entry maps a kappa qubit index to a sorted (u, v) pair.
+    for q_idx, (u, v) in edge_qubit_to_vertices.items():
+        assert 0 <= u < 14
+        assert 0 <= v < 14
+        assert u < v
+
+
+def test_label_inverse_round_trip():
+    from qldpc.codes.surgery.joint import _label_inverse
+    P = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=int)
+    # Vertex 0 has label 1, vertex 1 has label 0, vertex 2 has label 2
+    assert _label_inverse(P) == [1, 0, 2]
+
+
+def test_canonical_HR_is_path_graph_check():
+    from qldpc.codes.surgery.joint import canonical_HR
+    H = canonical_HR(4)
+    expected = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=int)
+    assert np.array_equal(H, expected)
+
+
+def test_running_xor_b_c_solves_HRt_b_eq_Tcol():
+    """b_c = running XOR of T[:, c] satisfies H_R b_c = T[:, c].
+
+    Note: the spec calls this "H_R^T b = T_col" but with H_R shaped (w-1) x w
+    the equation that holds is H_R @ b = T_col (row l of H_R has 1s at
+    columns l and l+1, so (H_R @ b)[l] = b[l] + b[l+1] = T_col[l]).
+    """
+    from qldpc.codes.surgery.joint import canonical_HR, _running_xor_b_c
+    w = 5
+    H_R = canonical_HR(w)
+    rng = np.random.default_rng(0)
+    T_col = rng.integers(0, 2, size=w - 1)
+    b = _running_xor_b_c(T_col)
+    assert b.shape == (w,)
+    assert b[0] == 0
+    product = (H_R @ b) % 2
+    assert np.array_equal(product, T_col)
