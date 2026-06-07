@@ -29,6 +29,7 @@ import sympy
 
 from qldpc import codes
 from qldpc.codes.surgery import build_layered_surgery_code
+from qldpc.objects import Pauli
 
 
 def build_bb1() -> codes.BBCode:
