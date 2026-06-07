@@ -20,3 +20,11 @@ def test_gadget_layout_is_frozen_dataclass():
         "code", "x", "V0", "C0", "F", "G",
         "HX_merged", "HZ_merged", "kappa_qubits",
     }
+    # Verify actually frozen: mutation must raise
+    inst = GadgetLayout(
+        code=None, x=None, V0=(), C0=(),
+        F=None, G=None, HX_merged=None, HZ_merged=None,
+        kappa_qubits=(),
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        inst.code = object()
