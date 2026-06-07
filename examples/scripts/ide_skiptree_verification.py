@@ -23,7 +23,8 @@ import numpy as np
 import sympy
 
 from qldpc import codes
-from qldpc.codes.surgery import _skip_tree, build_layered_surgery_code
+from qldpc.codes.surgery import build_gadget
+from qldpc.codes.surgery.bridge import _skip_tree
 
 
 def main():
@@ -42,9 +43,7 @@ def main():
     target_code = codes.CSSCode(
         bb1.matrix_z, bb1.matrix_x, is_subsystem_code=False
     )
-    _, layout = build_layered_surgery_code(
-        target_code, z1, num_layers=1, validate_logical_op=False
-    )
+    layout = build_gadget(target_code, z1)
     F = np.asarray(layout.F).astype(int)
     n_V = F.shape[1]
 

@@ -28,7 +28,7 @@ import numpy as np
 import sympy
 
 from qldpc import codes
-from qldpc.codes.surgery import build_layered_surgery_code
+from qldpc.codes.surgery import build_gadget
 from qldpc.objects import Pauli
 
 
@@ -80,12 +80,10 @@ def test_bb1_zlogical(name, support, ide_base):
     target_code = codes.CSSCode(
         bb1.matrix_z, bb1.matrix_x, is_subsystem_code=False
     )
-    merged, layout = build_layered_surgery_code(
-        target_code, vec, num_layers=1, validate_logical_op=False
-    )
-    n_k = int(layout.num_ancilla_qubits)
-    n_c = int(np.sum(layout.hx_row_kind != "data"))
-    n_g = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+    layout = build_gadget(target_code, vec)
+    n_k = len(layout.C0)
+    n_c = len(layout.V0)
+    n_g = layout.G.shape[0]
     raw_match = (n_k, n_c, n_g) == ide_base
     print(f"    Webster raw: (κ, χ, G) = ({n_k}, {n_c}, {n_g})")
 
@@ -177,12 +175,10 @@ def main() -> None:
             continue
         if ((HX_lp2 @ cur) % 2).sum() != 0:
             continue
-        merged, layout = build_layered_surgery_code(
-            target_code, cur, num_layers=1, validate_logical_op=False
-        )
-        n_k = int(layout.num_ancilla_qubits)
-        n_c = int(np.sum(layout.hx_row_kind != "data"))
-        n_g = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+        layout = build_gadget(target_code, cur)
+        n_k = len(layout.C0)
+        n_c = len(layout.V0)
+        n_g = layout.G.shape[0]
         if (n_k, n_c, n_g) == (20, 14, 7):
             print(f"  ✓ EXACT MATCH (κ=20, χ=14, G=7) at trial {trial}")
             print(f"    Support (qldpc indexing): {sorted(int(i) for i in np.flatnonzero(cur))}")

@@ -1,4 +1,14 @@
-"""Prototype Ide Lemma 10 adapter (full SkipTree bridge for Z̄_1 Z̄_2 measurement).
+"""DEPRECATED: this script depended on the legacy surgery API
+(_build_layered_blocks, layout.c0_indices, layout.num_layers,
+layout.hx_row_kind, layout.hz_row_kind, layout.num_ancilla_qubits)
+which was removed in feat/surgery-construction.
+
+# TODO: port to new API (build_gadget + GadgetLayout.{V0,C0,F,G})
+Will be ported as needed; for now skip execution.
+
+Original docstring preserved below:
+
+Prototype Ide Lemma 10 adapter (full SkipTree bridge for Z̄_1 Z̄_2 measurement).
 
 Ide arXiv:2410.03628 Lemma 10: Adapter X-cycle-check matrix N has rows:
 
@@ -13,13 +23,17 @@ vertex has EVEN incidence in any cycle).
 
 from __future__ import annotations
 
+import sys
+sys.exit(0)
+
 import galois
 import networkx as nx
 import numpy as np
 import sympy
 
 from qldpc import codes
-from qldpc.codes.surgery import _skip_tree, build_layered_surgery_code
+from qldpc.codes.surgery.bridge import _skip_tree
+from qldpc.codes.surgery import build_gadget
 from qldpc.objects import Pauli
 
 

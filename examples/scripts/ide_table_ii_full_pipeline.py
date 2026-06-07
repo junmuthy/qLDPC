@@ -18,7 +18,8 @@ import sympy
 
 from qldpc import codes
 from qldpc.abstract import CyclicGroup, GroupRing, RingArray
-from qldpc.codes.surgery import _cellulate_long_cycles, build_layered_surgery_code
+from qldpc.codes.surgery import build_gadget
+from qldpc.codes.surgery.bridge import _cellulate_long_cycles
 from qldpc.objects import Pauli
 
 
@@ -46,18 +47,16 @@ def build_lp2() -> codes.LPCode:
 
 
 def webster_gadget(code, target_op):
-    """Run build_layered_surgery_code on ZX-dual for Z̄ measurement."""
+    """Run build_gadget on ZX-dual for Z̄ measurement."""
     dual = codes.CSSCode(code.matrix_z, code.matrix_x, is_subsystem_code=False)
-    merged, layout = build_layered_surgery_code(
-        dual, target_op, num_layers=1, validate_logical_op=False
-    )
-    return merged, layout
+    layout = build_gadget(dual, target_op)
+    return None, layout
 
 
 def gadget_stats(layout):
-    n_k = int(layout.num_ancilla_qubits)
-    n_c = int(np.sum(layout.hx_row_kind != "data"))
-    n_g = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+    n_k = len(layout.C0)
+    n_c = len(layout.V0)
+    n_g = layout.G.shape[0]
     return n_k, n_c, n_g
 
 
