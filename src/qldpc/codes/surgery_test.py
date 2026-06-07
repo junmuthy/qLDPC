@@ -1790,3 +1790,21 @@ def test_multi_surgery_layout_dataclass_fields():
     assert layout.logical_ops[0].shape == (5,)
     assert layout.set_valued_port is port
     assert layout.chi_group_per_logical == ((0,),)
+
+
+def test_multi_target_disjoint_pair_steane():
+    """Two-element list with same Z-logical twice (degenerate): k drops by 1, not 2."""
+    from qldpc.codes.surgery import build_multi_target_surgery_code
+    steane = codes.SteaneCode()
+    z_logical = np.asarray(steane.get_logical_ops(Pauli.Z)).astype(int)[0]
+    # Steane has k=1; measuring same logical twice is degenerate (k_data - 1 = 0)
+    merged, layout = build_multi_target_surgery_code(
+        steane, [z_logical], validate=False,
+    )
+    assert merged.dimension == steane.dimension - 1
+    assert len(layout.logical_ops) == 1
+    assert len(layout.chi_group_per_logical) == 1
+    # Single logical's chi group = all chi rows
+    n_x_data = int(np.sum(layout.base_layout.hx_row_kind == "data"))
+    n_chi = int(np.sum(layout.base_layout.hx_row_kind != "data"))
+    assert layout.chi_group_per_logical[0] == tuple(range(n_x_data, n_x_data + n_chi))
