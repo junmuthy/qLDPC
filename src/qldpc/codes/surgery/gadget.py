@@ -98,3 +98,20 @@ def _step3_assemble(
     ]).astype(np.uint8)
 
     return HX_merged, HZ_merged
+
+
+def build_gadget(code: CSSCode, x: np.ndarray) -> GadgetLayout:
+    """Webster L=1 gadget = steps 1+2+3 composed. Deterministic in (code, x)."""
+    x = np.asarray(x).astype(np.uint8)
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    if ((HZ @ x) % 2).any():
+        raise ValueError("x is not a logical-X support (H_Z @ x != 0).")
+
+    V0, C0, F = _step1_restriction(code, x)
+    G = _step2_gauge_fix(F)
+    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G)
+    kappa_qubits = tuple(range(code.num_qudits, code.num_qudits + len(C0)))
+    return GadgetLayout(
+        code=code, x=x, V0=V0, C0=C0, F=F, G=G,
+        HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
+    )

@@ -168,3 +168,41 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
             f"row j={j} of HZ kappa-block should have exactly 1 one (indicator form), "
             f"got {row_sum} — F_tilde indicator form violated"
         )
+
+
+def test_build_gadget_steane_returns_valid_layout():
+    from qldpc.codes.surgery.gadget import build_gadget, GadgetLayout
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    assert isinstance(g, GadgetLayout)
+    assert g.code is code
+    assert np.array_equal(g.x, x)
+    # κ qubits indexed contiguously after data qubits
+    assert g.kappa_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.C0)))
+
+
+def test_build_gadget_deterministic():
+    from qldpc.codes.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g1 = build_gadget(code, x)
+    g2 = build_gadget(code, x)
+    assert g1.V0 == g2.V0
+    assert g1.C0 == g2.C0
+    assert np.array_equal(g1.F, g2.F)
+    assert np.array_equal(g1.G, g2.G)
+    assert np.array_equal(g1.HX_merged, g2.HX_merged)
+    assert np.array_equal(g1.HZ_merged, g2.HZ_merged)
+    assert g1.kappa_qubits == g2.kappa_qubits
+
+
+def test_build_gadget_rejects_non_x_logical():
+    from qldpc.codes.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    x = np.zeros(code.num_qudits, dtype=np.uint8)
+    x[0] = 1  # not a logical X (HZ @ x ≠ 0 in general)
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    if ((HZ @ x) % 2).any():
+        with pytest.raises(ValueError, match="logical"):
+            build_gadget(code, x)
