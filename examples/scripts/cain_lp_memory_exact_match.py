@@ -8,8 +8,8 @@ the bb_18 Resource match:
   1. Build lp_20^{3,7} from Cain App. A Eq A7 (l=75, 3×7 seed matrix).
   2. Find a weight-200 X̄ representative as a product of multiple
      single-logical X̄'s + greedy stab reduction.
-  3. Run build_layered_surgery_code (Webster 3-step gadget).
-  4. Apply boost_gadget_cheeger (spectral) with target_h=100 and
+  3. Run build_gadget (Webster 3-step gadget).
+  4. Apply boost_gadget (method='spectral') with target=100 and
      max_extra_qubits=46, seed=0 → adds exactly 46 κ qubits to reach Cain.
   5. Verify final gadget has (κ, χ, G) = (342, 200, 143).
 """
@@ -22,10 +22,7 @@ import time
 
 from qldpc import codes
 from qldpc.abstract import CyclicGroup, GroupRing, RingArray
-from qldpc.codes.surgery import (
-    boost_gadget_cheeger,
-    build_layered_surgery_code,
-)
+from qldpc.codes.surgery import build_gadget, boost_gadget
 from qldpc.objects import Pauli
 
 
@@ -111,21 +108,19 @@ def find_matching_bare_then_boost(
                 break
         if int(cur.sum()) != target_chi:
             continue
-        merged, layout = build_layered_surgery_code(
-            code, cur, num_layers=1, validate_logical_op=False
-        )
-        n_k_bare = int(layout.num_ancilla_qubits)
-        n_g_bare = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+        g = build_gadget(code, cur)
+        n_k_bare = len(g.kappa_qubits)
+        n_g_bare = g.G.shape[0]
         add = target_kappa - n_k_bare
         if add <= 0 or add > 80:
             continue
         for seed in range(max_seed_trials):
-            _, b_layout, _ = boost_gadget_cheeger(
-                merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
+            boosted_g = boost_gadget(
+                g, method='spectral', target=100.0, max_extra_qubits=add, seed=seed,
             )
-            n_kb = int(b_layout.num_ancilla_qubits)
-            n_chi_b = int(np.sum(b_layout.hx_row_kind != "data"))
-            n_gb = int(np.sum(b_layout.hz_row_kind == "gauge_fix"))
+            n_kb = len(boosted_g.kappa_qubits)
+            n_chi_b = len(boosted_g.V0)
+            n_gb = boosted_g.G.shape[0]
             if (n_kb, n_chi_b, n_gb) == target_cain:
                 return n_k_bare, n_g_bare, add, seed, trial
     raise RuntimeError("No exact match found within trial budget")

@@ -9,7 +9,7 @@ Cain interpretation (per Cain §"Concrete construction"):
   Pipeline (low-rate surgery on a high-weight P̄):
   1. Build lp_20^{3,5} [[1122, 148]] from Cain App. A Eq A3.
   2. Find P̄ with logical wt 69 AND physical wt 460 via random subset+stab search.
-  3. build_layered_surgery_code(lp_dual, P̄)  — single PPM.
+  3. build_gadget(lp_dual, P̄)  — single PPM Webster gadget.
   4. RANK-BOUNDED Cheeger boost. Random degree-2 boost saturates F's rank too
      fast (gives G=354 vs target 357). We constrain it: stop accepting rank-
      increasing edges once rank growth equals target_rank_growth (=7 here),
@@ -31,23 +31,28 @@ import _cain_helpers as h
 from qldpc import codes
 from qldpc.abstract import CyclicGroup, GroupRing, RingArray
 from qldpc.codes.common import CSSCode
-from qldpc.codes.surgery import build_layered_surgery_code
-from qldpc.codes.surgery.cheeger import _reassemble_gadget_with_new_F
+from qldpc.codes.surgery import build_gadget
+from qldpc.codes.surgery.cheeger import (
+    _gadget_to_legacy_layout,
+    _legacy_to_gadget,
+    _reassemble_gadget_with_new_F,
+)
 from qldpc.objects import Pauli
 
 GF2 = galois.GF(2)
 
 
-def rank_bounded_boost(
-    merged: CSSCode, layout, *, add: int, max_rank_increase: int, seed: int = 0,
-) -> tuple[CSSCode, "object"]:
+def rank_bounded_boost(gadget, *, add: int, max_rank_increase: int, seed: int = 0):
     """Cheeger-style boost capped on rank growth.
 
-    Like boost_gadget_cheeger but rejects an edge that would push rank(F)
-    beyond rank_initial + max_rank_increase. This lets us hit Cain's exact
-    G value: G_final = κ_final - rank_final, and we want rank_final to be
-    a specific value, not "as high as random gets."
+    Like boost_gadget(method='spectral') but rejects an edge that would push
+    rank(F) beyond rank_initial + max_rank_increase. This lets us hit Cain's
+    exact G value: G_final = κ_final - rank_final, and we want rank_final to
+    be a specific value, not "as high as random gets."
+
+    Takes a GadgetLayout (new API) and returns a GadgetLayout.
     """
+    merged, layout = _gadget_to_legacy_layout(gadget)
     rng = np.random.default_rng(seed)
     field = layout.F.__class__
     F = np.asarray(layout.F).astype(np.int_).copy()
@@ -75,7 +80,10 @@ def rank_bounded_boost(
         extra += 1
 
     augmented_F = field(F)
-    return _reassemble_gadget_with_new_F(merged, layout, augmented_F, extra)
+    boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
+        merged, layout, augmented_F, extra,
+    )
+    return _legacy_to_gadget(boosted_merged, boosted_layout, gadget)
 
 
 TARGET = (813, 460, 357)
@@ -189,12 +197,10 @@ def main() -> None:
     else:
         print(f"  found P̄ with physical weight {int(op.sum())} = {TARGET_PHYSICAL_WEIGHT}")
 
-    print("\nStep 2: build_layered_surgery_code(lp_dual, P̄)  [single-PPM Webster]")
+    print("\nStep 2: build_gadget(lp_dual, P̄)  [single-PPM Webster]")
     lp_dual = CSSCode(lp.matrix_z, lp.matrix_x, is_subsystem_code=False)
-    merged, layout = build_layered_surgery_code(
-        lp_dual, op, num_layers=1, validate_logical_op=False,
-    )
-    bare_shape = h.gadget_shape(layout)
+    g = build_gadget(lp_dual, op)
+    bare_shape = h.gadget_shape(g)
     print(f"  Bare gadget: (kappa, chi, G) = {bare_shape}")
     add = TARGET[0] - bare_shape[0]
     if add < 0:
@@ -212,10 +218,10 @@ def main() -> None:
     from tqdm import tqdm
     pbar = tqdm(range(MAX_BOOST_SEEDS), desc="boost seed sweep")
     for seed in pbar:
-        _, b_layout = rank_bounded_boost(
-            merged, layout, add=add, max_rank_increase=target_rank_growth, seed=seed,
+        boosted_g = rank_bounded_boost(
+            g, add=add, max_rank_increase=target_rank_growth, seed=seed,
         )
-        shape = h.gadget_shape(b_layout)
+        shape = h.gadget_shape(boosted_g)
         pbar.set_postfix({"shape": str(shape)})
         if shape == TARGET:
             pbar.close()

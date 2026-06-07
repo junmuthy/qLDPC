@@ -12,8 +12,8 @@ Cain interpretation:
   Pipeline (single-PPM low-rate surgery):
   1. Build lp_24^{3,7} [[5278, 1480]] from Cain App. A Eq A9.
   2. Find a wt-208 single-logical-qubit Z̄ representative (basis logical + stab reduction).
-  3. build_layered_surgery_code(lp_dual, Z̄)  — single PPM.
-  4. Cheeger boost seed sweep until (κ, χ, G) = (364, 208, 157).
+  3. build_gadget(lp_dual, Z̄)  — single PPM Webster gadget.
+  4. boost_gadget seed sweep (method='spectral') until (κ, χ, G) = (364, 208, 157).
 """
 
 from __future__ import annotations
@@ -31,10 +31,7 @@ import _cain_helpers as h
 from qldpc import codes
 from qldpc.abstract import CyclicGroup, GroupRing, RingArray
 from qldpc.codes.common import CSSCode
-from qldpc.codes.surgery import (
-    boost_gadget_cheeger,
-    build_layered_surgery_code,
-)
+from qldpc.codes.surgery import build_gadget, boost_gadget
 from qldpc.objects import Pauli
 
 
@@ -151,26 +148,24 @@ def main() -> None:
         return
     print(f"  ✓ found wt-{TARGET_WEIGHT} rep in {time.time()-t0:.1f}s")
 
-    print("\nStep 2: build_layered_surgery_code(lp_dual, Z̄)  [single-PPM Webster]")
+    print("\nStep 2: build_gadget(lp_dual, Z̄)  [single-PPM Webster]")
     lp_dual = CSSCode(lp.matrix_z, lp.matrix_x, is_subsystem_code=False)
-    merged, layout = build_layered_surgery_code(
-        lp_dual, op, num_layers=1, validate_logical_op=False,
-    )
-    bare_shape = h.gadget_shape(layout)
+    g = build_gadget(lp_dual, op)
+    bare_shape = h.gadget_shape(g)
     print(f"  Bare gadget: (κ, χ, G) = {bare_shape}")
     add = TARGET[0] - bare_shape[0]
     print(f"  Need to add {add} qubits via Cheeger boost (force exact count)")
 
-    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1}), "
+    print(f"\nStep 3: boost_gadget seed sweep (method='spectral', 0..{MAX_BOOST_SEEDS - 1}), "
           f"max_extra_qubits={add}")
     t0 = time.time()
     from tqdm import tqdm
     pbar = tqdm(range(MAX_BOOST_SEEDS), desc="boost seed sweep")
     for seed in pbar:
-        _, b_layout, _result = boost_gadget_cheeger(
-            merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
+        boosted_g = boost_gadget(
+            g, method='spectral', target=100.0, max_extra_qubits=add, seed=seed,
         )
-        shape = h.gadget_shape(b_layout)
+        shape = h.gadget_shape(boosted_g)
         pbar.set_postfix({"shape": str(shape)})
         if shape == TARGET:
             pbar.close()

@@ -3,7 +3,8 @@
 - find_low_weight_z_rep: BP+OSD-style greedy reduction toward target weight
 - combine_z_logicals: XOR multiple Z-logicals, with optional stab reduction
 - enumerate_z_logical_subsets: yields (k choose t) combos of basis Z-logicals
-- gadget_shape: returns (κ, χ, G) tuple for a (merged, SurgeryLayout) pair
+- gadget_shape: returns (κ, χ, G) tuple for a GadgetLayout (new API)
+  or a legacy SurgeryLayout (old API, kept for backwards compat in scripts).
 """
 
 from __future__ import annotations
@@ -20,14 +21,25 @@ GF2 = galois.GF(2)
 
 def gadget_shape(layout) -> tuple[int, int, int]:
     """Return (κ, χ, G) where:
-      κ = layout.num_ancilla_qubits  (total ancilla qubits)
-      χ = number of chi rows = layout.v0_indices.size
-      G = number of gauge-fix Z rows = (κ − rank(F))
+      κ = number of ancilla (kappa) qubits
+      χ = number of chi (X-check) rows in the ancilla block = |V0|
+      G = number of gauge-fix Z rows = κ − rank(F)
+
+    Accepts both the new GadgetLayout (from build_gadget / boost_gadget) and
+    the legacy SurgeryLayout (from the old build_layered_surgery_code API).
     """
     F = np.asarray(layout.F).astype(int)
     rank_F = int(np.linalg.matrix_rank(GF2(F)))
-    n_kappa = int(layout.num_ancilla_qubits)
-    n_chi = int(layout.v0_indices.size)
+
+    # New API: GadgetLayout has .kappa_qubits (tuple) and .V0 (tuple).
+    if hasattr(layout, "kappa_qubits"):
+        n_kappa = len(layout.kappa_qubits)
+        n_chi = len(layout.V0)
+    else:
+        # Legacy SurgeryLayout: .num_ancilla_qubits and .v0_indices.
+        n_kappa = int(layout.num_ancilla_qubits)
+        n_chi = int(layout.v0_indices.size)
+
     n_gauge = n_kappa - rank_F
     return (n_kappa, n_chi, n_gauge)
 

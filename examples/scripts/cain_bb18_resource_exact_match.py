@@ -9,8 +9,8 @@ This script reproduces those numbers EXACTLY using our pipeline:
      a = 1 + x^6 y + x^27, b = y^2 + x^15 y^3 + x^24).
   2. Use BP+OSD + greedy stab reduction to find a weight-20 Z̄
      representative (matching χ = 20 X-checks count).
-  3. Run build_layered_surgery_code (Webster §II.A 3-step gadget).
-  4. Apply boost_gadget_cheeger_combinatorial (target_h=1.0, greedy
+  3. Run build_gadget (Webster §II.A 3-step gadget).
+  4. Apply boost_gadget (method='combinatorial', target_h=1.0, greedy
      algorithm using exact boundary Cheeger constant).
   5. Verify final gadget has (κ, χ, G) = (39, 20, 20).
 """
@@ -22,10 +22,7 @@ import sympy
 
 from qldpc import codes, decoders
 from qldpc.codes.common import get_random_array
-from qldpc.codes.surgery import (
-    boost_gadget_cheeger_combinatorial,
-    build_layered_surgery_code,
-)
+from qldpc.codes.surgery import build_gadget, boost_gadget
 from qldpc.objects import Pauli
 
 
@@ -85,27 +82,24 @@ def main() -> None:
     print(f"        Found wt(Z̄) = {int(vec_20.sum())} ✓")
 
     print()
-    print("Step 3: build_layered_surgery_code (Webster §II.A 3-step gadget)")
+    print("Step 3: build_gadget (Webster §II.A 3-step gadget)")
     target_code = codes.CSSCode(
         bb18.matrix_z, bb18.matrix_x, is_subsystem_code=False
     )
-    merged, layout = build_layered_surgery_code(
-        target_code, vec_20, num_layers=1, validate_logical_op=False
-    )
-    n_kappa = int(layout.num_ancilla_qubits)
-    n_chi = int(np.sum(layout.hx_row_kind != "data"))
-    n_gauge = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+    g = build_gadget(target_code, vec_20)
+    n_kappa = len(g.kappa_qubits)
+    n_chi = len(g.V0)
+    n_gauge = g.G.shape[0]
     print(f"        Bare gadget: (κ={n_kappa}, χ={n_chi}, G={n_gauge})")
 
     print()
-    print("Step 4: boost_gadget_cheeger_combinatorial (greedy Cheeger boost)")
-    boosted, b_layout, result = boost_gadget_cheeger_combinatorial(
-        merged, layout, target_h=1.0, max_extra_qubits=20, seed=3,
-    )
-    n_kb = int(b_layout.num_ancilla_qubits)
-    n_chi_b = int(np.sum(b_layout.hx_row_kind != "data"))
-    n_gb = int(np.sum(b_layout.hz_row_kind == "gauge_fix"))
-    print(f"        Boost added +{result.extra_qubits_added} qubits to reach h(F) ≥ 1")
+    print("Step 4: boost_gadget (method='combinatorial', greedy Cheeger boost)")
+    boosted_g = boost_gadget(g, method='combinatorial', target=1.0, max_extra_qubits=20, seed=3)
+    n_kb = len(boosted_g.kappa_qubits)
+    n_chi_b = len(boosted_g.V0)
+    n_gb = boosted_g.G.shape[0]
+    extra_added = n_kb - n_kappa
+    print(f"        Boost added +{extra_added} qubits to reach h(F) ≥ 1")
     print(f"        Boosted gadget: (κ={n_kb}, χ={n_chi_b}, G={n_gb})")
 
     print()
