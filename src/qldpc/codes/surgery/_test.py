@@ -481,3 +481,33 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
     )
     samples = circuit.compile_detector_sampler().sample(shots=200)
     assert samples.any()  # at least one detector fires under noise
+
+
+def test_boost_gadget_dispatches_to_three_methods():
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, GadgetLayout, load_webster_seed_set,
+        _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.cheeger import boost_gadget
+    # Use Webster code 0 (l=31, k>=2): Steane gadget has dimension 0 (Steane
+    # k=1 minus 1 gadget-consumed logical), which causes the BP+OSD decoder
+    # used by boost_gadget_distance to hang searching for nonexistent logicals.
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x = _webster_x_bar_1_operator(data)
+    g = build_gadget(code, x)
+    for method in ("spectral", "combinatorial", "distance"):
+        out = boost_gadget(g, method=method, target=1.0, seed=42)
+        assert isinstance(out, GadgetLayout), f"method={method}"
+
+
+def test_boost_gadget_seed_reproducible():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.cheeger import boost_gadget
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    a = boost_gadget(g, method="spectral", target=1.0, seed=42)
+    b = boost_gadget(g, method="spectral", target=1.0, seed=42)
+    assert np.array_equal(a.F, b.F)
+    assert np.array_equal(a.HX_merged, b.HX_merged)

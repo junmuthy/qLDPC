@@ -641,3 +641,95 @@ def boost_gadget_distance(
         trials_attempted=trials_attempted,
         terminated_by="max_qubits_exhausted",
     )
+
+
+def _gadget_to_legacy_layout(g):
+    """Convert a GadgetLayout into the legacy (CSSCode, SurgeryLayout) pair
+    consumed by boost_gadget_cheeger* / boost_gadget_distance."""
+    F2 = galois.GF(2)
+    n = g.code.num_qudits
+    n_anc = len(g.C0)
+    merged = CSSCode(
+        F2(np.asarray(g.HX_merged).astype(np.int_).tolist()),
+        F2(np.asarray(g.HZ_merged).astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_layer = np.array([0] * n + [1] * n_anc, dtype=np.int_)
+    mX = g.code.matrix_x.shape[0]
+    hx_row_kind = np.array(
+        ["data"] * mX + ["ancilla_L1"] * len(g.V0), dtype=object
+    )
+    mZ = g.code.matrix_z.shape[0]
+    hz_row_kind = np.array(
+        ["data"] * mZ + ["gauge_fix"] * g.G.shape[0], dtype=object
+    )
+    layout = SurgeryLayout(
+        num_data_qubits=n,
+        num_ancilla_qubits=n_anc,
+        num_layers=1,
+        qubit_layer=qubit_layer,
+        v0_indices=np.array(g.V0, dtype=np.int_),
+        c0_indices=np.array(g.C0, dtype=np.int_),
+        F=F2(np.asarray(g.F).astype(np.int_).tolist()),
+        G=F2(np.asarray(g.G).astype(np.int_).tolist()),
+        hx_row_kind=hx_row_kind,
+        hz_row_kind=hz_row_kind,
+    )
+    return merged, layout
+
+
+def _legacy_to_gadget(merged: CSSCode, layout: SurgeryLayout, original_g):
+    """Reconstruct a GadgetLayout from a boost result (merged + legacy SurgeryLayout)."""
+    HX_m = np.asarray(merged.matrix_x).astype(np.uint8)
+    HZ_m = np.asarray(merged.matrix_z).astype(np.uint8)
+    F_new = np.asarray(layout.F).astype(np.uint8)
+    G_new = np.asarray(layout.G).astype(np.uint8)
+    n = original_g.code.num_qudits
+    n_anc_new = HX_m.shape[1] - n
+    kappa_qubits = tuple(range(n, n + n_anc_new))
+    return dataclasses.replace(
+        original_g,
+        F=F_new, G=G_new,
+        HX_merged=HX_m, HZ_merged=HZ_m,
+        kappa_qubits=kappa_qubits,
+    )
+
+
+def boost_gadget(
+    gadget,
+    *,
+    method: str,
+    target: float,
+    seed: int | None = None,
+    **kwargs,
+):
+    """Single entry point for Cheeger / distance boost.
+
+    Args:
+        gadget: a GadgetLayout from build_gadget.
+        method: 'spectral' | 'combinatorial' | 'distance'.
+        target: target Cheeger constant (for spectral / combinatorial) or
+            target distance (for distance method; cast via int(target)).
+        seed: RNG seed.
+        **kwargs: forwarded to the underlying boost function.
+
+    Returns:
+        A NEW GadgetLayout with boosted F, G, HX_merged, HZ_merged,
+        kappa_qubits.
+    """
+    merged0, layout0 = _gadget_to_legacy_layout(gadget)
+    if method == "spectral":
+        boosted_merged, boosted_layout, _ = boost_gadget_cheeger(
+            merged0, layout0, target_h=target, seed=seed, **kwargs,
+        )
+    elif method == "combinatorial":
+        boosted_merged, boosted_layout, _ = boost_gadget_cheeger_combinatorial(
+            merged0, layout0, target_h=target, seed=seed, **kwargs,
+        )
+    elif method == "distance":
+        boosted_merged, boosted_layout, _ = boost_gadget_distance(
+            merged0, layout0, target_distance=int(target), seed=seed, **kwargs,
+        )
+    else:
+        raise ValueError(f"unknown method: {method!r}")
+    return _legacy_to_gadget(boosted_merged, boosted_layout, gadget)
