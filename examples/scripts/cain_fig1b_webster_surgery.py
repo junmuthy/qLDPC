@@ -26,13 +26,13 @@ import stim
 
 from qldpc import circuits, codes, decoders
 from qldpc.codes.surgery import (
-    _build_bridge_via_skiptree,
-    _build_generalised_bicycle_code,
-    _stitch_gadgets_with_bridge,
-    boost_gadget_cheeger_combinatorial,
-    build_layered_surgery_code,
+    boost_gadget,
+    build_bridge,
+    build_gadget,
     load_webster_seed_set,
 )
+from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+from qldpc.codes.surgery.gadget import _build_generalised_bicycle_code
 from qldpc.objects import Pauli
 
 
@@ -55,22 +55,12 @@ def build_webster_code_0() -> tuple[codes.CSSCode, codes.CSSCode]:
     op1 = _support_to_vec(x_seeds[0], data["l"])
     op2 = _support_to_vec(x_seeds[1], data["l"])
 
-    m1, l1 = build_layered_surgery_code(
-        data_code, op1, num_layers=1, validate_logical_op=False
-    )
-    m2, l2 = build_layered_surgery_code(
-        data_code, op2, num_layers=1, validate_logical_op=False
-    )
-    m1b, l1b, _ = boost_gadget_cheeger_combinatorial(
-        m1, l1, target_h=1.0, max_extra_qubits=10, seed=42
-    )
-    m2b, l2b, _ = boost_gadget_cheeger_combinatorial(
-        m2, l2, target_h=1.0, max_extra_qubits=10, seed=42
-    )
-    bridge = _build_bridge_via_skiptree(l1b, l2b)
-    joint, _ = _stitch_gadgets_with_bridge(
-        data_code, m1b, l1b, m2b, l2b, bridge, pauli_type=Pauli.X
-    )
+    g1 = build_gadget(data_code, op1)
+    g2 = build_gadget(data_code, op2)
+    g1_boosted = boost_gadget(g1, method='combinatorial', target=1.0, max_extra_qubits=10, seed=42)
+    g2_boosted = boost_gadget(g2, method='combinatorial', target=1.0, max_extra_qubits=10, seed=42)
+    bridge = build_bridge(g1_boosted, g2_boosted)
+    joint = _stitch_to_joint_csscode(g1_boosted, g2_boosted, bridge)
     return data_code, joint
 
 
