@@ -1399,3 +1399,108 @@ def test_chi_z_compatibility_lemma_on_BB_LP():
     if not ok:
         print(f"  First 10 violators: {violators[:10]}")
     # Deliberately NOT asserting ok==True; the outcome informs Task 10.
+
+
+def test_solve_chi_z_bridge_choices_on_BB_constraint():
+    """Probe the (gamma, delta) joint linear system on BB_1 Z_1.
+
+    Current status: BLOCKED. On BB_1 Z_1 the F_2 system
+
+        sigma_c * gamma_v + delta_c = a_{v, c}     (a_{v, c} = canonical(c)[label[v]])
+
+    is **infeasible** — rank(A) = 26 vs rank([A|rhs]) = 27 in a 14+13=27
+    variable, 14*13=182 equation system.
+
+    Diagnostics (kept here so the math team can re-test after a redesign):
+
+    - 4 columns have sigma_c = 0 (c in {0, 2, 9, 11}); each forces
+      delta_c = a[v, c] for **all** v, but a[:, c] is non-constant
+      (e.g. column 0 has 10 zeros vs 4 ones).
+    - In the 9 columns with sigma_c = 1, 85 vertex pairs (v, v') produce
+      contradictory constraints gamma_v + gamma_v' = a[v, c] + a[v', c]
+      that disagree across different c.
+
+    So the simple "alpha_v = e_{label[v]} + gamma * 1, b_c = canonical + delta * 1"
+    two-bit-per-row ansatz is insufficient: chi-Z compatibility on BB_1 Z_1
+    needs a richer joint construction (per-vertex F_2^w freedom beyond a
+    single all-ones offset, or a different bridge structure).
+
+    Test is asserted-soft (probe) so downstream tasks remain unblocked while
+    the math team designs the corrected construction.
+    """
+    from qldpc.codes.surgery.joint import (
+        _build_auxiliary_graph,
+        _label_inverse,
+        _solve_chi_z_bridge_choices,
+    )
+    from qldpc.codes.surgery import _skip_tree_hr
+    x, y = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), x**3 + y**3 + y**4, y**6 + x**2 + x**5)
+    z1 = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1[q] = 1
+    dual = codes.CSSCode(bb.matrix_z, bb.matrix_x, is_subsystem_code=False)
+    _, layout = build_layered_surgery_code(dual, z1, num_layers=1, validate_logical_op=False)
+    F = np.asarray(layout.F).astype(int)
+    G, _ = _build_auxiliary_graph(F)
+    span = nx.minimum_spanning_tree(G)
+    T, P = _skip_tree_hr(span, root=0)
+    T = T.astype(int)
+    P = P.astype(int)
+    label_inv = _label_inverse(P)
+    try:
+        gamma, delta = _solve_chi_z_bridge_choices(T, label_inv)
+    except ValueError as e:
+        # Expected on BB_1 Z_1 with the current (alpha_v, b_c) ansatz.
+        msg = str(e)
+        assert "infeasible" in msg or "no solution" in msg
+        print(f"BB_1 Z_1 chi-Z joint system infeasible (expected): {msg}")
+        return
+    # If a future construction makes this feasible, verify shapes.
+    assert gamma.shape == (14,)
+    assert delta.shape == (13,)
+    assert set(int(v) for v in gamma).issubset({0, 1})
+    assert set(int(v) for v in delta).issubset({0, 1})
+    print(f"BB_1 Z_1 chi-Z joint solution: gamma={list(map(int, gamma))}, "
+          f"delta={list(map(int, delta))}")
+
+
+def test_extend_chi_rows_with_bridge_uses_gamma():
+    """Synthetic test: gamma=0 vector → alpha_v = e_{label[v]} (no all-ones flip)."""
+    from qldpc.codes.surgery.joint import _extend_chi_rows_with_bridge
+    n_v0 = 4
+    n_bridge = 4
+    n_data_plus_kappa = 6
+    chi_rows = np.zeros((n_v0, n_data_plus_kappa + n_bridge), dtype=int)
+    label_inv = [0, 1, 2, 3]
+    gamma = np.zeros(n_v0, dtype=int)
+    extended = _extend_chi_rows_with_bridge(
+        chi_rows, label_inv, gamma, n_data_plus_kappa, n_bridge
+    )
+    bridge_block = extended[:, n_data_plus_kappa:]
+    # gamma=0 → alpha_v = e_{label[v]} for each v.
+    for l, v in enumerate(label_inv):
+        assert bridge_block[v, l] == 1
+        assert bridge_block[v].sum() == 1
+
+
+def test_extend_chi_rows_with_bridge_gamma_flip():
+    """Synthetic test: gamma=1 vector → alpha_v = e_{label[v]} XOR all-ones."""
+    from qldpc.codes.surgery.joint import _extend_chi_rows_with_bridge
+    n_v0 = 4
+    n_bridge = 4
+    n_data_plus_kappa = 6
+    chi_rows = np.zeros((n_v0, n_data_plus_kappa + n_bridge), dtype=int)
+    label_inv = [0, 1, 2, 3]
+    gamma = np.ones(n_v0, dtype=int)
+    extended = _extend_chi_rows_with_bridge(
+        chi_rows, label_inv, gamma, n_data_plus_kappa, n_bridge
+    )
+    bridge_block = extended[:, n_data_plus_kappa:]
+    # gamma=1 → alpha_v = e_{label[v]} + all-ones = ones with the label[v] bit flipped.
+    for l, v in enumerate(label_inv):
+        assert bridge_block[v, l] == 0  # was 1, flipped
+        # Other bits are 1
+        for l2 in range(n_bridge):
+            if l2 != l:
+                assert bridge_block[v, l2] == 1

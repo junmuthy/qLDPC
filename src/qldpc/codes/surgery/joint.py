@@ -547,3 +547,177 @@ def _chi_z_compatibility_check(
             if B[l, c] != 0:
                 violators.append((v, c))
     return len(violators) == 0, violators
+
+
+def _solve_chi_z_bridge_choices(
+    T_s: np.ndarray,
+    label_inv: list[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Solve the joint (gamma, delta) system for chi-Z bridge compatibility.
+
+    Both alpha_v (chi bridge ext) and b_c (Webster Z bridge ext) have TWO
+    valid choices each since their constraints are dimensionally underdetermined:
+
+    - alpha_v = e_{label[v]} + gamma[v] * 1, gamma[v] in {0, 1}
+    - b_c     = canonical(c) + delta[c] * 1, delta[c] in {0, 1}
+
+    where 1 = (1, 1, ..., 1) in F_2^w and canonical(c) is the running XOR
+    of T_s[:, c] (Task 8).
+
+    For chi-Z compatibility (alpha_v . b_c = 0 for all v, c), expanding gives:
+
+        alpha_v . b_c
+            = canonical(c)[label[v]] + gamma_v * sigma_c
+              + delta_c + gamma_v * delta_c * (w mod 2)
+
+    where sigma_c = parity(canonical(c)).
+
+    For w even (BB_1 has w=14), the gamma*delta*w term vanishes; the joint
+    constraint becomes the F_2-linear system
+
+        gamma_v * sigma_c + delta_c = a_{v, c}     (a_{v, c} = canonical(c)[label[v]])
+
+    in n_v0 + n_E unknowns and n_v0 * n_E equations.
+
+    Args:
+        T_s: shape (w-1, n_E) skiptree matrix from _skip_tree_hr.
+        label_inv: list where label_inv[l] = vertex v.
+
+    Returns:
+        (gamma, delta) where
+          gamma: shape (n_v0,) F_2 vector. alpha_v = e_{label[v]} + gamma[v] * 1.
+          delta: shape (n_E,)  F_2 vector. b_c    = canonical(c)   + delta[c] * 1.
+
+    Raises:
+        ValueError if w is odd (the gamma*delta*w cross-term then makes the
+            system nonlinear; a different construction would be needed).
+        ValueError if the F_2 linear system has no solution.
+    """
+    GF2 = galois.GF(2)
+    w = T_s.shape[0] + 1
+    n_E = T_s.shape[1]
+    n_v0 = len(label_inv)
+
+    if w % 2 != 0:
+        raise ValueError(
+            f"Joint (gamma, delta) system requires w even (got w={w}); "
+            f"odd w introduces a gamma_v*delta_c cross-term that is not F_2-linear."
+        )
+
+    # Canonical b_c (running XOR), shape (w, n_E).
+    canonical_B = np.zeros((w, n_E), dtype=np.int_)
+    for c in range(n_E):
+        canonical_B[:, c] = _running_xor_b_c(T_s[:, c])
+
+    # sigma_c = parity of canonical(c), shape (n_E,).
+    sigma = canonical_B.sum(axis=0) % 2
+
+    # Invert label_inv: label[v] = l.
+    label = [0] * n_v0
+    for l, v in enumerate(label_inv):
+        label[v] = l
+
+    # a[v, c] = canonical(c)[label[v]].
+    a = np.zeros((n_v0, n_E), dtype=np.int_)
+    for v in range(n_v0):
+        a[v, :] = canonical_B[label[v], :]
+
+    # Build F_2 system: for each (v, c), sigma_c * gamma_v + delta_c = a[v, c].
+    # Variables: x = [gamma_0, ..., gamma_{n_v0-1}, delta_0, ..., delta_{n_E-1}].
+    n_eq = n_v0 * n_E
+    n_var = n_v0 + n_E
+    A = np.zeros((n_eq, n_var), dtype=np.int_)
+    rhs = np.zeros(n_eq, dtype=np.int_)
+    for v in range(n_v0):
+        for c in range(n_E):
+            row = v * n_E + c
+            A[row, v] = sigma[c]            # gamma_v coefficient
+            A[row, n_v0 + c] = 1            # delta_c coefficient
+            rhs[row] = a[v, c]
+
+    aug = GF2(np.hstack([A, rhs.reshape(-1, 1)]))
+    rref = np.asarray(aug.row_reduce())
+    x = np.zeros(n_var, dtype=np.int_)
+    for r in range(rref.shape[0]):
+        nz = np.flatnonzero(rref[r, :n_var])
+        if nz.size == 0:
+            if rref[r, n_var] == 1:
+                raise ValueError(
+                    "chi-Z joint bridge system infeasible. "
+                    "The (gamma, delta) F_2 linear system has no solution; "
+                    "the construction needs different math for this code."
+                )
+            continue
+        x[int(nz[0])] = int(rref[r, n_var])
+
+    gamma = x[:n_v0]
+    delta = x[n_v0:]
+
+    # Sanity check: alpha_v . b_c = 0 for all (v, c).
+    for v in range(n_v0):
+        l_v = label[v]
+        alpha_v = np.zeros(w, dtype=np.int_)
+        alpha_v[l_v] = 1
+        if int(gamma[v]) == 1:
+            alpha_v = (alpha_v + 1) % 2  # add all-ones
+        for c in range(n_E):
+            b_c = canonical_B[:, c].copy()
+            if int(delta[c]) == 1:
+                b_c = (b_c + 1) % 2
+            inner = int((alpha_v * b_c).sum()) % 2
+            if inner != 0:
+                raise RuntimeError(
+                    f"Solver returned inconsistent (gamma, delta): "
+                    f"alpha_{v} . b_{c} = {inner} != 0."
+                )
+    return gamma, delta
+
+
+def _extend_chi_rows_with_bridge(
+    chi_rows: np.ndarray,
+    label_inv: list[int],
+    gamma: np.ndarray,
+    n_data_plus_kappa: int,
+    n_bridge: int,
+) -> np.ndarray:
+    """Extend chi rows with bridge X-bits using the joint-system gamma choice.
+
+    Given the gamma vector from `_solve_chi_z_bridge_choices`, each row v
+    is extended by
+
+        alpha_v = e_{label[v]} + gamma[v] * 1     (1 = all-ones in F_2^w)
+
+    on the bridge columns. The companion choice delta[c] (returned by the
+    same solver) feeds into the Webster Z bridge extension; together they
+    guarantee alpha_v . b_c = 0, i.e. chi^(s)(v) and Webster Z[c] commute
+    on the bridge block.
+
+    Args:
+        chi_rows: shape (n_v0, n_data_plus_kappa + n_bridge). Bridge cols
+            start at zero on input; this function fills them in.
+        label_inv: list where label_inv[l] = vertex v in V_0_s.
+        gamma: shape (n_v0,) F_2 vector from _solve_chi_z_bridge_choices.
+        n_data_plus_kappa, n_bridge: column block widths.
+
+    Returns:
+        Extended chi_rows array of the same shape, with bridge bits filled.
+    """
+    n_v0 = chi_rows.shape[0]
+    assert n_v0 == len(label_inv), (
+        f"chi_rows has {n_v0} rows but label_inv has {len(label_inv)}"
+    )
+    assert gamma.shape == (n_v0,), (
+        f"gamma must have shape ({n_v0},), got {gamma.shape}"
+    )
+    w = n_bridge
+    out = chi_rows.copy()
+    label = [0] * n_v0
+    for l, v in enumerate(label_inv):
+        label[v] = l
+    for v in range(n_v0):
+        alpha_v = np.zeros(w, dtype=np.int_)
+        alpha_v[label[v]] = 1
+        if int(gamma[v]) == 1:
+            alpha_v = (alpha_v + 1) % 2  # add all-ones
+        out[v, n_data_plus_kappa:n_data_plus_kappa + w] = alpha_v
+    return out

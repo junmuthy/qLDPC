@@ -47,4 +47,6 @@ from .joint import (  # noqa: F401
     canonical_HR,
     _running_xor_b_c,
     _chi_z_compatibility_check,
+    _solve_chi_z_bridge_choices,
+    _extend_chi_rows_with_bridge,
 )
