@@ -527,3 +527,149 @@ def test_boost_gadget_preserves_css_commutation(method):
     boosted = boost_gadget(g, method=method, target=1.0, seed=0)
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
+
+
+# ---------------------------------------------------------------------------
+# Ports from surgery_test.py (T22): behavioral correctness invariants.
+# ---------------------------------------------------------------------------
+
+def _gf2_in_row_span(HX: np.ndarray, target: np.ndarray) -> bool:
+    """Return True iff `target` (1-D, uint8) is in the GF(2) row span of HX."""
+    import galois
+    GF2 = galois.GF(2)
+    M = GF2(HX.astype(np.int_))
+    t = GF2(target.astype(np.int_).reshape(1, -1))
+    rank_M = int(np.linalg.matrix_rank(M))
+    augmented = GF2(np.vstack([np.asarray(M), np.asarray(t)]).astype(np.int_))
+    return int(np.linalg.matrix_rank(augmented)) == rank_M
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_joint_xx_in_stabilizer_on_webster(code_index: int) -> None:
+    """X̄_1 ⊗ X̄_{k/2+1} padded with zeros on ancilla/bridge MUST lie in HX_joint row span.
+
+    This is the key stabilizer-membership criterion for joint measurement:
+    the merged code accepts X̄_1 X̄_2 as an X-stabilizer (Cross §3.6 invariant).
+    If this fails the surgery construction is broken.
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _webster_x_bar_k2p1_operator(data)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
+
+    n_data = code.num_qubits
+    n_total = joint_code.num_qubits
+    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
+    op1_padded = np.zeros(n_total, dtype=np.uint8)
+    op1_padded[:n_data] = x1
+    op2_padded = np.zeros(n_total, dtype=np.uint8)
+    op2_padded[:n_data] = x2
+    joint_op = (op1_padded + op2_padded) % 2
+
+    assert _gf2_in_row_span(HX, joint_op), (
+        f"Code {data.get('name', code_index)}: X̄_1 ⊗ X̄_2 is NOT in HX_joint row span. "
+        f"Construction is broken."
+    )
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
+    """Negative: X̄_1 alone (padded) must NOT lie in HX_joint row span.
+
+    Otherwise the surgery would stabilize X̄_1 individually rather than the joint
+    product X̄_1 X̄_2, violating Cross §3.6. Both singletons are tested.
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _webster_x_bar_k2p1_operator(data)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
+
+    n_data = code.num_qubits
+    n_total = joint_code.num_qubits
+    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
+    op1_padded = np.zeros(n_total, dtype=np.uint8)
+    op1_padded[:n_data] = x1
+    op2_padded = np.zeros(n_total, dtype=np.uint8)
+    op2_padded[:n_data] = x2
+
+    assert not _gf2_in_row_span(HX, op1_padded), (
+        f"Code {data.get('name', code_index)}: X̄_1 alone IS in HX_joint row span. "
+        f"Single-operator stabilization detected — joint surgery broken."
+    )
+    assert not _gf2_in_row_span(HX, op2_padded), (
+        f"Code {data.get('name', code_index)}: X̄_2 alone IS in HX_joint row span."
+    )
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_alpha_star_yields_joint_op_on_webster(code_index: int) -> None:
+    """Cross §3.6 / math.md §2.7: α* · HX_joint = (X̄_1 + X̄_2, 0_anc, 0_bridge).
+
+    The canonical protocol vector α* has 1 on every chi row from both gadgets
+    AND every U_B bridge-path-stabilizer row, and 0 on the data X-check rows.
+
+    Equivalently: XOR of (chi1 + chi2 + U_B) rows of HX_joint restricted to
+    data columns equals op1 + op2, and is zero on all ancilla/bridge columns.
+
+    Derivation:
+      Σ chi1 rows  = op1 on data | 0 on g1-kappa | X on bridge[0]   (Webster Eq. 1)
+      Σ chi2 rows  = op2 on data | 0 on g2-kappa | X on bridge[w-1] (Webster Eq. 1)
+      Σ U_B rows   = 0 on data   | 0 on ancillas  | e_0 + e_{w-1}   (path telescoping)
+      Total        = (op1+op2) on data | 0 on ancillas | 0 on bridge
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _webster_x_bar_k2p1_operator(data)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
+
+    n_data = code.num_qubits
+    mX = int(code.matrix_x.shape[0])
+    nV1 = len(g1.V0)  # number of chi rows from g1
+    nV2 = len(g2.V0)  # number of chi rows from g2
+    n_bridge = bridge.width
+    HX = np.asarray(joint_code.matrix_x).astype(np.int_)
+    n_rows = HX.shape[0]
+
+    # α* = 0 on data X-check rows (0..mX-1),
+    #       1 on chi1 rows (mX..mX+nV1-1),
+    #       1 on chi2 rows (mX+nV1..mX+nV1+nV2-1),
+    #       1 on U_B rows  (mX+nV1+nV2..)
+    alpha = np.zeros(n_rows, dtype=np.int_)
+    alpha[mX:] = 1  # chi1 + chi2 + U_B rows all get 1
+
+    product = (alpha @ HX) % 2
+
+    expected = np.zeros(joint_code.num_qubits, dtype=np.int_)
+    expected[:n_data] = (x1.astype(np.int_) + x2.astype(np.int_)) % 2
+
+    assert np.array_equal(product, expected), (
+        f"Code {data.get('name', code_index)}: α* · HX_joint != (op1+op2, 0, 0). "
+        f"Mismatch at columns: {np.flatnonzero(product ^ expected)[:20]}"
+    )
