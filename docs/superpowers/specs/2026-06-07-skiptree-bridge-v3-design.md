@@ -1,6 +1,16 @@
 # SkipTree-Based Joint Bridge (v3) — Design Spec
 
-**Status:** Draft 2026-06-07 · supersedes v2 path-graph bridge
+**Status:** Partially shipped 2026-06-07.
+- §1–§4 module split + helpers + Algorithm 2 SkipTree: SHIPPED as v2.1.
+- §4.5–§4.7 algorithmic chi/Z bridge extension: NOT SHIPPED. The
+  formulation here was shown to be mathematically infeasible on
+  BB_1 Z̄_1 (see "§10 Investigation outcome" below). The two paper
+  joint codes ([[355, 25, 10]] and [[150, 5, 12]]) are accessible via
+  `qldpc.codes._ide_fixtures.build_joint_from_ide_fixture(...)`
+  loading the Zenodo `.mtx` files directly.
+- Inter-code algorithmic v3 deferred to future work pending Ide
+  construction decode.
+
 **References:**
 - Ide / Swaroop et al. arXiv:2410.03628 (§III SkipTree, §IV Lemma 10, §VII B BB-LP, §VII C BB-BB, Appendix VIII Algorithm 2)
 - Webster (Cross et al.) arXiv:2407.18393 §II.A 3-step layered ancilla
@@ -335,3 +345,71 @@ None — all earlier clarifying questions resolved in the brainstorming session:
 - Test bar: Webster single-logical green + 2 new Ide joint tests
 - Equality level: stab-group equality (not byte-identical mtx)
 - Ide GTP files: optional `skiptree_override` parameter loads them for byte-exact reproduction; default generates our own T/P/G; tests assert stab-group equality either way
+
+---
+
+## 10. Investigation outcome (added 2026-06-07 post-implementation)
+
+The χ–Z bridge construction described in §4.5–§4.7 turned out to be
+mathematically infeasible on BB_1 Z̄_1. Detailed findings:
+
+### 10.1 χ–Z compatibility lemma (§4.7) fails
+
+Task 9's numerical probe: with `α_v = e_{label[v]}` and `b_c = running
+XOR(T_s[:, c])`, the identity `b_c[label[v]] = 0` fails for **39 of 182
+(v, c) pairs on BB_1 Z̄_1**. The simple single-bit chi extension is
+provably incompatible with the running-XOR Webster Z extension.
+
+### 10.2 Path B (linear-solve fallback) also infeasible
+
+The natural fallback — letting both α_v and b_c each pick from a
+2-element set (`e_{label[v]} + γ_v · 1` and `canonical(c) + δ_c · 1`) —
+gives an F_2 linear system in 27 variables and 182 equations. On BB_1
+Z̄_1 the system has rank(A) = 26, rank([A | rhs]) = 27 — **infeasible**.
+Diagnosed root cause: 4 of the 13 columns have parity σ_c = 0, which
+forces δ_c = a[v, c] for all v, contradicting the actual non-constant
+column `a[:, c]`.
+
+### 10.3 Ide's actual construction is structurally different
+
+Inspection of Ide's published joint H_X (Zenodo `data_qLDPC_surgery.zip`):
+
+| Observation | Implication |
+|---|---|
+| BB_1 single Z̄_1 H_X rows ARE in joint row span (59/59) | BB-side unchanged |
+| LP_2 single Z̄_2 H_X rows are NOT in joint row span (0/103) | LP-side non-trivially modified |
+| Bridge has rank 14 (not 13) | Bridge code is [[14, 0, 1]], not [[14, 1, 1]] |
+| No rows span κ_1 + κ_2 + bridge simultaneously | Lemma 10 `[T_1 \| H_R \| T_2]` template does NOT apply |
+| 32 bridge-touching rows all on LP-side; 13 cross-block rows (BB_κ + LP_data, no bridge) | Construction is asymmetric and uses non-canonical row mixing |
+
+The paper's Eq 37 `H_X|supp(E_A) = H_R(14)` does NOT hold in Ide's
+output: the actual bridge support patterns are
+`{(0,6), (0,8), (0,13), (1,6), (1,7), (1,9), …}` plus single bits
+`{6, 7, 11, 12, 13}` — none of which match the canonical `(l, l+1)`
+pattern.
+
+### 10.4 What shipped as v2.1
+
+- All §3.1 module split work (`layered.py`, `skiptree.py`, `cellulation.py`, `cheeger.py`, `joint.py`).
+- §4.2 SkipTree Algorithm 2 (`_skip_tree_hr`), although on tree inputs it is observationally equivalent to Algorithm 1.
+- §4.1, §4.3 helpers: `_build_auxiliary_graph`, `_label_inverse`, `canonical_HR`, `_running_xor_b_c`.
+- §4.7 probe + fallback solver as diagnostic helpers (`_chi_z_compatibility_check`, `_solve_chi_z_bridge_choices`, `_extend_chi_rows_with_bridge`) — these RAISE `ValueError` on BB_1 Z̄_1.
+- New `build_joint_from_ide_fixture("BB_LP" | "BB_BB")` in `qldpc.codes._ide_fixtures` returning the paper-exact joint CSSCode by loading the Zenodo `.mtx`. Use this for distance / decoder experiments on the two paper examples.
+- v2 path-graph bridge (intra-code only) preserved at `joint.py` `build_joint_measurement_code(data_code, op1, op2)`.
+
+### 10.5 What v3 future work needs
+
+A correct algorithmic inter-code construction needs to:
+1. Identify what the 13 "cross-block" (BB_κ + LP_data) joint H_X rows
+   actually represent — they don't fit Lemma 10's adapter template.
+2. Replace §4.5's per-vertex single-bit chi extension with whatever rule
+   Ide actually uses (which clearly varies per row).
+3. Justify the rank-14 bridge code (not H_R rank-13).
+4. Possibly: read the compact Tanner graph formalism (Ide Fig 7) more
+   carefully, since the framework appears to differ from Webster's
+   per-vertex χ rows.
+
+Estimated effort to decode the construction algorithmically: 1–2
+focused person-days on Ide's HX/HZ row-by-row, comparing across both
+paper examples. The Zenodo fixtures preserved under
+`tests/fixtures/ide_zenodo/` make this work tractable when revisited.

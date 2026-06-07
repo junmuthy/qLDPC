@@ -1260,6 +1260,37 @@ def test_ide_fixtures_load_correctly():
     assert np.array_equal((T1 @ G1 @ P1) % 2, HR_canonical)
 
 
+@pytest.mark.skipif(not fixtures_available(), reason="Zenodo fixtures not present")
+def test_build_joint_from_ide_fixture_BB_LP():
+    """Loader returns Ide's [[355, 25, 10]] BB-LP joint code as a CSSCode."""
+    from qldpc.codes._ide_fixtures import build_joint_from_ide_fixture
+    code = build_joint_from_ide_fixture("BB_LP")
+    assert code.num_qubits == 355
+    assert code.dimension == 25
+    # CSS commutation holds by construction (verified at load time too).
+    prod = (np.asarray(code.matrix_x).astype(int)
+            @ np.asarray(code.matrix_z).astype(int).T) % 2
+    assert (prod == 0).all()
+
+
+@pytest.mark.skipif(not fixtures_available(), reason="Zenodo fixtures not present")
+def test_build_joint_from_ide_fixture_BB_BB():
+    """Loader returns Ide's [[150, 5, 12]] BB intra-code joint as a CSSCode."""
+    from qldpc.codes._ide_fixtures import build_joint_from_ide_fixture
+    code = build_joint_from_ide_fixture("BB_BB")
+    assert code.num_qubits == 150
+    assert code.dimension == 5
+    prod = (np.asarray(code.matrix_x).astype(int)
+            @ np.asarray(code.matrix_z).astype(int).T) % 2
+    assert (prod == 0).all()
+
+
+def test_build_joint_from_ide_fixture_unknown_name_raises():
+    from qldpc.codes._ide_fixtures import build_joint_from_ide_fixture
+    with pytest.raises(ValueError, match="unknown example"):
+        build_joint_from_ide_fixture("BB_XYZ")
+
+
 def test_skip_tree_hr_path_graph_is_optimal():
     """On a 5-vertex path graph rooted at one endpoint, Algorithm 2 returns T = I_{n-1}.
 

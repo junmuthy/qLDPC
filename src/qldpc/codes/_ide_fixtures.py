@@ -1,7 +1,9 @@
 """Load Ide et al. (arXiv:2410.03628) Zenodo supplementary matrices.
 
 These matrices live under tests/fixtures/ide_zenodo/ and serve as
-ground truth for stab-group equality assertions in joint tests.
+ground truth for stab-group assertions and as a direct source of joint
+deformed codes for the two paper examples (BB-LP inter-code §VII B and
+BB-BB intra-code §VII C).
 """
 
 from __future__ import annotations
@@ -12,6 +14,8 @@ from pathlib import Path
 
 import numpy as np
 from scipy.io import mmread
+
+from qldpc.codes.common import CSSCode
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "ide_zenodo"
 
@@ -37,6 +41,42 @@ def load_ide_joint_BB_intracode() -> tuple[np.ndarray, np.ndarray]:
     HX = load_mtx("BB_98_intracode_adapter/Hx_BB_intracode_Z_1_Z_3_adapted-code.mtx")
     HZ = load_mtx("BB_98_intracode_adapter/Hz_BB_intracode_Z_1_Z_3_adapted-code.mtx")
     return HX, HZ
+
+
+def build_joint_from_ide_fixture(example: str) -> CSSCode:
+    """Return a CSSCode for one of Ide's two published joint deformed codes.
+
+    Use when you need the paper-exact joint code as a CSSCode object
+    (e.g., for distance / decoder experiments). The algorithmic
+    construction in build_joint_measurement_code does NOT yet reproduce
+    Ide's inter-code joint (see docs/superpowers/specs/2026-06-07-
+    skiptree-bridge-v3-design.md §1 "future work").
+
+    Args:
+        example: "BB_LP" for [[355, 25, 10]] (§VII B) or "BB_BB" for
+            [[150, 5, 12]] (§VII C).
+
+    Returns:
+        CSSCode with the paper's HX, HZ as F_2 matrices.
+
+    Raises:
+        ValueError: unknown example name.
+        FileNotFoundError: Zenodo fixtures not installed.
+    """
+    if not fixtures_available():
+        raise FileNotFoundError(
+            f"Zenodo fixtures not found at {_FIXTURE_ROOT}; install them "
+            f"from https://zenodo.org/records/17527545 (data_qLDPC_surgery.zip)."
+        )
+    if example == "BB_LP":
+        HX, HZ = load_ide_joint_BB_LP()
+    elif example == "BB_BB":
+        HX, HZ = load_ide_joint_BB_intracode()
+    else:
+        raise ValueError(f"unknown example '{example}'; want 'BB_LP' or 'BB_BB'")
+    import galois
+    GF2 = galois.GF(2)
+    return CSSCode(GF2(HX), GF2(HZ), is_subsystem_code=False)
 
 
 def load_ide_skiptree_TPG(path: str) -> dict[str, np.ndarray]:

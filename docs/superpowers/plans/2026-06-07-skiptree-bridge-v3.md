@@ -1,6 +1,13 @@
 # SkipTree Bridge v3 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution status (2026-06-07):** Partial. Tasks 1–9 SHIPPED as v2.1.
+> Tasks 10–17 ABANDONED after numerical investigation showed the spec's
+> algorithmic construction is infeasible on BB_1 Z̄_1 (39/182 violators
+> in Task 9 probe; Path B linear-solve rank 26 vs augmented rank 27).
+> The two paper joint codes are accessible via the new
+> `build_joint_from_ide_fixture()` helper (`_ide_fixtures.py`) which
+> loads Ide's Zenodo `.mtx` directly. See spec §10 for the full
+> investigation outcome and pointers for resuming v3 work.
 
 **Goal:** Replace the v2 path-graph joint bridge with the SkipTree-based Lemma 10 adapter from Ide et al. arXiv:2410.03628 §VII B + §VII C. The new construction reproduces the stabilizer groups of Ide's [[355, 25, 10]] BB-LP joint code and [[150, 5, 12]] BB-BB intra-code joint.
 
