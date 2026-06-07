@@ -20,21 +20,23 @@ PIPELINE METHODOLOGY (proven for bb_18; applies to all):
   4. boost_gadget_cheeger_combinatorial (greedy boost to h ≥ 1)
   5. Output: (κ, χ, G) = Cain's (Qubits, X-checks, Z-checks)
 
-REMAINING CAIN ROWS (require additional work):
-  bb_18 Processor |P̄|=9: (189, 104, 86)
-    Need: multi-target gadget OR specific weight-104 |P̄|=9 representative.
-    Our wt-60 |P̄|=9 X̄ gives (90, 60, 31) — much smaller than Cain.
-    Cain's higher count suggests their target is intentionally weight ~104
-    for connectivity reasons we haven't fully characterized.
+REMAINING CAIN ROWS (Tasks 8-10 outcomes; see footnotes below):
+  bb_18 Processor |P̄|=9: (189, 104, 86) — close, gap
+    Multi-target gadget (Task 3-5) constructs the merged code; leave-one-out
+    of 10 Z-basis logicals lands at |V_0_union| ∈ {127, 128, 129} vs target
+    104. Richer subset search (GF(2) subspace enumeration) needed.
+    See: cain_bb18_processor_exact_match.py
 
-  LP Memory |P̄|=1: (342, 200, 143) / (364, 208, 157)
-    Need: weight-200/208 single-target rep on LP code. Construction works,
-    but BP+OSD min-weight search for k>1000 codes is computationally
-    expensive (each get_logical_ops call ~5+ min for k=1224).
-    Same Webster + boost pipeline applies; bottleneck is target search.
+  lp_24^{3,7} Memory |P̄|=1: (364, 208, 157) — weight-skip
+    Existing limitation unchanged: wt-208 single-target Z̄ rep not found in
+    50000 BP+OSD + greedy reduction trials. Cain likely uses code
+    automorphism or specific algebraic structure.
+    See: cain_lp24_memory_exact_match.py
 
-  LP Processor lp_20^{3,5} |P̄|=69: (813, 460, 357)
-    Multi-target gadget; same considerations as bb_18 Processor.
+  lp_20^{3,5} Processor |P̄|=69: (813, 460, 357) — close, gap
+    Multi-target gadget ships; best random subset of 69 logicals gives
+    |V_0_union|=493 vs target 460. Need Cain's automorphism strategy.
+    See: cain_lp20_processor_exact_match.py
 """
 
 from __future__ import annotations
@@ -126,8 +128,8 @@ def main() -> None:
     print("| bb_18 Resource |P̄|=1            | (39, 20, 20)   | ✓ EXACT MATCH  |")
     print("| lp_20^{3,7} Memory |P̄|=1        | (342, 200, 143)| ✓ EXACT MATCH  |")
     print("| lp_24^{3,7} Memory |P̄|=1        | (364, 208, 157)| weight-skip    |")
-    print("| bb_18 Processor |P̄|=9           | (189, 104, 86) | multi-target   |")
-    print("| lp_20^{3,5} Processor |P̄|=69    | (813, 460, 357)| multi-target   |")
+    print("| bb_18 Processor |P̄|=9           | (189, 104, 86) | close, gap     |")
+    print("| lp_20^{3,5} Processor |P̄|=69    | (813, 460, 357)| close, gap     |")
     print()
     print("STATUS LEGEND:")
     print("  ✓ EXACT MATCH    — Webster 3-step + Cheeger boost reproduces (κ, χ, G) exactly")
@@ -136,8 +138,26 @@ def main() -> None:
     print("                     via 2-15 single-logical products + 50-step stab reduction)")
     print("                     Cain likely uses code automorphism or specific algebraic")
     print("                     structure to achieve weight 208 exactly.")
-    print("  multi-target     — Cain measures multiple PPMs simultaneously; needs extension")
-    print("                     of Webster gadget for joint multi-target measurement")
+    print("  close, gap       — Multi-target gadget (Task 3-5) ships and constructs the")
+    print("                     merged code; subset search of Z-basis logicals lands near")
+    print("                     but does not hit the Cain target |V_0|. Need richer subset")
+    print("                     enumeration (e.g. GF(2) subspace search or Cain's specific")
+    print("                     automorphism strategy) to close the remaining gap.")
+    print()
+    print("FOOTNOTES (Tasks 8-10 outcomes):")
+    print("  bb_18 Processor (Task 8): multi-target gadget shipped via Tasks 3-5; search")
+    print("    via leave_one_out of 10 Z-basis logicals returned |V_0_union| ∈ {127, 128,")
+    print("    129}, never the Cain target 104. Richer subset search needed (e.g. GF(2)")
+    print("    subspace enumeration over the logical space). See:")
+    print("      examples/scripts/cain_bb18_processor_exact_match.py")
+    print("  lp_20^{3,5} Processor (Task 10): same pattern as bb_18 Processor. Best random")
+    print("    subset of 69 logicals (out of 148) gives |V_0_union|=493 vs target 460.")
+    print("    Random subset sampling is insufficient; need Cain's automorphism strategy.")
+    print("      examples/scripts/cain_lp20_processor_exact_match.py")
+    print("  lp_24^{3,7} Memory (Task 9): previously documented 'weight-skip'; confirmed")
+    print("    unchanged. A wt-208 single-target Z̄ rep was not found in 50000 BP+OSD")
+    print("    trials with 2-15 single-logical products + 50-step greedy reduction.")
+    print("      examples/scripts/cain_lp24_memory_exact_match.py")
     print()
 
     print("STEP 3: Pipeline (reproduces bb_18 Resource exactly)")
