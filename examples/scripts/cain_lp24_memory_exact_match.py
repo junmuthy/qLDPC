@@ -83,37 +83,46 @@ def search_single_logical_wt208(
     best_op = None
 
     from tqdm import tqdm
-    # Strategy: Cain wants MAX-physical-weight basis logical at wt 208.
-    # Our default basis logicals reduce to ≤ 140; we need to ADD stabilizers
-    # to raise the weight (not reduce). Search for stab-equivalent variants
-    # with weight = target_weight via random stab additions to a basis logical.
+    # Strategy (matches Cain Memory mode |P̄|=1 selection):
+    # Cain picks the MAX-physical-weight single-logical Pauli. Our default
+    # basis logicals reduce to wt ≤ 140; we ADD random stabilizers to raise
+    # weight, searching for max within each basis logical's orbit.
+    # Also try greedy weight-increase: pick stabilizers that increase weight.
     rng = _random.Random(0)
-    print(f"    Pass: {n_basis_attempts} basis logicals × {n_random_combo_attempts//n_basis_attempts}"
-          f" stab-augmentations each")
-    iterations_per_basis = max(1, n_random_combo_attempts // n_basis_attempts)
+    max_seen_w = 0
+    print(f"    Pass: {n_basis_attempts} basis logicals, greedy weight-increase")
+    iterations_per_basis = max(1, n_random_combo_attempts // max(1, n_basis_attempts))
     pbar = tqdm(range(min(n_basis_attempts, k)), desc="basis × stab")
     for i in pbar:
+        # Initial: basis logical at its natural weight
         for j in range(iterations_per_basis):
             v = zls[i].copy()
-            # Add random stabilizers to raise weight toward target
-            n_stab = rng.randint(0, 30)
-            for _ in range(n_stab):
+            # Greedy weight-increase: try adding each stabilizer if it raises weight
+            for step in range(60):
                 s_idx = rng.randrange(HZ.shape[0])
-                v = (v + HZ[s_idx]) % 2
+                candidate = (v + HZ[s_idx]) % 2
+                cur_w = int(v.sum())
+                cand_w = int(candidate.sum())
+                # Accept if it increases weight (greedy max)
+                if cand_w > cur_w and cand_w <= target_weight:
+                    v = candidate
+                # Or accept hits target exactly
+                if cand_w == target_weight:
+                    v = candidate
+                    break
             if ((HX @ v) % 2).sum() != 0:
                 continue
             w = int(v.sum())
-            # Track operator closest to target (above or below)
-            if best_w is None or abs(w - target_weight) < abs(best_w - target_weight):
-                best_w = w
+            if w > max_seen_w:
+                max_seen_w = w
                 best_op = v
-                pbar.set_postfix({"best_wt": best_w, "target": target_weight})
+                pbar.set_postfix({"max_wt": max_seen_w, "target": target_weight})
             if w == target_weight:
                 pbar.close()
                 return v, w
     pbar.close()
 
-    return None, best_w
+    return None, max_seen_w
 
 
 def main() -> None:
@@ -149,20 +158,28 @@ def main() -> None:
     )
     bare_shape = h.gadget_shape(layout)
     print(f"  Bare gadget: (κ, χ, G) = {bare_shape}")
+    add = TARGET[0] - bare_shape[0]
+    print(f"  Need to add {add} qubits via Cheeger boost (force exact count)")
 
-    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1})")
+    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1}), "
+          f"max_extra_qubits={add}")
     t0 = time.time()
-    for seed in range(MAX_BOOST_SEEDS):
+    from tqdm import tqdm
+    pbar = tqdm(range(MAX_BOOST_SEEDS), desc="boost seed sweep")
+    for seed in pbar:
         _, b_layout, _result = boost_gadget_cheeger(
-            merged, layout, target_h=100.0, max_extra_qubits=300, seed=seed,
+            merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
         )
         shape = h.gadget_shape(b_layout)
+        pbar.set_postfix({"shape": str(shape)})
         if shape == TARGET:
+            pbar.close()
             print(f"  ✓ EXACT MATCH at seed={seed}: {shape} (elapsed {time.time()-t0:.1f}s)")
             print("\n" + "=" * 72)
             print(f"✓ EXACT MATCH: {shape} = Cain target {TARGET}")
             print("=" * 72)
             return
+    pbar.close()
     print(f"  ✗ no seed produced {TARGET} (elapsed {time.time()-t0:.1f}s)")
 
 

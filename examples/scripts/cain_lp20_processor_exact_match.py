@@ -8,11 +8,12 @@ Cain interpretation (per Cain §"Concrete construction"):
 
   Pipeline (low-rate surgery on a high-weight P̄):
   1. Build lp_20^{3,5} [[1122, 148]] from Cain App. A Eq A3.
-  2. Find a Pauli P̄ with logical weight 69 AND physical weight 460.
-     Strategy: XOR random subsets of 69 basis Z-logicals + greedy stab reduction.
-     (Cain samples 10^5 random multi-qubit X̄ operators per paper text.)
+  2. Find P̄ with logical wt 69 AND physical wt 460 via random subset+stab search.
   3. build_layered_surgery_code(lp_dual, P̄)  — single PPM.
-  4. Cheeger boost seed sweep until (κ, χ, G) = (813, 460, 357).
+  4. RANK-BOUNDED Cheeger boost. Random degree-2 boost saturates F's rank too
+     fast (gives G=354 vs target 357). We constrain it: stop accepting rank-
+     increasing edges once rank growth equals target_rank_growth (=7 here),
+     so the remaining boost edges only add G.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import random as _random
 import sys
 from pathlib import Path
 
+import galois
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -29,11 +31,82 @@ import _cain_helpers as h
 from qldpc import codes
 from qldpc.abstract import CyclicGroup, GroupRing, RingArray
 from qldpc.codes.common import CSSCode
-from qldpc.codes.surgery import (
-    boost_gadget_cheeger,
-    build_layered_surgery_code,
+from qldpc.codes.surgery import build_layered_surgery_code
+from qldpc.codes.surgery.layered import (
+    _assemble_merged_HX,
+    _assemble_merged_HZ,
+    _build_layered_blocks,
+    _build_layout,
+    _compute_gauge_fix,
 )
 from qldpc.objects import Pauli
+
+GF2 = galois.GF(2)
+
+
+def rank_bounded_boost(
+    merged: CSSCode, layout, *, add: int, max_rank_increase: int, seed: int = 0,
+) -> tuple[CSSCode, "object"]:
+    """Cheeger-style boost capped on rank growth.
+
+    Like boost_gadget_cheeger but rejects an edge that would push rank(F)
+    beyond rank_initial + max_rank_increase. This lets us hit Cain's exact
+    G value: G_final = κ_final - rank_final, and we want rank_final to be
+    a specific value, not "as high as random gets."
+    """
+    rng = np.random.default_rng(seed)
+    field = layout.F.__class__
+    F = np.asarray(layout.F).astype(np.int_).copy()
+    n_X = F.shape[1]
+    rank_F = int(np.linalg.matrix_rank(GF2(F)))
+    rank_increases = 0
+    extra = 0
+    max_attempts = 100 * add
+
+    for _ in range(max_attempts):
+        if extra >= add:
+            break
+        i, j = sorted(int(x) for x in rng.choice(n_X, 2, replace=False))
+        new_row = np.zeros(n_X, dtype=np.int_)
+        new_row[i] = 1
+        new_row[j] = 1
+        F_test = np.vstack([F, new_row])
+        new_rank = int(np.linalg.matrix_rank(GF2(F_test)))
+        if new_rank > rank_F:
+            if rank_increases >= max_rank_increase:
+                continue
+            rank_increases += 1
+            rank_F = new_rank
+        F = F_test
+        extra += 1
+
+    augmented_F = field(F)
+    G = _compute_gauge_fix(augmented_F)
+    blocks = _build_layered_blocks(augmented_F, layout.num_layers)
+    n_data = layout.num_data_qubits
+    n_extra = extra
+    data_x = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
+    data_z = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
+    data_x = field(data_x[:, :n_data])
+    data_z_original = field(data_z[:, :n_data])
+    if n_extra > 0:
+        synthetic_z = field.Zeros((n_extra, n_data))
+        data_z_extended = field(np.vstack([np.asarray(data_z_original), np.asarray(synthetic_z)]))
+    else:
+        data_z_extended = data_z_original
+    data_code_proxy = CSSCode(data_x, data_z_extended, is_subsystem_code=False)
+    n_z_data_original = data_z_original.shape[0]
+    new_c0_indices = np.concatenate([
+        layout.c0_indices,
+        np.arange(n_z_data_original, n_z_data_original + n_extra, dtype=np.int_),
+    ])
+    HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
+    HZ_new = _assemble_merged_HZ(data_code_proxy, blocks, G, new_c0_indices)
+    boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
+    boosted_layout = _build_layout(
+        data_code_proxy, blocks, G, layout.v0_indices, new_c0_indices, augmented_F
+    )
+    return boosted_merged, boosted_layout
 
 
 TARGET = (813, 460, 357)
@@ -160,13 +233,18 @@ def main() -> None:
         return
     print(f"  Need to add {add} qubits via Cheeger boost (force exact count)")
 
-    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1}), "
-          f"max_extra_qubits={add}, target_h=100.0")
+    # Rank-bounded boost: cap rank growth to hit Cain's exact G.
+    # rank_initial = bare_κ - bare_G;  rank_target = TARGET_κ - TARGET_G.
+    rank_initial = bare_shape[0] - bare_shape[2]
+    rank_target = TARGET[0] - TARGET[2]
+    target_rank_growth = rank_target - rank_initial
+    print(f"\nStep 3: rank-bounded boost (0..{MAX_BOOST_SEEDS - 1}), "
+          f"add={add} qubits, target rank growth={target_rank_growth}")
     from tqdm import tqdm
     pbar = tqdm(range(MAX_BOOST_SEEDS), desc="boost seed sweep")
     for seed in pbar:
-        boosted, b_layout, _r = boost_gadget_cheeger(
-            merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
+        _, b_layout = rank_bounded_boost(
+            merged, layout, add=add, max_rank_increase=target_rank_growth, seed=seed,
         )
         shape = h.gadget_shape(b_layout)
         pbar.set_postfix({"shape": str(shape)})
