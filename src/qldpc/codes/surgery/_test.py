@@ -467,3 +467,17 @@ def test_build_joint_ppm_circuit_intercode_css_commutation_and_dim():
     assert actual in (expected_naive, expected_naive + 1), (
         f"k_joint = {actual}, expected {expected_naive} or {expected_naive + 1}"
     )
+
+
+def test_build_single_ppm_circuit_with_noise_detectors_fire():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.noise_model import DepolarizingNoiseModel
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(
+        g, rounds=2, noise_model=DepolarizingNoiseModel(p=0.05),
+    )
+    samples = circuit.compile_detector_sampler().sample(shots=200)
+    assert samples.any()  # at least one detector fires under noise
