@@ -62,6 +62,7 @@ def _restrict_to_logical_support(
     logical_op: npt.ArrayLike,
     num_layers: int,
     validate_logical_op: bool,
+    validate_commutation: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, galois.FieldArray]:
     """Compute V_0, C_0, F per Cross 2024 §III Step 1, with input validation.
 
@@ -99,7 +100,7 @@ def _restrict_to_logical_support(
     logical_op_gf = field(int_view)
     hz = data_code.matrix_z
     # commutation with Z-stabilizers: H_Z @ X̄^T == 0 over GF(2)
-    if np.any(hz @ logical_op_gf != 0):
+    if validate_commutation and np.any(hz @ logical_op_gf != 0):
         raise ValueError(
             "logical_op does not commute with Z-stabilizers (H_Z @ logical_op != 0)."
         )
@@ -309,6 +310,7 @@ def build_layered_surgery_code(
     *,
     num_layers: int = 1,
     validate_logical_op: bool = True,
+    validate_commutation: bool = True,
 ) -> tuple[CSSCode, SurgeryLayout]:
     """Construct a merged stabilizer code that measures ``logical_op`` by lattice surgery.
 
@@ -330,6 +332,9 @@ def build_layered_surgery_code(
         validate_logical_op: If True (default), check that logical_op is
             not in the row span of H_X. Skip with False if the caller has
             already validated.
+        validate_commutation: if True (default), check H_Z @ logical_op == 0.
+            Set False when logical_op is a binary V_0 marker (e.g., union of
+            multiple logical supports) rather than a single logical operator.
 
     Returns:
         (merged_code, layout):
@@ -341,7 +346,8 @@ def build_layered_surgery_code(
         ValueError: See spec §5 for the exhaustive list of cases.
     """
     v0_indices, c0_indices, F = _restrict_to_logical_support(
-        data_code, logical_op, num_layers, validate_logical_op
+        data_code, logical_op, num_layers, validate_logical_op,
+        validate_commutation=validate_commutation,
     )
     G = _compute_gauge_fix(F)
     blocks = _build_layered_blocks(F, num_layers)

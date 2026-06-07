@@ -106,7 +106,8 @@ def build_multi_target_surgery_code(
     set_valued_port = SetValuedPort.from_supports(list(ops_arr))
 
     merged, base_layout = build_layered_surgery_code(
-        data_code, v0_union, num_layers=num_layers, validate_logical_op=False,
+        data_code, v0_union, num_layers=num_layers,
+        validate_logical_op=False, validate_commutation=False,
     )
 
     # chi rows are indexed by V_0_union vertices; v0_indices[k] = data qubit

@@ -1808,3 +1808,33 @@ def test_multi_target_disjoint_pair_steane():
     n_x_data = int(np.sum(layout.base_layout.hx_row_kind == "data"))
     n_chi = int(np.sum(layout.base_layout.hx_row_kind != "data"))
     assert layout.chi_group_per_logical[0] == tuple(range(n_x_data, n_x_data + n_chi))
+
+
+def test_multi_target_each_logical_in_HX_row_span_steane():
+    """For Steane single logical, chi sum over its support equals X̄ on data."""
+    from qldpc.codes.surgery import build_multi_target_surgery_code
+    steane = codes.SteaneCode()
+    z_logical = np.asarray(steane.get_logical_ops(Pauli.Z)).astype(int)[0]
+    steane_dual = codes.CSSCode(
+        steane.matrix_z, steane.matrix_x, is_subsystem_code=False,
+    )
+    merged, layout = build_multi_target_surgery_code(steane_dual, [z_logical], validate=False)
+    HX = np.asarray(merged.matrix_x).astype(int)
+    chi_sum = np.zeros(merged.num_qubits, dtype=int)
+    for r in layout.chi_group_per_logical[0]:
+        chi_sum = (chi_sum + HX[r]) % 2
+    assert np.array_equal(chi_sum[:steane.num_qubits], z_logical)
+
+
+def test_multi_target_disjoint_pair_on_bb_basic_dimensions():
+    """Two disjoint Z-logical pairs on BB; verify k = k_data - 2."""
+    from qldpc.codes.surgery import build_multi_target_surgery_code
+    x, y = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), x**3 + y**3 + y**4, y**6 + x**2 + x**5)
+    bb_dual = codes.CSSCode(bb.matrix_z, bb.matrix_x, is_subsystem_code=False)
+    zls = np.asarray(bb.get_logical_ops(Pauli.Z)).astype(int)
+    ops = [zls[0], zls[1]]
+    merged, layout = build_multi_target_surgery_code(bb_dual, ops, validate=False)
+    assert merged.dimension == bb.dimension - 2
+    assert len(layout.logical_ops) == 2
+    assert len(layout.chi_group_per_logical) == 2
