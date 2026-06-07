@@ -50,3 +50,28 @@ def test_step1_restriction_steane():
     # F @ 1_{V0} == 0 (math.md §1.1 invariant)
     ones = np.ones(len(V0), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
+
+
+def test_step2_gauge_fix_basis_property():
+    from qldpc.codes.surgery.gadget import _step1_restriction, _step2_gauge_fix
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    _, _, F = _step1_restriction(code, x)
+    G = _step2_gauge_fix(F)
+    # math.md §1.2: G F = 0 over GF(2)
+    assert G.shape[1] == F.shape[0]
+    GF = (G @ F) % 2
+    assert np.array_equal(GF, np.zeros_like(GF))
+    # rank(G) = |C_0| - rank(F)
+    import galois
+    r_expected = F.shape[0] - int(np.linalg.matrix_rank(galois.GF(2)(F.tolist())))
+    assert G.shape[0] == r_expected
+
+
+def test_step2_gauge_fix_deterministic():
+    """Same F twice → byte-identical G."""
+    from qldpc.codes.surgery.gadget import _step2_gauge_fix
+    F = np.array([[1, 0, 1, 1], [0, 1, 1, 1]], dtype=np.uint8)
+    G1 = _step2_gauge_fix(F)
+    G2 = _step2_gauge_fix(F)
+    assert np.array_equal(G1, G2)

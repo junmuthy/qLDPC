@@ -45,3 +45,14 @@ def _step1_restriction(
     )
     F = HZ[np.ix_(C0, V0)] if C0 and V0 else np.zeros((len(C0), len(V0)), dtype=np.uint8)
     return V0, C0, F.astype(np.uint8)
+
+
+def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
+    """math.md §1.2 — G whose rows form a canonical basis of ker(F.T) over GF(2).
+
+    Uses galois ``left_null_space`` (row-reduced) so the basis is deterministic.
+    """
+    if F.size == 0:
+        return np.zeros((0, F.shape[0]), dtype=np.uint8)
+    G = GF2(F.astype(np.int_).tolist()).left_null_space()
+    return np.asarray(G).astype(np.uint8)
