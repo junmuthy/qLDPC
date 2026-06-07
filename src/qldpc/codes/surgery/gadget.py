@@ -56,3 +56,44 @@ def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
         return np.zeros((0, F.shape[0]), dtype=np.uint8)
     G = GF2(F.astype(np.int_).tolist()).left_null_space()
     return np.asarray(G).astype(np.uint8)
+
+
+def _step3_assemble(
+    code: CSSCode,
+    V0: tuple[int, ...],
+    C0: tuple[int, ...],
+    F: np.ndarray,
+    G: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """math.md §1.4 — block assembly of HX_merged, HZ_merged."""
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    n = code.num_qudits
+    mX, mZ = HX.shape[0], HZ.shape[0]
+    nV, nC = len(V0), len(C0)
+    r = G.shape[0]
+
+    # E_{V0}^T : (nV × n), single 1 per row at position V0[i]
+    E_V0_T = np.zeros((nV, n), dtype=np.uint8)
+    for i, v in enumerate(V0):
+        E_V0_T[i, v] = 1
+
+    # F^T (nV × nC)
+    F_T = F.T.astype(np.uint8)
+
+    # \tilde F : (mZ × nC), embedding F's rows back at HZ row indices C0
+    F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
+    for k, j in enumerate(C0):
+        F_tilde[j] = F[k]
+
+    HX_merged = np.block([
+        [HX, np.zeros((mX, nC), dtype=np.uint8)],
+        [E_V0_T, F_T],
+    ]).astype(np.uint8)
+
+    HZ_merged = np.block([
+        [HZ, F_tilde],
+        [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
+    ]).astype(np.uint8)
+
+    return HX_merged, HZ_merged

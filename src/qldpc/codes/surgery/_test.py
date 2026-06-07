@@ -79,3 +79,21 @@ def test_step2_gauge_fix_deterministic():
     assert np.array_equal(G1, G2)
     # And sanity-check the basis property holds on this F too.
     assert np.array_equal((G1 @ F) % 2, np.zeros((1, F.shape[1]), dtype=np.uint8))
+
+
+def test_step3_assemble_steane_css_commutes():
+    from qldpc.codes.surgery.gadget import (
+        _step1_restriction, _step2_gauge_fix, _step3_assemble,
+    )
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    V0, C0, F = _step1_restriction(code, x)
+    G = _step2_gauge_fix(F)
+    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G)
+
+    n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
+    assert HX_m.shape == (mX + len(V0), n + len(C0))
+    assert HZ_m.shape == (mZ + G.shape[0], n + len(C0))
+    # math.md §1.5(a): H_X^merged @ H_Z^merged.T == 0 over GF(2)
+    product = (HX_m @ HZ_m.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
