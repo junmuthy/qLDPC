@@ -9,6 +9,8 @@ Three explicit named steps that map 1:1 to the paper:
 from __future__ import annotations
 
 import dataclasses
+import json as _json
+import pathlib as _pathlib
 
 import galois
 import numpy as np
@@ -16,6 +18,8 @@ import numpy as np
 from qldpc.codes.common import CSSCode
 
 GF2 = galois.GF(2)
+
+_WEBSTER_APP_A_PATH = _pathlib.Path(__file__).resolve().parents[4] / "examples" / "webster_app_a.json"
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -115,3 +119,58 @@ def build_gadget(code: CSSCode, x: np.ndarray) -> GadgetLayout:
         code=code, x=x, V0=V0, C0=C0, F=F, G=G,
         HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
     )
+
+
+def load_webster_seed_set(code_index: int) -> dict:
+    """Load Webster (arXiv:2511.15989) Appendix A data for code index 0..3.
+
+    The 4 codes are generalised bicycle codes with l in {31, 63, 127, 255},
+    each having 4 seed operators (X_bar_1, Z_bar_1, X_bar_{k/2+1}, Z_bar_{k/2+1}).
+    The data is read from ``examples/webster_app_a.json``.
+
+    Returns:
+        A dict matching the JSON schema.
+
+    Raises:
+        IndexError: if code_index is not in 0..3.
+        FileNotFoundError: if the JSON fixture is missing.
+    """
+    if not 0 <= code_index <= 3:
+        raise IndexError(f"code_index must be in 0..3, got {code_index}")
+    with _WEBSTER_APP_A_PATH.open() as fh:
+        data = _json.load(fh)
+    return data["codes"][code_index]
+
+
+def _build_generalised_bicycle_code(l: int, A_set: list[int], B_set: list[int]) -> CSSCode:
+    """Build a generalised bicycle code from cyclic exponent sets A, B.
+
+    Per Kovalev-Pryadko (arXiv:1212.6703) and Swaroop's reference
+    implementation (https://github.com/eswaroop/adapters-LDPC-surgery,
+    ext/bivariate_bicyclic.py): given subsets A, B of Z_l, let A(x) =
+    sum(x^a for a in A_set) and B(x) = sum(x^b for b in B_set) as cyclic
+    matrices in F_2[Z_l]. Then H_X = [A | B] and H_Z = [B^T | A^T] define
+    the bicycle code on 2l data qubits.
+
+    Args:
+        l: cyclic group order.
+        A_set, B_set: subsets of {0, 1, ..., l-1}.
+
+    Returns:
+        CSSCode on 2l data qubits with check matrices [A | B] and
+        [B^T | A^T] over GF(2).
+    """
+    I_l = np.eye(l, dtype=np.int_)
+    # cyclic shift matrix S such that S^k is left-shift by k (zero-indexed)
+    S = np.roll(I_l, shift=-1, axis=0)
+    A = np.zeros((l, l), dtype=np.int_)
+    for a in A_set:
+        A = (A + np.linalg.matrix_power(S, a)) % 2
+    B = np.zeros((l, l), dtype=np.int_)
+    for b in B_set:
+        B = (B + np.linalg.matrix_power(S, b)) % 2
+
+    H_X = np.hstack([A, B])
+    H_Z = np.hstack([B.T, A.T])
+
+    return CSSCode(H_X, H_Z, is_subsystem_code=False)

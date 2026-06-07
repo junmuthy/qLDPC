@@ -206,3 +206,23 @@ def test_build_gadget_rejects_non_x_logical():
     if ((HZ @ x) % 2).any():
         with pytest.raises(ValueError, match="logical"):
             build_gadget(code, x)
+
+
+def test_load_webster_seed_set_returns_known_shape():
+    from qldpc.codes.surgery.gadget import load_webster_seed_set
+    data = load_webster_seed_set(0)
+    assert "l" in data and "A" in data and "B" in data
+    assert "seeds" in data
+
+
+def test_build_generalised_bicycle_code_constructs_css():
+    from qldpc.codes.surgery.gadget import (
+        load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    assert code.num_qudits == 2 * data["l"]
+    # CSS commutation
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    HZ = np.asarray(code.matrix_z).astype(np.uint8)
+    assert np.array_equal((HX @ HZ.T) % 2, np.zeros((HX.shape[0], HZ.shape[0]), dtype=np.uint8))
