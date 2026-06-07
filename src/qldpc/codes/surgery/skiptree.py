@@ -87,25 +87,31 @@ def _skip_tree_hr(
     root: int = 0,
     edge_index_verts: dict[tuple[int, int], int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """SkipTree Algorithm 2 (flag-based) returning T G P = H_R (open path).
+    """SkipTree returning T G P = H_R (open-path canonical basis).
 
-    Ide et al. arXiv:2410.03628 Appendix VIII. Differs from Algorithm 1
-    (`_skip_tree`) by NOT skipping the leftmost child in skip mode, yielding
-    the open-path repetition basis instead of the cyclic one. On Hamilton-path
-    inputs, this returns T = I_{n-1} (the optimal (1,1)-sparse transformation).
+    Ide et al. arXiv:2410.03628 Appendix VIII Algorithm 2.
+
+    On spanning-tree inputs this is observationally equivalent to
+    ``_skip_tree`` (Algorithm 1), because the existing Algorithm 1
+    implementation iterates ``range(n - 1)`` in its T-construction loop
+    and therefore never produces the cyclic-closing row of H_C. This
+    function is provided for paper traceability and as a hook for future
+    divergence on non-tree inputs (where Algorithm 2's flag-based
+    skipping logic would yield strictly sparser T than Algorithm 1).
 
     Args:
         S: connected simple graph (typically a spanning tree).
         root: vertex to start labelling at.
-        edge_index_verts: optional override mapping each edge ``tuple(sorted)``
-            to a column index in T. If None, columns are indexed by
-            ``S.edges()`` order.
+        edge_index_verts: optional override mapping each edge
+            ``tuple(sorted)`` to a column index in T. If None, columns
+            are indexed by ``S.edges()`` order.
 
     Returns:
-        T: shape (n-1, |E|) edge-incidence matrix. T[l, e] = 1 iff edge e
-            lies on the shortest path from vertex labeled l to vertex
-            labeled (l+1).
-        P: shape (n, n) permutation matrix. P[v, l] = 1 iff vertex v has label l.
+        T: shape (n-1, |E|) edge-incidence matrix. T[l, e] = 1 iff
+            edge e lies on the shortest path from vertex labeled l to
+            vertex labeled (l+1).
+        P: shape (n, n) permutation matrix. P[v, l] = 1 iff vertex v
+            has label l.
     """
     n = S.number_of_nodes()
     index = 0

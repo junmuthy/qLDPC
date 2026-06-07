@@ -1260,15 +1260,21 @@ def test_ide_fixtures_load_correctly():
 
 
 def test_skip_tree_hr_path_graph_is_optimal():
-    """On a path graph of 5 vertices, Algorithm 2 returns T = identity on the path edges."""
-    import networkx as nx
+    """On a 5-vertex path graph rooted at one endpoint, Algorithm 2 returns T = I_{n-1}.
+
+    With root at an endpoint, the SkipTree labels propagate sequentially
+    along the path, so each adjacent-label path is a single edge and T is
+    the identity matrix.
+    """
     from qldpc.codes.surgery import _skip_tree_hr
     G = nx.path_graph(5)
     T, P = _skip_tree_hr(G, root=0)
     n = 5
-    # T should be (n-1) x (n-1) = 4 x 4; P should be n x n = 5 x 5.
     assert T.shape == (n - 1, n - 1)
     assert P.shape == (n, n)
+    # With root=0 at one endpoint, the labelling traverses the path in order,
+    # making T identity (each l→l+1 step uses exactly the (l, l+1) edge).
+    assert np.array_equal(T.astype(int), np.eye(n - 1, dtype=int))
 
 
 def test_skip_tree_hr_gives_HR_basis():
