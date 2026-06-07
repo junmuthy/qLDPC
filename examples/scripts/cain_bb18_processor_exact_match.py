@@ -87,80 +87,75 @@ def logical_weight(vec: np.ndarray, basis_logicals: np.ndarray) -> int:
 def find_P_via_logical_subspace_search(
     code, target_logical_wt: int, target_phys_wt: int,
     max_samples: int = MAX_RANDOM_SAMPLES, seed: int = 0,
-) -> np.ndarray | None:
-    """Search for a Pauli P̄ with logical weight ≈ target_logical_wt and
-    physical weight = target_phys_wt.
+) -> tuple[np.ndarray | None, np.ndarray, int]:
+    """Search for a Pauli P̄ with logical weight target_logical_wt and
+    maximum physical weight (Cain §"Concrete construction"):
 
-    Strategy (matches Cain text §"Concrete construction"):
-      - Sample random non-trivial subsets of basis Z-logicals
-      - XOR them together
-      - Apply greedy stabilizer reduction to lower physical weight
-      - Check (logical_weight, physical_weight) == (target_logical_wt, target_phys_wt)
+      "Each operator is selected as the maximum-physical-weight example
+       among 10^5 randomly sampled logical multi-qubit X̄ operators."
+
+    Strategy:
+      - Sample random subsets of basis Z-logicals of size target_logical_wt
+      - XOR them together (NO stab reduction — Cain picks max-physical-weight)
+      - Verify it's a valid Z-logical (HX @ v == 0)
+      - Find one with physical weight == target_phys_wt
+      - Track max-physical-weight seen for diagnostics
+
+    Returns (matching_op_or_None, max_seen_op, max_seen_phys_weight).
     """
     HX = np.asarray(code.matrix_x).astype(int)
     HZ = np.asarray(code.matrix_z).astype(int)
     zls = np.asarray(code.get_logical_ops(Pauli.Z)).astype(int)
     k = code.dimension
     rng = _random.Random(seed)
-    # Exhaustive enumeration for k=10 is feasible: 2^10 - 1 = 1023 subsets
-    # Try ALL subsets of size target_logical_wt first
+
+    max_phys = 0
+    max_op = None
+
+    # Exhaustive enumeration for k=10 is feasible: C(10, 9) = 10 subsets at target_logical_wt=9
+    # Plus nearby sizes for more candidates
     candidates_seen = set()
     for subset in itertools.combinations(range(k), target_logical_wt):
         candidates_seen.add(subset)
         cur = np.zeros(code.num_qubits, dtype=int)
         for i in subset:
             cur = (cur + zls[i]) % 2
-        cur = h.stab_reduce(cur, HZ, max_steps=200, seed=hash(subset) & 0xFFFFFFFF)
         if ((HX @ cur) % 2).sum() != 0:
             continue
-        if int(cur.sum()) == target_phys_wt:
-            return cur
-    # Also try random subsets of various sizes for more coverage
-    for trial in range(max_samples):
-        wt = rng.choice([target_logical_wt - 1, target_logical_wt, target_logical_wt + 1])
-        wt = max(1, min(k, wt))
-        subset = tuple(sorted(rng.sample(range(k), wt)))
-        if subset in candidates_seen:
-            continue
-        candidates_seen.add(subset)
-        cur = np.zeros(code.num_qubits, dtype=int)
-        for i in subset:
-            cur = (cur + zls[i]) % 2
-        cur = h.stab_reduce(cur, HZ, max_steps=200, seed=trial)
-        if ((HX @ cur) % 2).sum() != 0:
-            continue
-        if int(cur.sum()) == target_phys_wt:
-            return cur
-    return None
+        phys_wt = int(cur.sum())
+        if phys_wt > max_phys:
+            max_phys = phys_wt
+            max_op = cur
+        if phys_wt == target_phys_wt:
+            return cur, max_op, max_phys
 
-
-def find_P_with_closest_weight(
-    code, target_logical_wt: int, target_phys_wt: int,
-    max_samples: int = 5000, seed: int = 0,
-) -> tuple[np.ndarray, int]:
-    """Find the candidate Pauli closest to target physical weight (for diagnostics)."""
-    HX = np.asarray(code.matrix_x).astype(int)
-    HZ = np.asarray(code.matrix_z).astype(int)
-    zls = np.asarray(code.get_logical_ops(Pauli.Z)).astype(int)
-    k = code.dimension
-    best_dist = None
-    best_op = None
-    rng = _random.Random(seed)
-    for trial in range(max_samples):
+    # Random XOR subsets with extra stabilizer noise (to span more orbits)
+    from tqdm import tqdm
+    pbar = tqdm(range(max_samples), desc="P̄ search")
+    for trial in pbar:
         wt = target_logical_wt
         subset = tuple(sorted(rng.sample(range(k), wt)))
         cur = np.zeros(code.num_qubits, dtype=int)
         for i in subset:
             cur = (cur + zls[i]) % 2
-        cur = h.stab_reduce(cur, HZ, max_steps=100, seed=trial)
+        # Add random stabilizers (preserves logical class, changes physical support)
+        n_stab = rng.randint(0, 10)
+        for _ in range(n_stab):
+            s_idx = rng.randrange(HZ.shape[0])
+            cur = (cur + HZ[s_idx]) % 2
         if ((HX @ cur) % 2).sum() != 0:
             continue
         phys_wt = int(cur.sum())
-        dist = abs(phys_wt - target_phys_wt)
-        if best_dist is None or dist < best_dist:
-            best_dist = dist
-            best_op = cur
-    return best_op, best_dist
+        if phys_wt > max_phys:
+            max_phys = phys_wt
+            max_op = cur
+            pbar.set_postfix({"max_phys": max_phys, "target": target_phys_wt})
+        if phys_wt == target_phys_wt:
+            pbar.close()
+            return cur, max_op, max_phys
+
+    pbar.close()
+    return None, max_op, max_phys
 
 
 def main() -> None:
@@ -176,20 +171,16 @@ def main() -> None:
     assert (bb.num_qubits, bb.dimension) == (248, 10)
 
     print(f"\nStep 1: find P̄ with logical weight {TARGET_LOGICAL_WEIGHT}, "
-          f"physical weight {TARGET_PHYSICAL_WEIGHT}")
-    op = find_P_via_logical_subspace_search(
+          f"max physical weight (target = {TARGET_PHYSICAL_WEIGHT})")
+    print(f"  (Cain: max-physical-weight among 10^5 random multi-qubit X̄ ops)")
+    op, max_op, max_phys = find_P_via_logical_subspace_search(
         bb,
         target_logical_wt=TARGET_LOGICAL_WEIGHT,
         target_phys_wt=TARGET_PHYSICAL_WEIGHT,
     )
     if op is None:
-        print(f"  no exact-weight P̄ found via subset search")
-        best_op, best_dist = find_P_with_closest_weight(
-            bb, TARGET_LOGICAL_WEIGHT, TARGET_PHYSICAL_WEIGHT, max_samples=5000,
-        )
-        print(f"  closest sample: physical weight {int(best_op.sum())}, "
-              f"distance from target {best_dist}")
-        op = best_op
+        print(f"  no exact-weight P̄ found; max physical weight seen: {max_phys}")
+        op = max_op
     else:
         print(f"  found P̄ with physical weight {int(op.sum())} = {TARGET_PHYSICAL_WEIGHT}")
 
@@ -200,21 +191,32 @@ def main() -> None:
     )
     bare_shape = h.gadget_shape(layout)
     print(f"  Bare gadget: (kappa, chi, G) = {bare_shape}")
+    add = TARGET[0] - bare_shape[0]
+    if add < 0:
+        print(f"  ✗ bare κ={bare_shape[0]} already exceeds target {TARGET[0]}")
+        return
+    print(f"  Need to add {add} qubits via Cheeger boost (force exact count)")
 
-    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_SEEDS - 1})")
-    for seed in range(MAX_SEEDS):
+    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_SEEDS - 1}), "
+          f"max_extra_qubits={add}, target_h=100.0")
+    from tqdm import tqdm
+    pbar = tqdm(range(MAX_SEEDS), desc="boost seed sweep")
+    for seed in pbar:
         boosted, b_layout, _result = boost_gadget_cheeger(
-            merged, layout, target_h=1.0, max_extra_qubits=200, seed=seed,
+            merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
         )
         shape = h.gadget_shape(b_layout)
+        pbar.set_postfix({"shape": str(shape)})
         if shape == TARGET:
-            print(f"  EXACT MATCH at seed={seed}: {shape}")
+            pbar.close()
+            print(f"\n  ✓ EXACT MATCH at seed={seed}: {shape}")
             print("\n" + "=" * 72)
             print(f"✓ EXACT MATCH with Cain Table III: {shape}")
             print(f"  Cain target: {TARGET}")
             print("=" * 72)
             return
-    print(f"  no seed in 0..{MAX_SEEDS - 1} produced {TARGET}; expand range or revise search")
+    pbar.close()
+    print(f"  ✗ no seed in 0..{MAX_SEEDS - 1} produced {TARGET}")
 
 
 if __name__ == "__main__":

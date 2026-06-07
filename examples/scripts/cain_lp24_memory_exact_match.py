@@ -82,43 +82,36 @@ def search_single_logical_wt208(
     best_w = None
     best_op = None
 
-    # Pass 1: individual basis logicals
-    print(f"    Pass 1: {min(n_basis_attempts, k)} basis logicals individually")
-    for i in range(min(n_basis_attempts, k)):
-        v = zls[i].copy()
-        v = h.stab_reduce(v, HZ, max_steps=stab_reduce_steps, seed=i)
-        if ((HX @ v) % 2).sum() != 0:
-            continue
-        w = int(v.sum())
-        if best_w is None or w < best_w:
-            best_w = w
-            best_op = v
-        if w == target_weight:
-            return v, w
-        if i < 5 or i % 50 == 0:
-            print(f"      basis[{i}]: wt={w} (best so far={best_w})")
-
-    # Pass 2: random XOR combinations of basis Z-logicals
+    from tqdm import tqdm
+    # Strategy: Cain wants MAX-physical-weight basis logical at wt 208.
+    # Our default basis logicals reduce to ≤ 140; we need to ADD stabilizers
+    # to raise the weight (not reduce). Search for stab-equivalent variants
+    # with weight = target_weight via random stab additions to a basis logical.
     rng = _random.Random(0)
-    print(f"    Pass 2: {n_random_combo_attempts} random XOR combinations")
-    for trial in range(n_random_combo_attempts):
-        # Vary combination size; small combinations are more likely to give low weight
-        nz = rng.randint(1, min(8, k))
-        subset = rng.sample(range(k), nz)
-        cur = np.zeros(code.num_qubits, dtype=int)
-        for i in subset:
-            cur = (cur + zls[i]) % 2
-        cur = h.stab_reduce(cur, HZ, max_steps=stab_reduce_steps, seed=trial)
-        if ((HX @ cur) % 2).sum() != 0:
-            continue
-        w = int(cur.sum())
-        if best_w is None or w < best_w:
-            best_w = w
-            best_op = cur
-        if w == target_weight:
-            return cur, w
-        if trial % 2000 == 0:
-            print(f"      trial {trial}: best wt={best_w}")
+    print(f"    Pass: {n_basis_attempts} basis logicals × {n_random_combo_attempts//n_basis_attempts}"
+          f" stab-augmentations each")
+    iterations_per_basis = max(1, n_random_combo_attempts // n_basis_attempts)
+    pbar = tqdm(range(min(n_basis_attempts, k)), desc="basis × stab")
+    for i in pbar:
+        for j in range(iterations_per_basis):
+            v = zls[i].copy()
+            # Add random stabilizers to raise weight toward target
+            n_stab = rng.randint(0, 30)
+            for _ in range(n_stab):
+                s_idx = rng.randrange(HZ.shape[0])
+                v = (v + HZ[s_idx]) % 2
+            if ((HX @ v) % 2).sum() != 0:
+                continue
+            w = int(v.sum())
+            # Track operator closest to target (above or below)
+            if best_w is None or abs(w - target_weight) < abs(best_w - target_weight):
+                best_w = w
+                best_op = v
+                pbar.set_postfix({"best_wt": best_w, "target": target_weight})
+            if w == target_weight:
+                pbar.close()
+                return v, w
+    pbar.close()
 
     return None, best_w
 

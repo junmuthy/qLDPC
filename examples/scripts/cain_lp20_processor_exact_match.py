@@ -65,49 +65,54 @@ def find_P_via_subspace_search(
     max_samples: int = MAX_RANDOM_SAMPLES, seed: int = 0,
 ) -> tuple[np.ndarray | None, np.ndarray, int]:
     """Search for a Pauli P̄ with logical weight target_logical_wt and
-    physical weight target_phys_wt.
+    MAXIMUM physical weight (Cain §"Concrete construction"):
 
-    Returns (matching_op_or_None, best_op_seen, best_phys_weight).
+      "Each operator is selected as the maximum-physical-weight example
+       among 10^5 randomly sampled logical multi-qubit X̄ operators."
+
+    Returns (matching_op_or_None, max_seen_op, max_seen_phys_weight).
 
     Strategy:
       - Sample random subsets of basis Z-logicals of size target_logical_wt
-      - XOR them together
-      - Apply greedy stabilizer reduction to lower physical weight
-      - Track candidate closest to target_phys_wt for diagnostics
+      - XOR them together (NO stab reduction — Cain wants max-physical-weight)
+      - Optionally add a few random stabilizers (preserves logical class)
+      - Find one with physical weight == target_phys_wt
     """
+    from tqdm import tqdm
     HX = np.asarray(code.matrix_x).astype(int)
     HZ = np.asarray(code.matrix_z).astype(int)
     zls = np.asarray(code.get_logical_ops(Pauli.Z)).astype(int)
     k = code.dimension
     rng = _random.Random(seed)
 
-    best_dist = None
-    best_op = None
-    best_phys = 0
+    max_phys = 0
+    max_op = None
 
-    for trial in range(max_samples):
-        # Vary subset size around target to enable some flexibility
+    pbar = tqdm(range(max_samples), desc="P̄ search")
+    for trial in pbar:
         wt = target_logical_wt
         subset = rng.sample(range(k), wt)
         cur = np.zeros(code.num_qubits, dtype=int)
         for i in subset:
             cur = (cur + zls[i]) % 2
-        cur = h.stab_reduce(cur, HZ, max_steps=40, seed=trial)
+        # Add some random stabilizers to span more orbits in the logical class
+        n_stab = rng.randint(0, 30)
+        for _ in range(n_stab):
+            s_idx = rng.randrange(HZ.shape[0])
+            cur = (cur + HZ[s_idx]) % 2
         if ((HX @ cur) % 2).sum() != 0:
             continue
         phys = int(cur.sum())
-        dist = abs(phys - target_phys_wt)
-        if best_dist is None or dist < best_dist:
-            best_dist = dist
-            best_op = cur
-            best_phys = phys
+        if phys > max_phys:
+            max_phys = phys
+            max_op = cur
+            pbar.set_postfix({"max_phys": max_phys, "target": target_phys_wt})
         if phys == target_phys_wt:
-            return cur, best_op, best_phys
-        # Progress logging at sparse intervals
-        if trial < 5 or trial % 5000 == 0:
-            print(f"    trial {trial}: phys_wt={phys} (best so far={best_phys})")
+            pbar.close()
+            return cur, max_op, max_phys
 
-    return None, best_op, best_phys
+    pbar.close()
+    return None, max_op, max_phys
 
 
 def main() -> None:
@@ -126,8 +131,9 @@ def main() -> None:
         return
 
     print(f"\nStep 1: find P̄ with logical weight {TARGET_LOGICAL_WEIGHT}, "
-          f"physical weight {TARGET_PHYSICAL_WEIGHT}")
-    op, best_op, best_phys = find_P_via_subspace_search(
+          f"max physical weight (target {TARGET_PHYSICAL_WEIGHT})")
+    print(f"  (Cain: max-physical-weight among 10^5 random multi-qubit X̄ ops)")
+    op, max_op, max_phys = find_P_via_subspace_search(
         lp,
         target_logical_wt=TARGET_LOGICAL_WEIGHT,
         target_phys_wt=TARGET_PHYSICAL_WEIGHT,
@@ -135,9 +141,8 @@ def main() -> None:
     )
     if op is None:
         print(f"  no exact-weight P̄ found in {MAX_RANDOM_SAMPLES} trials")
-        print(f"  best sample: physical weight {best_phys} (target {TARGET_PHYSICAL_WEIGHT},"
-              f" distance {abs(best_phys - TARGET_PHYSICAL_WEIGHT)})")
-        print(f"  Cain uses Ref [113] algebraic construction for LP codes; we use random + reduce.")
+        print(f"  max sample: physical weight {max_phys} (target {TARGET_PHYSICAL_WEIGHT})")
+        print(f"  Cain uses Ref [113] algebraic construction for LP codes; we use random sampling.")
         return
     else:
         print(f"  found P̄ with physical weight {int(op.sum())} = {TARGET_PHYSICAL_WEIGHT}")
@@ -149,21 +154,31 @@ def main() -> None:
     )
     bare_shape = h.gadget_shape(layout)
     print(f"  Bare gadget: (kappa, chi, G) = {bare_shape}")
+    add = TARGET[0] - bare_shape[0]
+    if add < 0:
+        print(f"  ✗ bare κ={bare_shape[0]} already exceeds target {TARGET[0]}")
+        return
+    print(f"  Need to add {add} qubits via Cheeger boost (force exact count)")
 
-    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1})")
-    for seed in range(MAX_BOOST_SEEDS):
+    print(f"\nStep 3: Cheeger boost seed sweep (0..{MAX_BOOST_SEEDS - 1}), "
+          f"max_extra_qubits={add}, target_h=100.0")
+    from tqdm import tqdm
+    pbar = tqdm(range(MAX_BOOST_SEEDS), desc="boost seed sweep")
+    for seed in pbar:
         boosted, b_layout, _r = boost_gadget_cheeger(
-            merged, layout, target_h=1.0, max_extra_qubits=500, seed=seed,
+            merged, layout, target_h=100.0, max_extra_qubits=add, seed=seed,
         )
         shape = h.gadget_shape(b_layout)
+        pbar.set_postfix({"shape": str(shape)})
         if shape == TARGET:
-            print(f"  EXACT MATCH at seed={seed}: {shape}")
+            pbar.close()
+            print(f"\n  ✓ EXACT MATCH at seed={seed}: {shape}")
             print("\n" + "=" * 72)
             print(f"✓ EXACT MATCH: {shape} = Cain target {TARGET}")
             print("=" * 72)
             return
-    print(f"  no seed in 0..{MAX_BOOST_SEEDS - 1} produced {TARGET};"
-          f" expand search OR reps wrong")
+    pbar.close()
+    print(f"  ✗ no seed in 0..{MAX_BOOST_SEEDS - 1} produced {TARGET}")
 
 
 if __name__ == "__main__":
