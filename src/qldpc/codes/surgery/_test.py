@@ -97,3 +97,74 @@ def test_step3_assemble_steane_css_commutes():
     # math.md §1.5(a): H_X^merged @ H_Z^merged.T == 0 over GF(2)
     product = (HX_m @ HZ_m.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_step3_assemble_csscode_with_distinct_nV_nC():
+    """Synthetic CSS code where nV != nC — catches F_tilde shape bug.
+
+    Uses a 5-qubit CSS code with k=1, picking a logical-X representative
+    whose support size (nV=4) differs from the number of Z-checks it
+    touches (nC=2). With the buggy F_tilde[j] = F[k] form, numpy raises
+    ValueError because F[k] has shape (nV=4,) but the row width is (nC=2).
+    The fix (F_tilde[j, k] = 1) is the correct indicator/selection matrix.
+
+    Verifies:
+    1. CSS commutation: HX_merged @ HZ_merged.T == 0 over GF(2).
+    2. Indicator form: each Z-check in C_0 attaches to EXACTLY ONE kappa
+       ancilla (row-sum == 1 in the kappa block).
+    """
+    from qldpc.codes.surgery.gadget import (
+        _step1_restriction, _step2_gauge_fix, _step3_assemble,
+    )
+
+    # 5-qubit CSS code (k=1):
+    #   HX = [[1,1,1,0,0],[0,0,0,1,1]]
+    #   HZ = [[1,1,0,0,0],[1,0,1,0,0]]
+    # Commutativity check (each pair of rows):
+    #   row0(HX)·row0(HZ) = 1+1+0+0+0 = 0 mod 2 ✓
+    #   row0(HX)·row1(HZ) = 1+0+1+0+0 = 0 mod 2 ✓
+    #   row1(HX)·row0(HZ) = 0+0+0+0+0 = 0 mod 2 ✓
+    #   row1(HX)·row1(HZ) = 0+0+0+0+0 = 0 mod 2 ✓
+    HX_raw = np.array([[1, 1, 1, 0, 0],
+                        [0, 0, 0, 1, 1]], dtype=np.uint8)
+    HZ_raw = np.array([[1, 1, 0, 0, 0],
+                        [1, 0, 1, 0, 0]], dtype=np.uint8)
+    assert np.array_equal((HX_raw @ HZ_raw.T) % 2,
+                           np.zeros((2, 2), dtype=np.uint8)), "CSS sanity failed"
+
+    code = codes.CSSCode(HX_raw, HZ_raw)
+
+    # Logical X rep: x = [1,1,1,1,0].
+    #   HZ @ x = [1+1+0,1+0+1] = [0,0] mod 2  =>  x in ker(HZ) ✓
+    #   row(HX) = span{[1,1,1,0,0],[0,0,0,1,1]}: cannot produce [1,1,1,1,0]
+    #   because the last coord would require b=0 while 4th coord requires b=1 ✓ logical
+    x_logical = np.array([1, 1, 1, 1, 0], dtype=np.uint8)
+    assert np.array_equal((HZ_raw @ x_logical) % 2,
+                           np.zeros(2, dtype=np.uint8)), "x_logical not in ker(HZ)"
+
+    V0, C0, F = _step1_restriction(code, x_logical)
+    # V0 = {0,1,2,3} (nV=4); HZ row0 touches {0,1}, HZ row1 touches {0,2} -> C0=(0,1) (nC=2)
+    assert len(V0) != len(C0), (
+        f"nV={len(V0)} == nC={len(C0)}: this test requires nV != nC to catch the bug"
+    )
+
+    G = _step2_gauge_fix(F)
+    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G)
+
+    # 1. CSS commutation
+    product = (HX_m @ HZ_m.T) % 2
+    assert np.array_equal(product, np.zeros_like(product)), (
+        "CSS commutation failed: HX_merged @ HZ_merged.T != 0"
+    )
+
+    # 2. Indicator form: each Z-check j in C_0 should attach to exactly
+    #    one kappa ancilla (column-slice after n data qubits in HZ_merged).
+    n = code.num_qudits
+    mZ = HZ_raw.shape[0]
+    HZ_kappa_block = HZ_m[:mZ, n:]
+    for k, j in enumerate(C0):
+        row_sum = int(HZ_kappa_block[j].sum())
+        assert row_sum == 1, (
+            f"row j={j} of HZ kappa-block should have exactly 1 one (indicator form), "
+            f"got {row_sum} — F_tilde indicator form violated"
+        )

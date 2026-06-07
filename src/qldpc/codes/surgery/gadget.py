@@ -81,10 +81,11 @@ def _step3_assemble(
     # F^T (nV × nC)
     F_T = F.T.astype(np.uint8)
 
-    # \tilde F : (mZ × nC), embedding F's rows back at HZ row indices C0
+    # \tilde F : (mZ × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
+    # (math.md §1.4). Previous form F_tilde[j] = F[k] only worked when nV == nC.
     F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
     for k, j in enumerate(C0):
-        F_tilde[j] = F[k]
+        F_tilde[j, k] = 1
 
     HX_merged = np.block([
         [HX, np.zeros((mX, nC), dtype=np.uint8)],
