@@ -1838,3 +1838,25 @@ def test_multi_target_disjoint_pair_on_bb_basic_dimensions():
     assert merged.dimension == bb.dimension - 2
     assert len(layout.logical_ops) == 2
     assert len(layout.chi_group_per_logical) == 2
+
+
+def test_multi_target_overlap_on_bb_shared_qubits_tracked():
+    """Two Z-logicals on BB with overlapping supports; SetValuedPort tracks shared qubits."""
+    from qldpc.codes.surgery import build_multi_target_surgery_code
+    x, y = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), x**3 + y**3 + y**4, y**6 + x**2 + x**5)
+    bb_dual = codes.CSSCode(bb.matrix_z, bb.matrix_x, is_subsystem_code=False)
+    # Construct two overlapping supports manually
+    op1 = np.zeros(98, dtype=int); op1[[6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]] = 1
+    op3 = np.zeros(98, dtype=int); op3[[10, 17, 35, 39, 42, 43, 53, 55, 61, 70, 84, 89]] = 1
+    overlap = set(np.flatnonzero(op1).tolist()) & set(np.flatnonzero(op3).tolist())
+    assert overlap == {17, 35}, f"test setup: overlap was {overlap}"
+
+    merged, layout = build_multi_target_surgery_code(bb_dual, [op1, op3], validate=False)
+    # Set-valued port tracks shared qubits
+    assert sorted(layout.set_valued_port.shared_qubits()) == [17, 35]
+    assert layout.set_valued_port.gadgets_for_qubit(17) == [0, 1]
+    assert layout.set_valued_port.gadgets_for_qubit(35) == [0, 1]
+    # Non-shared qubits map to single gadgets
+    assert layout.set_valued_port.gadgets_for_qubit(6) == [0]
+    assert layout.set_valued_port.gadgets_for_qubit(10) == [1]
