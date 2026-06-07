@@ -1,4 +1,4 @@
-"""Verify build_layered_surgery_code against Cain et al. Extended Data Table III.
+"""Verify build_gadget against Cain et al. Extended Data Table III.
 
 Cain Table III lists gadget ancilla sizes for various code families:
   - lp_20^{3,7} [[4350, 1224, ≤20]] Memory |P̄|=1: (342, 200, 143)
@@ -7,9 +7,9 @@ Cain Table III lists gadget ancilla sizes for various code families:
   - lp_20^{3,5} [[1122, 148, ≤20]] Processor |P̄|=69: (813, 460, 357)
   - bb_18 [[248, 10, ≤18]] Resource |P̄|=1: (39, 20, 20)
 
-Our build_layered_surgery_code is code-agnostic: it accepts ANY CSSCode plus
-a logical operator support vector. For verification, we run it on multiple
-code families and check the structural relations hold:
+Our build_gadget is code-agnostic: it accepts ANY CSSCode plus a logical
+operator support vector. For verification, we run it on multiple code
+families and check the structural relations hold:
 
   κ qubits     = |C_0|                       = # Z-stabs touching V_0
   χ X-checks   = |V_0|                       = wt(P̄) of the target operator
@@ -26,27 +26,22 @@ import numpy as np
 import sympy
 
 from qldpc import codes
-from qldpc.codes.surgery import (
-    _build_generalised_bicycle_code,
-    build_layered_surgery_code,
-    load_webster_seed_set,
-)
+from qldpc.codes.surgery import build_gadget, load_webster_seed_set
+from qldpc.codes.surgery.gadget import _build_generalised_bicycle_code
 from qldpc.objects import Pauli
 
 
 def gadget_size(code, logical_op):
     op = np.asarray(logical_op).astype(np.int_)
-    merged, layout = build_layered_surgery_code(
-        code, op, num_layers=1, validate_logical_op=False
-    )
-    n_kappa = int(layout.num_ancilla_qubits)
-    n_chi = int(np.sum(layout.hx_row_kind != "data"))
-    n_gauge = int(np.sum(layout.hz_row_kind == "gauge_fix"))
+    g = build_gadget(code, op)
+    n_kappa = len(g.kappa_qubits)
+    n_chi = len(g.V0)
+    n_gauge = g.G.shape[0]
     return n_kappa, n_chi, n_gauge
 
 
 def main() -> None:
-    print("Verifying build_layered_surgery_code across code families")
+    print("Verifying build_gadget across code families")
     print("=" * 90)
     print()
     print("| Code family   | Code [[n,k]]   | wt(P̄) | (κ, χ, G) | Total qubits | Cain ref       |")

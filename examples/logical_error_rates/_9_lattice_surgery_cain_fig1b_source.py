@@ -1,6 +1,6 @@
 """Source for 9_lattice_surgery_cain_fig1b.ipynb.
 
-Reproduces Cain et al. 2024 Fig 1b using qldpc.codes.build_layered_surgery_code
+Reproduces Cain et al. 2024 Fig 1b using qldpc.codes.surgery.build_gadget
 (Webster, Smith, Cohen 2025 §II.A 3-step gadget; equivalent to Cross 2024
 §III at L=1). The measurement circuit follows Webster Eq. (1): with gadget
 qubits initialized to |0⟩, the logical observable is the product of new
@@ -27,6 +27,7 @@ from __future__ import annotations
 import numpy as np
 
 from qldpc import codes
+from qldpc.codes.surgery import build_gadget
 from qldpc.objects import Pauli
 
 NUM_WORKERS = 8  # adjust to your machine; matches conventions in this directory.
@@ -57,14 +58,13 @@ print(f"|supp(X̄_M)| = {int(logical_x.sum())}")
 # %% [markdown]
 # ## 3. Build the gadget (merged surgery code)
 #
-# ``num_layers=1`` implements Webster Steps 1–3 verbatim. If BP-LSD fails to
-# converge, try ``num_layers=3`` (Cross fallback).
+# ``build_gadget`` implements Webster Steps 1–3 verbatim (L=1).
 
 # %%
-merged, layout = codes.build_layered_surgery_code(
-    data_code, logical_x, num_layers=1
-)
-print(f"Merged code: [[{merged.num_qubits}, {merged.dimension}]]")
+g = build_gadget(data_code, logical_x)
+merged_hx = g.HX_merged
+merged_hz = g.HZ_merged
+print(f"Gadget kappa qubits: {len(g.kappa_qubits)}, V0 size: {len(g.V0)}")
 
 # %% [markdown]
 # ## 4. Sanity print against Cain Table III
@@ -75,12 +75,12 @@ print(f"Merged code: [[{merged.num_qubits}, {merged.dimension}]]")
 # magnitude should be comparable.
 
 # %%
-ancilla_qubits = int(layout.num_ancilla_qubits)
-new_x_checks = int(np.sum(layout.hx_row_kind != "data"))
-new_z_checks = int(np.sum(layout.hz_row_kind != "data"))
+ancilla_qubits = len(g.kappa_qubits)
+new_x_checks = len(g.V0)
+new_z_checks = g.G.shape[0]
 print(f"Ancilla qubits      : {ancilla_qubits}")
 print(f"New X-checks (χ_i)  : {new_x_checks}")
-print(f"New Z-checks + U_L  : {new_z_checks}")
+print(f"New Z-checks (G)    : {new_z_checks}")
 print(f"Cain Table III ref  : (189, 104, 86) — qualitative comparison only")
 
 # %% [markdown]
@@ -103,12 +103,17 @@ num_rounds = 12  # PLACEHOLDER — set per target code distance
 
 # Identify which columns of the merged code are gadget qubits (Webster κ_j)
 # vs data qubits — needed for the per-qubit initial state.
-ancilla_qubit_mask = layout.qubit_layer == 1
-data_qubit_mask = layout.qubit_layer == 0
+n_data = data_code.num_qudits
+total_qubits = merged_hx.shape[1]
+ancilla_qubit_mask = np.array(
+    [False] * n_data + [True] * len(g.kappa_qubits), dtype=bool
+)
+data_qubit_mask = ~ancilla_qubit_mask
 
 # Identify which H_X rows are the χ_i (new X-checks added by the gadget).
-chi_row_mask = layout.hx_row_kind == "ancilla_L1"
-chi_row_indices = np.flatnonzero(chi_row_mask)
+# In GadgetLayout, the merged HX has data-code X-checks first, then |V0| new rows.
+n_data_x_checks = data_code.matrix_x.shape[0]
+chi_row_indices = np.arange(n_data_x_checks, n_data_x_checks + len(g.V0))
 print(f"#chi_i rows: {chi_row_indices.size}")
 
 # TODO(notebook author): build the surgery circuit. The pattern is:

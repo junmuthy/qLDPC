@@ -16,8 +16,8 @@ CODE CONSTRUCTIONS VERIFIED:
 PIPELINE METHODOLOGY (proven for bb_18; applies to all):
   1. Build CSSCode (qldpc.codes.BBCode or LPCode)
   2. Find min-weight Z̄ rep via BP+OSD + greedy stab reduction
-  3. build_layered_surgery_code (Webster §II.A 3-step)
-  4. boost_gadget_cheeger_combinatorial (greedy boost to h ≥ 1)
+  3. build_gadget (Webster §II.A 3-step)
+  4. boost_gadget(method='combinatorial') (greedy boost to h ≥ 1)
   5. Output: (κ, χ, G) = Cain's (Qubits, X-checks, Z-checks)
 
 REMAINING CAIN ROWS (Tasks 8-10 outcomes; see footnotes below):
@@ -164,8 +164,8 @@ def main() -> None:
     print("-" * 78)
     print("  1. Build CSSCode via codes.BBCode or codes.LPCode (Cain App. A polynomials)")
     print("  2. Find min-weight target rep via BP+OSD + greedy stab reduction")
-    print("  3. build_layered_surgery_code(target_code, target_op)  # Webster 3-step")
-    print("  4. boost_gadget_cheeger_combinatorial(merged, layout, target_h=1.0)")
+    print("  3. build_gadget(target_code, target_op)                 # Webster 3-step")
+    print("  4. boost_gadget(g, method='combinatorial', target=1.0)")
     print("  5. Read (κ, χ, G) from boosted layout — equals Cain's (Qubits, X, Z)")
     print()
 
