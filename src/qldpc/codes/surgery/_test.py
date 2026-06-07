@@ -373,3 +373,21 @@ def test_cellulate_long_cycles_no_op_when_short():
         G_mat[idx, v] = 1
     new_edges, _, _, _ = _cellulate_long_cycles(G, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=6)
     assert new_edges == []
+
+
+def test_build_bridge_intercode_two_different_codes():
+    """Inter-code dispatch fires (smoke test). Exact behavior tested with Ide BB-LP fixtures later."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code1 = codes.SteaneCode()
+    code2 = codes.SteaneCode()
+    assert code1 is not code2
+    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g1 = build_gadget(code1, x1)
+    g2 = build_gadget(code2, x2)
+    bridge = build_bridge(g1, g2)
+    # Just verify the dispatch went the intercode path:
+    assert bridge.intercode is True
+    # aux_graph_edges may be empty for trivial inputs; just check it's set
+    assert bridge.aux_graph_edges is not None
