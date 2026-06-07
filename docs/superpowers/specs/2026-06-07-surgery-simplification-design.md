@@ -35,6 +35,16 @@ generation, plus Cheeger distance boost as a utility.
    first-class API. Noise model layer and DETECTOR / OBSERVABLE_INCLUDE
    construction included.
 6. No backwards-compatibility aliases. Old names are removed cleanly.
+7. **Final code is minimal and reviewable end-to-end.** Each module
+   stays small enough to hold in head at once. Target line budget
+   (excluding `_test.py` and `cheeger.py`): `gadget.py` ≤ 200,
+   `bridge.py` ≤ 350, `circuit.py` ≤ 300, `__init__.py` ≤ 30. No
+   helper functions that exist only to be called once unless they
+   carry a named paper step (the three `_stepN_*` in `gadget.py` are
+   the explicit exception). No defensive checks beyond what
+   `build_gadget` / `build_bridge` / `build_*_circuit` need at the
+   API boundary. Docstrings cite math.md sections rather than
+   re-deriving math.
 
 ## Non-goals
 
