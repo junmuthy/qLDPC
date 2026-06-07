@@ -511,3 +511,19 @@ def test_boost_gadget_seed_reproducible():
     b = boost_gadget(g, method="spectral", target=1.0, seed=42)
     assert np.array_equal(a.F, b.F)
     assert np.array_equal(a.HX_merged, b.HX_merged)
+
+
+@pytest.mark.parametrize("method", ["spectral", "combinatorial", "distance"])
+def test_boost_gadget_preserves_css_commutation(method):
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.cheeger import boost_gadget
+    # Webster code 0 — Steane causes distance-boost decoder to hang on k=0 merged.
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x = _webster_x_bar_1_operator(data)
+    g = build_gadget(code, x)
+    boosted = boost_gadget(g, method=method, target=1.0, seed=0)
+    product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
