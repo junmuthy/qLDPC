@@ -339,3 +339,37 @@ def test_build_bridge_intracode_chi_endpoint_extensions():
     # math.md §2.3: χ_0 from each gadget gets an X on its bridge endpoint
     assert 0 in bridge.chi_endpoint_extensions  # gadget 1, row 0
     assert bridge.intercode is False
+
+
+def test_skip_tree_path_graph_returns_identity():
+    """math.md skip-tree on a path graph yields T and P with correct shapes."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _skip_tree
+    # Path graph on 5 vertices: edges (0,1),(1,2),(2,3),(3,4)
+    G = nx.path_graph(5)
+    T, P = _skip_tree(G)
+    # T should have shape (n-1, |E|) = (4, 4)
+    assert T.shape == (4, 4)
+    # P should be a permutation matrix of shape (n, n) = (5, 5)
+    assert P.shape == (5, 5)
+    # P is a permutation: each row and column has exactly one 1
+    assert np.array_equal(P.sum(axis=0), np.ones(5, dtype=np.int_))
+    assert np.array_equal(P.sum(axis=1), np.ones(5, dtype=np.int_))
+
+
+def test_cellulate_long_cycles_no_op_when_short():
+    """Cellulation of a graph with no long cycles returns no new edges."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_long_cycles
+    # Triangle: only cycle has length 3, well within max_len=6
+    G = nx.cycle_graph(3)
+    edge_qubit_to_vertices = {i: tuple(sorted(e)) for i, e in enumerate(G.edges())}
+    vert_to_edge = {v: k for k, v in edge_qubit_to_vertices.items()}
+    n_v = G.number_of_nodes()
+    n_e = G.number_of_edges()
+    G_mat = np.zeros((n_e, n_v), dtype=np.int_)
+    for idx, (u, v) in edge_qubit_to_vertices.items():
+        G_mat[idx, u] = 1
+        G_mat[idx, v] = 1
+    new_edges, _, _, _ = _cellulate_long_cycles(G, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=6)
+    assert new_edges == []
