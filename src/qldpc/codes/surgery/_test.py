@@ -276,3 +276,16 @@ def test_bridge_dataclass_fields():
         "aux_graph_edges", "z_extensions",
     }
     assert dataclasses.is_dataclass(Bridge)
+
+
+def test_path_graph_U_B_telescoping():
+    """math.md §2.2: sum of U_B rows == e_0 + e_{w-1}."""
+    from qldpc.codes.surgery.bridge import _build_path_graph_U_B
+    for w in (2, 3, 5, 11):
+        U_B = _build_path_graph_U_B(w)
+        assert U_B.shape == (w - 1, w)
+        col_sum = U_B.sum(axis=0) % 2
+        expected = np.zeros(w, dtype=np.uint8)
+        expected[0] = 1
+        expected[-1] = 1
+        assert np.array_equal(col_sum, expected)
