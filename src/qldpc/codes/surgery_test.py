@@ -1227,3 +1227,35 @@ def test_joint_dimension_equals_k_data_minus_1_on_webster(code_index: int) -> No
         f"Code {data['name']}: joint.dimension={joint.dimension}, expected "
         f"k_data - 1 = {code.dimension - 1}"
     )
+
+
+from qldpc.codes._ide_fixtures import (
+    fixtures_available,
+    load_ide_joint_BB_LP,
+    load_ide_joint_BB_intracode,
+    load_ide_skiptree_TPG,
+)
+
+
+@pytest.mark.skipif(not fixtures_available(), reason="Zenodo fixtures not present")
+def test_ide_fixtures_load_correctly():
+    HX_bbLP, HZ_bbLP = load_ide_joint_BB_LP()
+    assert HX_bbLP.shape == (175, 355)
+    assert HZ_bbLP.shape == (173, 355)
+    assert ((HX_bbLP @ HZ_bbLP.T) % 2 == 0).all()
+
+    HX_bbBB, HZ_bbBB = load_ide_joint_BB_intracode()
+    assert HX_bbBB.shape == (73, 150)
+    assert HZ_bbBB.shape == (72, 150)
+    assert ((HX_bbBB @ HZ_bbBB.T) % 2 == 0).all()
+
+    bb_z1 = load_ide_skiptree_TPG(
+        "BB_98_LP_200_adapter/skipTree_transformations/BB_98_6_12_Z_1_GTP.txt"
+    )
+    assert "T_1" in bb_z1 and "P_1" in bb_z1 and "G_mat_1" in bb_z1
+    T1, P1, G1 = bb_z1["T_1"] % 2, bb_z1["P_1"] % 2, bb_z1["G_mat_1"] % 2
+    HR_canonical = np.zeros((P1.shape[0] - 1, P1.shape[0]), dtype=int)
+    for l in range(P1.shape[0] - 1):
+        HR_canonical[l, l] = 1
+        HR_canonical[l, l + 1] = 1
+    assert np.array_equal((T1 @ G1 @ P1) % 2, HR_canonical)
