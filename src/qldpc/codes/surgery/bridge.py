@@ -36,3 +36,37 @@ def _build_path_graph_U_B(w: int) -> np.ndarray:
         U_B[i, i] = 1
         U_B[i, i + 1] = 1
     return U_B
+
+
+def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
+    """Two-PPM bridge between gadgets. Auto-dispatches intra vs inter-code.
+
+    math.md §2: bridge data qubits + path-graph U_B + chi endpoint extensions.
+    """
+    intercode = g1.code is not g2.code
+    w = min(len(g1.V0), len(g2.V0))
+    if w < 2:
+        raise ValueError(f"bridge width must be >= 2, got {w}")
+
+    qubits = tuple(range(w))  # relative offsets; circuit.py rebases.
+
+    U_B = _build_path_graph_U_B(w)
+
+    # math.md §2.3 χ-extension
+    # gadget 1's χ_0 row → X on bridge[0]
+    # gadget 2's χ_0 row → X on bridge[w-1]
+    chi_endpoint_extensions: dict[int, np.ndarray] = {
+        0: np.array([0], dtype=np.uint8),
+    }
+
+    if not intercode:
+        return Bridge(
+            width=w, qubits=qubits, U_B=U_B,
+            chi_endpoint_extensions=chi_endpoint_extensions,
+            intercode=False,
+            aux_graph_edges=None,
+            z_extensions=None,
+        )
+
+    # Inter-code path added in Task 12.
+    raise NotImplementedError("inter-code bridge added in Task 12")

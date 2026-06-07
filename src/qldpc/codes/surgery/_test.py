@@ -289,3 +289,53 @@ def test_path_graph_U_B_telescoping():
         expected[0] = 1
         expected[-1] = 1
         assert np.array_equal(col_sum, expected)
+
+
+WEBSTER_TABLE_I_BRIDGE = [(0, 11), (1, 19), (2, 31), (3, 51)]
+
+
+@pytest.mark.parametrize("code_index,bridge_w_minus_1", WEBSTER_TABLE_I_BRIDGE)
+def test_webster_table_i_bridge_width_exact(code_index, bridge_w_minus_1):
+    """Webster Table I: 2w - 1 matches."""
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _webster_x_bar_k2p1_operator(data)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    assert bridge.intercode is False
+    assert 2 * bridge.width - 1 == bridge_w_minus_1
+
+
+def _webster_x_bar_k2p1_operator(data: dict) -> np.ndarray:
+    """Extract X_bar_k2p1 operator from a Webster seed_set dict."""
+    l = data["l"]
+    for seed in data["seeds"]:
+        if seed["name"] == "X_bar_k2p1" and seed["pauli_type"] == "X":
+            L = np.zeros(l, dtype=np.uint8)
+            R = np.zeros(l, dtype=np.uint8)
+            for i in seed["L_support"]:
+                L[i] = 1
+            for i in seed["R_support"]:
+                R[i] = 1
+            return np.concatenate([L, R])
+    raise ValueError("X_bar_k2p1 seed not found")
+
+
+def test_build_bridge_intracode_chi_endpoint_extensions():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code = codes.SteaneCode()
+    x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    # math.md §2.3: χ_0 from each gadget gets an X on its bridge endpoint
+    assert 0 in bridge.chi_endpoint_extensions  # gadget 1, row 0
+    assert bridge.intercode is False
