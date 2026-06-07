@@ -12,7 +12,7 @@ Public API is re-exported for backwards compatibility with
 from __future__ import annotations
 
 from .cellulation import _cellulate_long_cycles  # noqa: F401
-from .skiptree import _skip_tree  # noqa: F401
+from .skiptree import _skip_tree, _skip_tree_hr  # noqa: F401
 from .cheeger import (  # noqa: F401
     BoostResult,
     DistanceBoostResult,

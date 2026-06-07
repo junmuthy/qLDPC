@@ -1257,3 +1257,37 @@ def test_ide_fixtures_load_correctly():
         HR_canonical[l, l] = 1
         HR_canonical[l, l + 1] = 1
     assert np.array_equal((T1 @ G1 @ P1) % 2, HR_canonical)
+
+
+def test_skip_tree_hr_path_graph_is_optimal():
+    """On a path graph of 5 vertices, Algorithm 2 returns T = identity on the path edges."""
+    import networkx as nx
+    from qldpc.codes.surgery import _skip_tree_hr
+    G = nx.path_graph(5)
+    T, P = _skip_tree_hr(G, root=0)
+    n = 5
+    # T should be (n-1) x (n-1) = 4 x 4; P should be n x n = 5 x 5.
+    assert T.shape == (n - 1, n - 1)
+    assert P.shape == (n, n)
+
+
+def test_skip_tree_hr_gives_HR_basis():
+    """T·G·P = H_R(n) for the open-path basis (NOT H_C cyclic)."""
+    import networkx as nx
+    from qldpc.codes.surgery import _skip_tree_hr
+    # Cycle graph of 6 vertices; spanning tree drops one edge to get a path
+    G = nx.cycle_graph(6)
+    span = nx.minimum_spanning_tree(G)
+    T, P = _skip_tree_hr(span, root=0)
+    n = 6
+    edge_list = list(span.edges())
+    G_mat = np.zeros((len(edge_list), n), dtype=int)
+    for i, (u, v) in enumerate(edge_list):
+        G_mat[i, u] = 1
+        G_mat[i, v] = 1
+    H_R = np.zeros((n - 1, n), dtype=int)
+    for l in range(n - 1):
+        H_R[l, l] = 1
+        H_R[l, l + 1] = 1
+    product = (T.astype(int) @ G_mat @ P.astype(int)) % 2
+    assert np.array_equal(product, H_R)
