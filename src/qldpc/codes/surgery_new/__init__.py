@@ -24,8 +24,8 @@ from qldpc.codes.surgery import (
     _assemble_merged_HX,
     _assemble_merged_HZ,
     _build_generalised_bicycle_code,
-    _skip_tree,
     _spectral_cheeger_lower_bound,
 )
 
 from .cellulation import _cellulate_long_cycles  # noqa: F401
+from .skiptree import _skip_tree  # noqa: F401
