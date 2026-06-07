@@ -1367,6 +1367,33 @@ def test_build_joint_measurement_code_intercode_BB_LP_has_expected_dim():
     assert feasible, "joint observable X̄_1 X̄_2 not in HX row span"
 
 
+def test_v2_intra_code_joint_BB_Z1_Z3_with_overlap():
+    """v2 intra-code joint on BB_1 Z̄_1 × Z̄_3 with overlap on {17, 35} works.
+
+    Validates that the legacy v2 path-graph bridge handles the overlap
+    case (where supp(op1) ∩ supp(op2) ≠ ∅). This is the §VII C scenario.
+    """
+    from qldpc.codes.surgery import build_joint_measurement_code
+
+    xs, ys = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), xs**3 + ys**3 + ys**4, ys**6 + xs**2 + xs**5)
+    z1 = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1[q] = 1
+    z3 = np.zeros(98, dtype=int)
+    for q in [10, 17, 35, 39, 42, 43, 53, 55, 61, 70, 84, 89]:
+        z3[q] = 1
+    overlap = set(np.flatnonzero(z1).tolist()) & set(np.flatnonzero(z3).tolist())
+    assert overlap == {17, 35}
+
+    merged, layout = build_joint_measurement_code(bb, z1, z3, validate=True)
+    # k_joint = k_bb - 1 = 5 for intra-code measurement consuming one DOF.
+    assert merged.dimension == bb.dimension - 1
+    prod = (np.asarray(merged.matrix_x).astype(int)
+            @ np.asarray(merged.matrix_z).astype(int).T) % 2
+    assert (prod == 0).all()
+
+
 def test_skip_tree_hr_path_graph_is_optimal():
     """On a 5-vertex path graph rooted at one endpoint, Algorithm 2 returns T = I_{n-1}.
 
