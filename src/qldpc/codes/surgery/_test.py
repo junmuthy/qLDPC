@@ -391,3 +391,27 @@ def test_build_bridge_intercode_two_different_codes():
     assert bridge.intercode is True
     # aux_graph_edges may be empty for trivial inputs; just check it's set
     assert bridge.aux_graph_edges is not None
+
+
+def test_build_single_ppm_circuit_noiseless_compiles():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    import stim
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(g, rounds=2, noise_model=None)
+    assert isinstance(circuit, stim.Circuit)
+    assert len(circuit) > 0
+
+
+def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(g, rounds=2, noise_model=None)
+    sampler = circuit.compile_detector_sampler()
+    samples = sampler.sample(shots=16)
+    assert (samples == 0).all()
