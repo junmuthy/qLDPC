@@ -6,6 +6,7 @@ ground truth for stab-group equality assertions in joint tests.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -16,7 +17,8 @@ _FIXTURE_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "id
 
 
 def fixtures_available() -> bool:
-    return _FIXTURE_ROOT.exists() and any(_FIXTURE_ROOT.iterdir())
+    sentinel = _FIXTURE_ROOT / "BB_98_LP_200_adapter" / "Hx_intercode_BB_LP_adapter-Z_1_Z_2_deformed-code.mtx"
+    return sentinel.exists()
 
 
 def load_mtx(rel_path: str) -> np.ndarray:
@@ -38,14 +40,24 @@ def load_ide_joint_BB_intracode() -> tuple[np.ndarray, np.ndarray]:
 
 
 def load_ide_skiptree_TPG(path: str) -> dict[str, np.ndarray]:
-    """Parse one of Ide's *_GTP.txt files. Returns dict with keys G_mat_*, T_*, P_*."""
+    """Parse one of Ide's *_GTP.txt files.
+
+    Args:
+        path: relative path from ``tests/fixtures/ide_zenodo/`` (e.g.
+            ``"BB_98_LP_200_adapter/skipTree_transformations/BB_98_6_12_Z_1_GTP.txt"``).
+
+    Returns:
+        Dict mapping variable name (e.g. ``"G_mat_1"``, ``"T_1"``, ``"P_1"``)
+        to its numpy int array, parsed from the Python array literals in the file.
+    """
     text = (_FIXTURE_ROOT / path).read_text()
     out: dict[str, np.ndarray] = {}
     pattern = re.compile(r"^([A-Za-z_0-9]+)\s*=\s*np\.array\((.*?)\)\s*$",
                           re.MULTILINE | re.DOTALL)
     for match in pattern.finditer(text):
         name = match.group(1)
-        # safe eval: only floats, lists, np.array allowed
-        arr = eval(match.group(2), {"np": np}, {})
+        # trusted Zenodo input, parsed via ast.literal_eval
+        inner = match.group(2).strip()
+        arr = ast.literal_eval(inner)
         out[name] = np.array(arr, dtype=int)
     return out

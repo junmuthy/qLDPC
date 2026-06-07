@@ -13,6 +13,12 @@ import numpy as np
 import pytest
 
 from qldpc import codes
+from qldpc.codes._ide_fixtures import (
+    fixtures_available,
+    load_ide_joint_BB_LP,
+    load_ide_joint_BB_intracode,
+    load_ide_skiptree_TPG,
+)
 from qldpc.codes.surgery import SurgeryLayout, load_webster_seed_set
 from qldpc.objects import Pauli
 
@@ -1227,14 +1233,6 @@ def test_joint_dimension_equals_k_data_minus_1_on_webster(code_index: int) -> No
         f"Code {data['name']}: joint.dimension={joint.dimension}, expected "
         f"k_data - 1 = {code.dimension - 1}"
     )
-
-
-from qldpc.codes._ide_fixtures import (
-    fixtures_available,
-    load_ide_joint_BB_LP,
-    load_ide_joint_BB_intracode,
-    load_ide_skiptree_TPG,
-)
 
 
 @pytest.mark.skipif(not fixtures_available(), reason="Zenodo fixtures not present")
