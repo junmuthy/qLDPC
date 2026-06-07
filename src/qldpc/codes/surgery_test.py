@@ -1367,6 +1367,107 @@ def test_build_joint_measurement_code_intercode_BB_LP_has_expected_dim():
     assert feasible, "joint observable X̄_1 X̄_2 not in HX row span"
 
 
+def test_build_joint_measurement_code_intercode_cellulated_matches_Ide_n():
+    """With cellulate=True, BB-LP joint matches Ide's n=355.
+
+    Note: same n and k, but the STAB GROUPS are NOT equivalent — Ide's
+    construction uses a different (and not fully decoded) basis.
+    """
+    from qldpc.codes.surgery import build_joint_measurement_code_intercode
+    from qldpc.codes.surgery.layered import _restrict_to_logical_support
+    from qldpc.codes.surgery.cellulation import _cellulate_long_cycles
+    from qldpc.abstract import CyclicGroup, GroupRing, RingArray
+    import networkx as _nx
+    import random as _random
+
+    xs, ys = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), xs**3 + ys**3 + ys**4, ys**6 + xs**2 + xs**5)
+    z1 = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1[q] = 1
+
+    ell = 8
+    grp = CyclicGroup(ell)
+    xg = grp.generators[0]
+    ring = GroupRing(grp)
+    A = RingArray.build(
+        [[xg**2, 1, 1, xg**2], [1, xg, xg**2, xg], [xg**2, xg, xg**3, xg**2]],
+        ring,
+    )
+    lp = codes.LPCode(A)
+
+    HX_lp = np.asarray(lp.matrix_x).astype(int)
+    HZ_lp = np.asarray(lp.matrix_z).astype(int)
+    zls = np.asarray(lp.get_logical_ops(Pauli.Z)).astype(int)
+    from qldpc.codes.common import CSSCode as _CSSCode
+    lp_dual = _CSSCode(lp.matrix_z, lp.matrix_x, is_subsystem_code=False)
+    rng = _random.Random(0)
+    z2 = None
+    for _ in range(2000):
+        kk = rng.randint(1, 8)
+        idxs = rng.sample(range(lp.dimension), kk)
+        cur = np.zeros(lp.num_qubits, dtype=int)
+        for i in idxs:
+            cur = (cur + zls[i]) % 2
+        for _ in range(20):
+            improved = False
+            for s_idx in rng.sample(range(HZ_lp.shape[0]), 30):
+                cand = (cur + HZ_lp[s_idx]) % 2
+                if int(cand.sum()) < int(cur.sum()):
+                    cur = cand; improved = True; break
+            if not improved:
+                break
+        if int(cur.sum()) != 14 or ((HX_lp @ cur) % 2).sum() != 0:
+            continue
+        # Filter by cellulated ancilla = 20 (matches Ide)
+        try:
+            _, _, F = _restrict_to_logical_support(lp_dual, cur, 1, False)
+        except ValueError:
+            continue
+        F_arr = np.asarray(F).astype(int)
+        n_V = F_arr.shape[1]
+        vte = {}; eqv = {}
+        Gg = _nx.Graph(); Gg.add_nodes_from(range(n_V))
+        for i, row in enumerate(F_arr):
+            eps = sorted(np.flatnonzero(row).tolist())
+            if len(eps) == 2:
+                u_, v_ = eps
+                if (u_, v_) not in vte:
+                    eqv[i] = (u_, v_); vte[(u_, v_)] = i; Gg.add_edge(u_, v_)
+        F_c = F_arr.astype(np.int_).copy()
+        _, _, _, F_cell = _cellulate_long_cycles(Gg, dict(eqv), dict(vte), F_c, 6)
+        if F_cell.shape[0] == 20:
+            z2 = cur
+            break
+    assert z2 is not None, "Could not find wt-14 LP_2 logical rep with κ_2 = 20"
+
+    merged, layout = build_joint_measurement_code_intercode(
+        bb, z1, lp, z2, cellulate=True, validate=False
+    )
+    assert merged.num_qubits == 355, f"Expected n=355, got {merged.num_qubits}"
+    assert merged.dimension == 25
+    # CSS commute
+    prod = (np.asarray(merged.matrix_x).astype(int)
+            @ np.asarray(merged.matrix_z).astype(int).T) % 2
+    assert (prod == 0).all()
+    # Joint observable check
+    op_pad = np.zeros(355, dtype=int)
+    op_pad[:98] = z1
+    d2_start = 98 + layout.gadget_layouts[0].num_ancilla_qubits
+    op_pad[d2_start:d2_start + 200] = z2
+    HX_arr = np.asarray(merged.matrix_x).astype(int)
+    import galois as _galois
+    GF2 = _galois.GF(2)
+    aug = GF2(np.hstack([HX_arr.T, op_pad.reshape(-1, 1)]))
+    rref = np.asarray(aug.row_reduce())
+    feasible = True
+    for r in range(rref.shape[0]):
+        nz = np.flatnonzero(rref[r, :HX_arr.shape[0]])
+        if nz.size == 0 and rref[r, -1] == 1:
+            feasible = False; break
+    assert feasible
+
+
 def test_v2_intra_code_joint_BB_Z1_Z3_with_overlap():
     """v2 intra-code joint on BB_1 Z̄_1 × Z̄_3 with overlap on {17, 35} works.
 

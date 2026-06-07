@@ -373,6 +373,90 @@ def _stitch_gadgets_with_bridge(
     return joint_merged, joint_layout
 
 
+def _build_gadget_with_cellulation(
+    data_code: CSSCode,
+    logical_op: np.ndarray,
+    max_cycle_len: int = 6,
+) -> tuple[CSSCode, "SurgeryLayout"]:
+    """Build a Webster gadget with Lemma 14 cellulation applied to the auxiliary graph.
+
+    Identical to ``build_layered_surgery_code`` for L=1 except for an inserted
+    cellulation step on the auxiliary graph G. Each cellulation chord adds
+    one κ_1 ancilla qubit; the corresponding Z-stab is provided by the
+    gauge-fix block (left null space of F includes the cellulation
+    dependencies automatically).
+
+    Used by ``build_joint_measurement_code_intercode`` so that the resulting
+    joint code's ``n`` matches Ide's paper-exact value (e.g., n=355 for BB-LP).
+    """
+    from .cellulation import _cellulate_long_cycles
+    from .layered import (
+        _restrict_to_logical_support, _compute_gauge_fix,
+        _build_layered_blocks, _assemble_merged_HX, _build_layout,
+    )
+    import networkx as nx
+
+    v0_indices, c0_indices, F = _restrict_to_logical_support(
+        data_code, logical_op, num_layers=1, validate_logical_op=False
+    )
+    F_arr = np.asarray(F).astype(int)
+    n_orig_c0 = F_arr.shape[0]
+    n_V = F_arr.shape[1]
+    edge_q_to_v: dict[int, tuple[int, int]] = {}
+    vert_to_edge: dict[tuple[int, int], int] = {}
+    G_graph = nx.Graph()
+    G_graph.add_nodes_from(range(n_V))
+    for i, row in enumerate(F_arr):
+        eps = sorted(np.flatnonzero(row).tolist())
+        if len(eps) == 2:
+            u, v = eps[0], eps[1]
+            if (u, v) not in vert_to_edge:
+                edge_q_to_v[i] = (u, v)
+                vert_to_edge[(u, v)] = i
+                G_graph.add_edge(u, v)
+    F_for_cell = F_arr.astype(np.int_).copy()
+    _, _, _, F_cell = _cellulate_long_cycles(
+        G_graph, dict(edge_q_to_v), dict(vert_to_edge), F_for_cell,
+        max_len=max_cycle_len,
+    )
+    F_cell_gf = data_code.field(F_cell.astype(int))
+    blocks = _build_layered_blocks(F_cell_gf, num_layers=1)
+    G_gauge = _compute_gauge_fix(F_cell_gf)
+    HX_merged = _assemble_merged_HX(data_code, blocks, v0_indices)
+
+    # HZ assembly with adjusted I_c0 size to cover only original C_0 cols.
+    field = data_code.field
+    n_data = data_code.num_qubits
+    n_ancilla = blocks.total_ancilla
+    n_merged = n_data + n_ancilla
+    hz = data_code.matrix_z
+    n_z_data = int(hz.shape[0])
+
+    old_z = field.Zeros((n_z_data, n_merged))
+    old_z[:, :n_data] = hz
+    c1_slice = blocks.ancilla_col_slice(1)
+    if n_orig_c0 > 0:
+        I_orig = field.Identity(n_orig_c0)
+        old_z[
+            c0_indices,
+            n_data + c1_slice.start : n_data + c1_slice.start + n_orig_c0,
+        ] = I_orig
+
+    gauge_rows = []
+    if G_gauge.shape[0] > 0:
+        gf_block = field.Zeros((G_gauge.shape[0], n_merged))
+        cL_slice = blocks.ancilla_col_slice(blocks.num_layers)
+        gf_block[:, n_data + cL_slice.start : n_data + cL_slice.stop] = G_gauge
+        gauge_rows.append(gf_block)
+    HZ_merged = field(np.vstack([old_z, *gauge_rows]))
+
+    merged_code = CSSCode(HX_merged, HZ_merged, is_subsystem_code=False)
+    layout = _build_layout(
+        data_code, blocks, G_gauge, v0_indices, c0_indices, F_cell_gf
+    )
+    return merged_code, layout
+
+
 def build_joint_measurement_code_intercode(
     data_code_1: CSSCode,
     op1: npt.ArrayLike,
@@ -380,6 +464,8 @@ def build_joint_measurement_code_intercode(
     op2: npt.ArrayLike,
     *,
     num_layers: int = 1,
+    cellulate: bool = False,
+    max_cycle_len: int = 6,
     validate: bool = True,
 ) -> tuple[CSSCode, JointSurgeryLayout]:
     """Inter-code joint measurement of op1 (on data_code_1) and op2 (on data_code_2).
@@ -400,6 +486,13 @@ def build_joint_measurement_code_intercode(
         op1: logical operator support on data_code_1.
         op2: logical operator support on data_code_2.
         num_layers: layer count L for each gadget.
+        cellulate: if True, apply Lemma 14 cellulation to each gadget's
+            auxiliary graph before assembling. This matches Ide's
+            (arXiv:2410.03628 §VII A) paper-exact ancilla counts (BB_1
+            Z̄_1 → 23, LP_2 Z̄_2 → 20). The total n increases by the
+            number of cellulation edges added per gadget.
+        max_cycle_len: max cycle length allowed in G_s without cellulation.
+            Default 6 matches Ide §VII A.
         validate: if True, run sanity checks on op1, op2.
 
     Returns:
@@ -424,12 +517,20 @@ def build_joint_measurement_code_intercode(
     target_2 = CSSCode(
         data_code_2.matrix_z, data_code_2.matrix_x, is_subsystem_code=False
     )
-    merged1, layout1 = build_layered_surgery_code(
-        target_1, op1_arr, num_layers=num_layers, validate_logical_op=False
-    )
-    merged2, layout2 = build_layered_surgery_code(
-        target_2, op2_arr, num_layers=num_layers, validate_logical_op=False
-    )
+    if cellulate:
+        merged1, layout1 = _build_gadget_with_cellulation(
+            target_1, op1_arr, max_cycle_len=max_cycle_len
+        )
+        merged2, layout2 = _build_gadget_with_cellulation(
+            target_2, op2_arr, max_cycle_len=max_cycle_len
+        )
+    else:
+        merged1, layout1 = build_layered_surgery_code(
+            target_1, op1_arr, num_layers=num_layers, validate_logical_op=False
+        )
+        merged2, layout2 = build_layered_surgery_code(
+            target_2, op2_arr, num_layers=num_layers, validate_logical_op=False
+        )
 
     w = min(int(layout1.v0_indices.size), int(layout2.v0_indices.size))
     if w == 0:
