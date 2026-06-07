@@ -226,3 +226,42 @@ def test_build_generalised_bicycle_code_constructs_css():
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     assert np.array_equal((HX @ HZ.T) % 2, np.zeros((HX.shape[0], HZ.shape[0]), dtype=np.uint8))
+
+
+WEBSTER_TABLE_I_KAPPA_CHI_R = [(0, 19), (1, 31), (2, 49), (3, 79)]
+
+
+def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
+    """Extract the X_bar_1 operator from a Webster seed_set dict as a 2l-vector.
+
+    L_support and R_support are sparse index lists (positions within each l-half
+    that are set to 1). This converts them to a dense binary vector of length 2l.
+    """
+    l = data["l"]
+    for seed in data["seeds"]:
+        if seed["name"] == "X_bar_1" and seed["pauli_type"] == "X":
+            v_L = np.zeros(l, dtype=np.uint8)
+            v_L[seed["L_support"]] = 1
+            v_R = np.zeros(l, dtype=np.uint8)
+            v_R[seed["R_support"]] = 1
+            return np.concatenate([v_L, v_R])
+    raise ValueError("X_bar_1 seed not found")
+
+
+@pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_KAPPA_CHI_R)
+def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
+    """Webster Table I: κ + χ + r matches for each of the 4 codes."""
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    g1 = build_gadget(code, x1)
+    kappa = len(g1.kappa_qubits)
+    chi = int(g1.x.sum())  # |V_0|
+    r = g1.G.shape[0]
+    assert kappa + chi + r == n_anc, (
+        f"code {code_index}: κ={kappa}, χ={chi}, r={r}, "
+        f"sum={kappa+chi+r}, expected {n_anc}"
+    )
