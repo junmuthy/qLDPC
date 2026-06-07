@@ -265,3 +265,14 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
         f"code {code_index}: κ={kappa}, χ={chi}, r={r}, "
         f"sum={kappa+chi+r}, expected {n_anc}"
     )
+
+
+def test_bridge_dataclass_fields():
+    from qldpc.codes.surgery.bridge import Bridge
+    fields = {f.name for f in dataclasses.fields(Bridge)}
+    assert fields == {
+        "width", "qubits", "U_B",
+        "chi_endpoint_extensions", "intercode",
+        "aux_graph_edges", "z_extensions",
+    }
+    assert dataclasses.is_dataclass(Bridge)
