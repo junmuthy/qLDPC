@@ -1739,3 +1739,35 @@ def test_extend_chi_rows_with_bridge_gamma_flip():
         for l2 in range(n_bridge):
             if l2 != l:
                 assert bridge_block[v, l2] == 1
+
+
+def test_set_valued_port_from_supports_disjoint():
+    from qldpc.codes.surgery import SetValuedPort
+    s1 = np.zeros(10, dtype=int); s1[[2, 5, 7]] = 1
+    s2 = np.zeros(10, dtype=int); s2[[3, 8]] = 1
+    port = SetValuedPort.from_supports([s1, s2])
+    assert port.qubit_to_gadgets == {2: [0], 5: [0], 7: [0], 3: [1], 8: [1]}
+    assert not port.is_shared(2)
+    assert not port.is_shared(3)
+    assert port.gadgets_for_qubit(5) == [0]
+    assert port.shared_qubits() == []
+
+
+def test_set_valued_port_from_supports_with_overlap():
+    from qldpc.codes.surgery import SetValuedPort
+    s1 = np.zeros(10, dtype=int); s1[[2, 5, 7]] = 1
+    s2 = np.zeros(10, dtype=int); s2[[5, 8]] = 1
+    port = SetValuedPort.from_supports([s1, s2])
+    assert port.is_shared(5)
+    assert not port.is_shared(2)
+    assert port.gadgets_for_qubit(5) == [0, 1]
+    assert port.shared_qubits() == [5]
+
+
+def test_set_valued_port_qubits_not_in_any_support_omitted():
+    from qldpc.codes.surgery import SetValuedPort
+    s1 = np.zeros(10, dtype=int); s1[[0]] = 1
+    port = SetValuedPort.from_supports([s1])
+    assert 0 in port.qubit_to_gadgets
+    assert 1 not in port.qubit_to_gadgets
+    assert port.gadgets_for_qubit(1) == []
