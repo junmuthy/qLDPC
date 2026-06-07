@@ -415,3 +415,28 @@ def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
     sampler = circuit.compile_detector_sampler()
     samples = sampler.sample(shots=16)
     assert (samples == 0).all()
+
+
+def test_build_joint_ppm_circuit_intracode_returns_pair():
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    import stim
+    # Use a k>=2 code so the k_joint = k_data - 1 invariant is not masked by
+    # the spurious bridge logical (see joint.py lines 327-346 for details).
+    data = load_webster_seed_set(0)  # (62, 10, 6) bicycle code
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _webster_x_bar_k2p1_operator(data)
+    g1 = build_gadget(code, x1)
+    g2 = build_gadget(code, x2)
+    bridge = build_bridge(g1, g2)
+    circuit, joint_code = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=1, noise_model=None,
+    )
+    assert isinstance(circuit, stim.Circuit)
+    assert isinstance(joint_code, codes.CSSCode)
+    # math.md §2.8: k_joint = k_data - 1
+    assert joint_code.dimension == code.dimension - 1
