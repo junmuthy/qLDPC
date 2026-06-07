@@ -404,7 +404,7 @@ import json as _json
 import pathlib as _pathlib
 
 
-_WEBSTER_APP_A_PATH = _pathlib.Path(__file__).resolve().parents[3] / "examples" / "webster_app_a.json"
+_WEBSTER_APP_A_PATH = _pathlib.Path(__file__).resolve().parents[4] / "examples" / "webster_app_a.json"
 
 
 def load_webster_seed_set(code_index: int) -> dict:
