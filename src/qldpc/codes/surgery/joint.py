@@ -495,7 +495,10 @@ def canonical_HR(w: int) -> np.ndarray:
 def _running_xor_b_c(T_col: np.ndarray) -> np.ndarray:
     """Compute b in F_2^w from T_col in F_2^{w-1} via running XOR.
 
-    Solves H_R^T b = T_col with the canonical choice b[0] = 0.
+    Solves H_R @ b = T_col with the canonical choice b[0] = 0, where
+    H_R = canonical_HR(w) is the (w-1) x w open-path repetition parity
+    check. Row l of H_R yields b[l] + b[l+1] = T_col[l]; the running
+    XOR b[l] = b[l-1] XOR T_col[l-1] (with b[0] = 0) solves this.
     """
     w_minus_1 = T_col.shape[0]
     w = w_minus_1 + 1
