@@ -373,6 +373,133 @@ def _stitch_gadgets_with_bridge(
     return joint_merged, joint_layout
 
 
+def build_joint_measurement_code_intercode(
+    data_code_1: CSSCode,
+    op1: npt.ArrayLike,
+    data_code_2: CSSCode,
+    op2: npt.ArrayLike,
+    *,
+    num_layers: int = 1,
+    validate: bool = True,
+) -> tuple[CSSCode, JointSurgeryLayout]:
+    """Inter-code joint measurement of op1 (on data_code_1) and op2 (on data_code_2).
+
+    Builds independent Webster gadgets on each code, connects them with
+    a path-graph bridge (w = min(|V_0_1|, |V_0_2|) data qubits + w-1 X
+    path stabs + chi endpoint extensions). The merged code measures the
+    product op1 · op2 jointly, consuming one logical DOF.
+
+    Qubit register layout:
+        [ data_1 | κ_1 | data_2 | κ_2 | bridge ]
+        n_data_1   n_anc_1   n_data_2   n_anc_2   w
+
+    k_joint = data_code_1.dimension + data_code_2.dimension - 1.
+
+    Args:
+        data_code_1, data_code_2: stabilizer CSSCodes (possibly different).
+        op1: logical operator support on data_code_1.
+        op2: logical operator support on data_code_2.
+        num_layers: layer count L for each gadget.
+        validate: if True, run sanity checks on op1, op2.
+
+    Returns:
+        (merged_code, joint_layout).
+    """
+    op1_arr = np.asarray(op1).astype(np.int_)
+    op2_arr = np.asarray(op2).astype(np.int_)
+
+    if validate:
+        if data_code_1.dimension < 1 or data_code_2.dimension < 1:
+            raise ValueError("both codes must have dimension >= 1")
+        gf1 = data_code_1.field(op1_arr)
+        if ((data_code_1.matrix_z @ gf1) != 0).any():
+            raise ValueError("op1 must commute with data_code_1.matrix_z")
+        gf2 = data_code_2.field(op2_arr)
+        if ((data_code_2.matrix_z @ gf2) != 0).any():
+            raise ValueError("op2 must commute with data_code_2.matrix_z")
+
+    target_1 = CSSCode(
+        data_code_1.matrix_z, data_code_1.matrix_x, is_subsystem_code=False
+    )
+    target_2 = CSSCode(
+        data_code_2.matrix_z, data_code_2.matrix_x, is_subsystem_code=False
+    )
+    merged1, layout1 = build_layered_surgery_code(
+        target_1, op1_arr, num_layers=num_layers, validate_logical_op=False
+    )
+    merged2, layout2 = build_layered_surgery_code(
+        target_2, op2_arr, num_layers=num_layers, validate_logical_op=False
+    )
+
+    w = min(int(layout1.v0_indices.size), int(layout2.v0_indices.size))
+    if w == 0:
+        raise ValueError("min(|V_0_1|, |V_0_2|) = 0; cannot build bridge")
+
+    n_data_1 = data_code_1.num_qubits
+    n_data_2 = data_code_2.num_qubits
+    n_anc_1 = layout1.num_ancilla_qubits
+    n_anc_2 = layout2.num_ancilla_qubits
+    n_bridge = w
+    n_merged = n_data_1 + n_anc_1 + n_data_2 + n_anc_2 + n_bridge
+
+    HX1 = np.asarray(merged1.matrix_x).astype(np.int_)
+    HX2 = np.asarray(merged2.matrix_x).astype(np.int_)
+    HZ1 = np.asarray(merged1.matrix_z).astype(np.int_)
+    HZ2 = np.asarray(merged2.matrix_z).astype(np.int_)
+
+    def embed_1(M: np.ndarray) -> np.ndarray:
+        out = np.zeros((M.shape[0], n_merged), dtype=np.int_)
+        out[:, :n_data_1] = M[:, :n_data_1]
+        out[:, n_data_1 : n_data_1 + n_anc_1] = M[:, n_data_1:]
+        return out
+
+    def embed_2(M: np.ndarray) -> np.ndarray:
+        out = np.zeros((M.shape[0], n_merged), dtype=np.int_)
+        d2_start = n_data_1 + n_anc_1
+        a2_start = d2_start + n_data_2
+        out[:, d2_start : d2_start + n_data_2] = M[:, :n_data_2]
+        out[:, a2_start : a2_start + n_anc_2] = M[:, n_data_2:]
+        return out
+
+    HX1_emb = embed_1(HX1)
+    HX2_emb = embed_2(HX2)
+    HZ1_emb = embed_1(HZ1)
+    HZ2_emb = embed_2(HZ2)
+
+    bridge_col_start = n_data_1 + n_anc_1 + n_data_2 + n_anc_2
+
+    # Extend chi_0^(1) with X on bridge[0]; chi_0^(2) with X on bridge[w-1].
+    n_x_data_1 = int(np.sum(layout1.hx_row_kind == "data"))
+    n_x_data_2 = int(np.sum(layout2.hx_row_kind == "data"))
+    HX1_emb[n_x_data_1, bridge_col_start + 0] = 1
+    HX2_emb[n_x_data_2, bridge_col_start + (w - 1)] = 1
+
+    # Bridge path X-stabs: w-1 rows, row i has 1s at bridge[i], bridge[i+1].
+    u_b = np.zeros((w - 1, n_merged), dtype=np.int_)
+    for i in range(w - 1):
+        u_b[i, bridge_col_start + i] = 1
+        u_b[i, bridge_col_start + i + 1] = 1
+
+    HX_joint = np.vstack([HX1_emb, HX2_emb, u_b])
+    HZ_joint = np.vstack([HZ1_emb, HZ2_emb])
+
+    field = data_code_1.field
+    joint = CSSCode(field(HX_joint % 2), field(HZ_joint % 2), is_subsystem_code=False)
+
+    u_b_mask = np.zeros(HX_joint.shape[0], dtype=bool)
+    u_b_mask[-(w - 1):] = True
+    layout = JointSurgeryLayout(
+        gadget_layouts=(layout1, layout2),
+        pauli_type=Pauli.X,
+        num_data_qubits=n_data_1 + n_data_2,
+        num_ancilla_qubits=n_anc_1 + n_anc_2,
+        num_bridge_qubits=n_bridge,
+        bridge_qubit_slice=slice(bridge_col_start, n_merged),
+        u_b_check_kind_mask=u_b_mask,
+    )
+    return joint, layout
+
+
 def build_joint_measurement_code(
     data_code: CSSCode,
     op1: npt.ArrayLike,

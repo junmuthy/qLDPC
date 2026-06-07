@@ -1291,6 +1291,82 @@ def test_build_joint_from_ide_fixture_unknown_name_raises():
         build_joint_from_ide_fixture("BB_XYZ")
 
 
+def test_build_joint_measurement_code_intercode_BB_LP_has_expected_dim():
+    """Inter-code joint on BB_1 Z̄_1 × LP_2 Z̄_2 gives k_joint = k_BB + k_LP - 1."""
+    from qldpc.codes.surgery import build_joint_measurement_code_intercode
+    from qldpc.abstract import CyclicGroup, GroupRing, RingArray
+    import random as _random
+
+    xs, ys = sympy.symbols("x y")
+    bb = codes.BBCode((7, 7), xs**3 + ys**3 + ys**4, ys**6 + xs**2 + xs**5)
+    z1 = np.zeros(98, dtype=int)
+    for q in [6, 8, 13, 17, 31, 32, 33, 35, 36, 37, 41, 50, 51, 93]:
+        z1[q] = 1
+
+    ell = 8
+    grp = CyclicGroup(ell)
+    xg = grp.generators[0]
+    ring = GroupRing(grp)
+    A = RingArray.build(
+        [[xg**2, 1, 1, xg**2], [1, xg, xg**2, xg], [xg**2, xg, xg**3, xg**2]],
+        ring,
+    )
+    lp = codes.LPCode(A)
+
+    HX_lp = np.asarray(lp.matrix_x).astype(int)
+    HZ_lp = np.asarray(lp.matrix_z).astype(int)
+    zls = np.asarray(lp.get_logical_ops(Pauli.Z)).astype(int)
+    rng = _random.Random(0)
+    z2 = None
+    for _ in range(2000):
+        k = rng.randint(1, 8)
+        idxs = rng.sample(range(lp.dimension), k)
+        cur = np.zeros(lp.num_qubits, dtype=int)
+        for i in idxs:
+            cur = (cur + zls[i]) % 2
+        for _ in range(20):
+            improved = False
+            for s_idx in rng.sample(range(HZ_lp.shape[0]), 30):
+                cand = (cur + HZ_lp[s_idx]) % 2
+                if int(cand.sum()) < int(cur.sum()):
+                    cur = cand
+                    improved = True
+                    break
+            if not improved:
+                break
+        if int(cur.sum()) == 14 and ((HX_lp @ cur) % 2).sum() == 0:
+            z2 = cur
+            break
+    assert z2 is not None, "Could not find wt-14 LP_2 logical rep"
+
+    merged, layout = build_joint_measurement_code_intercode(
+        bb, z1, lp, z2, validate=False
+    )
+    assert merged.num_qubits == 98 + 200 + layout.num_ancilla_qubits + layout.num_bridge_qubits
+    assert merged.dimension == bb.dimension + lp.dimension - 1  # = 25 for [[98,6,?]] + [[200,20,?]]
+    # CSS commute
+    prod = (np.asarray(merged.matrix_x).astype(int)
+            @ np.asarray(merged.matrix_z).astype(int).T) % 2
+    assert (prod == 0).all()
+    # Joint observable X̄_1 X̄_2 should be in HX row span
+    op_pad = np.zeros(merged.num_qubits, dtype=int)
+    op_pad[:98] = z1
+    d2_start = 98 + layout.gadget_layouts[0].num_ancilla_qubits
+    op_pad[d2_start : d2_start + 200] = z2
+    HX_arr = np.asarray(merged.matrix_x).astype(int)
+    import galois as _galois
+    GF2 = _galois.GF(2)
+    aug = GF2(np.hstack([HX_arr.T, op_pad.reshape(-1, 1)]))
+    rref = np.asarray(aug.row_reduce())
+    feasible = True
+    for r in range(rref.shape[0]):
+        nz = np.flatnonzero(rref[r, :HX_arr.shape[0]])
+        if nz.size == 0 and rref[r, -1] == 1:
+            feasible = False
+            break
+    assert feasible, "joint observable X̄_1 X̄_2 not in HX row span"
+
+
 def test_skip_tree_hr_path_graph_is_optimal():
     """On a 5-vertex path graph rooted at one endpoint, Algorithm 2 returns T = I_{n-1}.
 

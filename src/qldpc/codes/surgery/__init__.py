@@ -36,6 +36,7 @@ from .layered import (  # noqa: F401
 from .joint import (  # noqa: F401
     JointSurgeryLayout,
     build_joint_measurement_code,
+    build_joint_measurement_code_intercode,
     _validate_joint_logical_ops,
     _BridgeSpec,
     _build_bridge_via_skiptree,

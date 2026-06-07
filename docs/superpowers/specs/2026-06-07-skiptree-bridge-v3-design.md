@@ -396,6 +396,7 @@ pattern.
 - §4.7 probe + fallback solver as diagnostic helpers (`_chi_z_compatibility_check`, `_solve_chi_z_bridge_choices`, `_extend_chi_rows_with_bridge`) — these RAISE `ValueError` on BB_1 Z̄_1.
 - New `build_joint_from_ide_fixture("BB_LP" | "BB_BB")` in `qldpc.codes._ide_fixtures` returning the paper-exact joint CSSCode by loading the Zenodo `.mtx`. Use this for distance / decoder experiments on the two paper examples.
 - v2 path-graph bridge (intra-code only) preserved at `joint.py` `build_joint_measurement_code(data_code, op1, op2)`.
+- **NEW: inter-code joint** at `joint.py` `build_joint_measurement_code_intercode(data_code_1, op1, data_code_2, op2)` — a path-graph-bridge analog of v2 generalized to two distinct data codes. Produces a valid CSSCode with `k_joint = k_1 + k_2 - 1`, CSS commutation holds, joint observable X̄_1 X̄_2 ∈ HX row span. Does NOT match Ide's paper-exact basis (rank-13 H_R bridge instead of Ide's rank-14 bridge code) but is stab-group-valid for joint measurement purposes. Verified on BB_1 Z̄_1 × LP_2 Z̄_2.
 
 ### 10.5 What v3 future work needs
 
