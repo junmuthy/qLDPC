@@ -1082,3 +1082,23 @@ def test_surgery_observable_emits_two_observable_include():
     text = str(circuit)
     assert text.count("OBSERVABLE_INCLUDE") == 2  # PPM + cross-check
     assert "(0)" in text and "(1)" in text  # two distinct observable indices
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_single_ppm_circuit_noiseless_observables_zero(basis):
+    """Both OBSERVABLE_INCLUDEs evaluate to 0 (= +1) under no noise."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    op = (code.get_logical_ops(Pauli.X)[0]
+          if basis is Pauli.X
+          else code.get_logical_ops(Pauli.Z)[0])
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    circuit = build_single_ppm_circuit(g, rounds=3, noise_model=None)
+    # Sample observables; all should be 0.
+    sampler = circuit.compile_detector_sampler()
+    _, obs = sampler.sample(shots=16, separate_observables=True)
+    assert (obs == 0).all(), (
+        f"noiseless observables fired: {obs.sum()} flips across 16 shots"
+    )

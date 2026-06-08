@@ -11,7 +11,7 @@ import stim
 
 from qldpc.codes.common import CSSCode
 from qldpc.circuits.bookkeeping import QubitIDs
-from qldpc.circuits.memory.memory import get_memory_experiment
+from qldpc.circuits.memory.memory import get_memory_experiment, get_qubit_coordinates
 from qldpc.objects import Pauli, PauliXZ
 
 from .bridge import Bridge
@@ -32,13 +32,56 @@ def build_single_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> stim.Circuit:
-    """Stim circuit for single-PPM measurement using `gadget`.
+    """Stim circuit implementing Cain §III.A single-PPM surgery on `gadget`.
 
-    Builds the merged CSS code (data + κ ancillas) and delegates to the
-    existing memory experiment infrastructure.
+    Pipeline:
+        1. QubitIDs + coordinates
+        2. _surgery_state_prep (κ |0⟩, data |+⟩ or basis-Z duals)
+        3. _surgery_qec_cycle (τ_s rounds with classified round-1 detectors)
+        4. _surgery_detach_and_readout (Mκ then Mdata)
+        5. _surgery_observable (observable 0 = chi-XOR; observable 1 = data on V_0)
+        6. Apply noise_model
     """
-    merged = _gadget_merged_csscode(gadget)
-    return get_memory_experiment(merged, basis=Pauli.X, num_rounds=rounds, noise_model=noise_model)
+    merged_code = _gadget_merged_csscode(gadget)
+    qubit_ids = QubitIDs.from_code(merged_code)
+    n_original_data = gadget.code.num_qudits
+    data_ids = qubit_ids.data[:n_original_data]
+    kappa_ids = qubit_ids.data[n_original_data:]
+    bridge_ids: tuple[int, ...] = ()
+
+    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
+    circuit += _surgery_state_prep(gadget, data_ids, kappa_ids, bridge_ids)
+    qec_cycle, measurement_record, _ = _surgery_qec_cycle(
+        gadget, merged_code, num_rounds=rounds, qubit_ids=qubit_ids,
+    )
+    circuit += qec_cycle
+    circuit += _surgery_detach_and_readout(
+        gadget, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
+
+    # Chi-row check_ids: HX_merged rows [m_X : m_X + |V_0|] (basis=X) or HZ_merged for Z.
+    m_X = gadget.code.matrix_x.shape[0]
+    m_Z = gadget.code.matrix_z.shape[0]
+    n_V = len(gadget.V0)
+    if gadget.basis is Pauli.X:
+        chi_check_ids = tuple(qubit_ids.checks_x[m_X:m_X + n_V])
+    else:
+        chi_check_ids = tuple(qubit_ids.checks_z[m_Z:m_Z + n_V])
+
+    circuit += _surgery_observable(
+        gadget,
+        chi_check_ids=chi_check_ids,
+        data_ids=data_ids,
+        v0_indices=gadget.V0,
+        num_rounds=rounds,
+        measurement_record=measurement_record,
+    )
+
+    if noise_model is not None:
+        circuit = noise_model.noisy_circuit(circuit)
+
+    return circuit
 
 
 def _stitch_to_joint_csscode(
