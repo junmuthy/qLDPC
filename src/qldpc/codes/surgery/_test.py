@@ -727,3 +727,26 @@ def test_step1_restriction_basis_z_uses_HX():
     # math.md §1.1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
     ones = np.ones(len(V0), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
+
+
+def test_build_gadget_z_basis_css_commutation():
+    """build_gadget(code, z_logical, basis=Pauli.Z) yields a CSS-commuting merged code."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    assert g.basis is Pauli.Z
+    product = (g.HX_merged @ g.HZ_merged.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_build_gadget_z_basis_rejects_non_z_logical():
+    """For basis=Pauli.Z, build_gadget checks HX @ x == 0 (z must be a Z-logical)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    # An X-logical fails: HX @ x_logical_X is typically nonzero
+    x_logical = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    if ((HX @ x_logical) % 2).any():
+        with pytest.raises(ValueError, match="logical"):
+            build_gadget(code, x_logical, basis=Pauli.Z)
