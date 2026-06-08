@@ -299,6 +299,34 @@ def _surgery_qec_cycle(
     return circuit, measurement_record, detector_record
 
 
+def _surgery_observable(
+    gadget: GadgetLayout,
+    *,
+    chi_check_ids: tuple[int, ...],
+    data_ids: tuple[int, ...],
+    v0_indices: tuple[int, ...],
+    num_rounds: int,
+    measurement_record: MeasurementRecord,
+) -> stim.Circuit:
+    """Two OBSERVABLE_INCLUDE: 0 = ⊕ chi-row records across rounds (Webster Eq. 1),
+    1 = ⊕ data measurements on V_0 (X̄_M / Z̄_M cross-check).
+    """
+    circuit = stim.Circuit()
+    # Observable 0: chi-XOR across all rounds
+    chi_targets = [
+        measurement_record.get_target_rec(cid, -1 - r)
+        for r in range(num_rounds)
+        for cid in chi_check_ids
+    ]
+    circuit.append("OBSERVABLE_INCLUDE", chi_targets, 0)
+    # Observable 1: data measurement on V_0
+    data_targets = [
+        measurement_record.get_target_rec(data_ids[i]) for i in v0_indices
+    ]
+    circuit.append("OBSERVABLE_INCLUDE", data_targets, 1)
+    return circuit
+
+
 def _surgery_detach_and_readout(
     gadget: GadgetLayout,
     *,
