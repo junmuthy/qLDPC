@@ -1,17 +1,14 @@
-"""Stim surgery circuit construction.
-
-build_single_ppm_circuit  — single-PPM measurement (gadget alone)
-build_joint_ppm_circuit   — two-PPM joint measurement (gadget + gadget + bridge)
-"""
+"""Stim surgery circuit construction (single-PPM and joint-PPM)."""
 
 from __future__ import annotations
 
 import numpy as np
 import stim
 
-from qldpc.codes.common import CSSCode
-from qldpc.circuits.bookkeeping import QubitIDs
+from qldpc.circuits.bookkeeping import MeasurementRecord, DetectorRecord, QubitIDs
 from qldpc.circuits.memory.memory import get_qubit_coordinates
+from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
+from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 
 from .bridge import Bridge
@@ -32,21 +29,12 @@ def build_single_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> stim.Circuit:
-    """Stim circuit implementing Cain §III.A single-PPM surgery on `gadget`.
-
-    Pipeline:
-        1. QubitIDs + coordinates
-        2. _surgery_state_prep (κ |0⟩, data |+⟩ or basis-Z duals)
-        3. _surgery_qec_cycle (τ_s rounds with classified round-1 detectors)
-        4. _surgery_detach_and_readout (Mκ then Mdata)
-        5. _surgery_observable (observable 0 = chi-XOR; observable 1 = data on V_0)
-        6. Apply noise_model
-    """
+    """Cain §III.A single-PPM measurement circuit for `gadget`."""
     merged_code = _gadget_merged_csscode(gadget)
     qubit_ids = QubitIDs.from_code(merged_code)
-    n_original_data = gadget.code.num_qudits
-    data_ids = qubit_ids.data[:n_original_data]
-    kappa_ids = qubit_ids.data[n_original_data:]
+    n_data = gadget.code.num_qudits
+    data_ids = qubit_ids.data[:n_data]
+    kappa_ids = qubit_ids.data[n_data:]
     bridge_ids: tuple[int, ...] = ()
 
     circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
@@ -60,14 +48,11 @@ def build_single_ppm_circuit(
         measurement_record=measurement_record,
     )
 
-    # Chi-row check_ids: HX_merged rows [m_X : m_X + |V_0|] (basis=X) or HZ_merged for Z.
-    m_X = gadget.code.matrix_x.shape[0]
-    m_Z = gadget.code.matrix_z.shape[0]
-    n_V = len(gadget.V0)
+    m_X, m_Z, n_V = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0], len(gadget.V0)
     if gadget.basis is Pauli.X:
-        chi_check_ids = tuple(qubit_ids.checks_x[m_X:m_X + n_V])
+        chi_check_ids = tuple(qubit_ids.checks_x[m_X : m_X + n_V])
     else:
-        chi_check_ids = tuple(qubit_ids.checks_z[m_Z:m_Z + n_V])
+        chi_check_ids = tuple(qubit_ids.checks_z[m_Z : m_Z + n_V])
 
     circuit += _surgery_observable(
         gadget,
@@ -89,142 +74,99 @@ def _stitch_to_joint_csscode(
     g2: GadgetLayout,
     bridge: Bridge,
 ) -> CSSCode:
-    """Assemble the joint CSS code for two-PPM surgery.
-
-    Intra-code (g1.code is g2.code) layout:
-        [ data | g1-kappa | g2-kappa | bridge ]
-        HX rows: g1 rows (all), g2 chi-rows (non-data), bridge U_B rows.
-        HZ rows: g1 rows (all, with g2-kappa extensions spliced in),
-                 g2 gauge-fix rows.
-
-    Inter-code (g1.code is not g2.code) layout:
-        [ data_1 | data_2 | g1-kappa | g2-kappa | bridge ]
-        HX rows: g1 rows (all), g2 rows (all), bridge U_B rows.
-        HZ rows: g1 rows (all), g2 rows (all).
-
-    Per Cross §3.6 + math.md §2.5–2.6.
-    """
+    """Assemble joint CSS code for two-PPM surgery (math.md §2.5–2.6)."""
     intercode = g1.code is not g2.code
     field = g1.code.field
 
     n_data_1 = g1.code.num_qubits
     n_data_2 = g2.code.num_qubits if intercode else 0
-    n_anc_1 = len(g1.C0)       # kappa qubits for g1
-    n_anc_2 = len(g2.C0)       # kappa qubits for g2
+    n_anc_1, n_anc_2 = len(g1.C0), len(g2.C0)
     n_bridge = bridge.width
     n_merged = n_data_1 + n_data_2 + n_anc_1 + n_anc_2 + n_bridge
-
-    mX1 = int(g1.code.matrix_x.shape[0])
-    mZ1 = int(g1.code.matrix_z.shape[0])
-    mX2 = int(g2.code.matrix_x.shape[0])
-    mZ2 = int(g2.code.matrix_z.shape[0])
-
+    mX1, mZ1 = int(g1.code.matrix_x.shape[0]), int(g1.code.matrix_z.shape[0])
+    mX2, mZ2 = int(g2.code.matrix_x.shape[0]), int(g2.code.matrix_z.shape[0])
     HX1 = np.asarray(g1.HX_merged).astype(np.int_)
     HZ1 = np.asarray(g1.HZ_merged).astype(np.int_)
     HX2 = np.asarray(g2.HX_merged).astype(np.int_)
     HZ2 = np.asarray(g2.HZ_merged).astype(np.int_)
 
     if intercode:
-        # Inter-code: data_1 and data_2 are disjoint.
-        # Column layout: [data_1 | data_2 | kappa_1 | kappa_2 | bridge]
-        data_off_1 = 0
-        data_off_2 = n_data_1
+        # Columns: [data_1 | data_2 | kappa_1 | kappa_2 | bridge]
         anc_off_1 = n_data_1 + n_data_2
         anc_off_2 = anc_off_1 + n_anc_1
         bridge_col_start = anc_off_2 + n_anc_2
 
-        def _pad_g1(matrix: np.ndarray) -> np.ndarray:
-            out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
-            out[:, data_off_1 : data_off_1 + n_data_1] = matrix[:, :n_data_1]
-            out[:, anc_off_1 : anc_off_1 + n_anc_1] = matrix[:, n_data_1:]
+        def _pad_g1(m: np.ndarray) -> np.ndarray:
+            out = np.zeros((m.shape[0], n_merged), dtype=np.int_)
+            out[:, :n_data_1] = m[:, :n_data_1]
+            out[:, anc_off_1 : anc_off_1 + n_anc_1] = m[:, n_data_1:]
             return out
-
-        def _pad_g2(matrix: np.ndarray) -> np.ndarray:
-            out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
-            out[:, data_off_2 : data_off_2 + n_data_2] = matrix[:, :n_data_2]
-            out[:, anc_off_2 : anc_off_2 + n_anc_2] = matrix[:, n_data_2:]
+        def _pad_g2(m: np.ndarray) -> np.ndarray:
+            out = np.zeros((m.shape[0], n_merged), dtype=np.int_)
+            out[:, n_data_1 : n_data_1 + n_data_2] = m[:, :n_data_2]
+            out[:, anc_off_2 : anc_off_2 + n_anc_2] = m[:, n_data_2:]
             return out
-
-        HX1_pad = _pad_g1(HX1)
-        HZ1_pad = _pad_g1(HZ1)
-        HX2_pad = _pad_g2(HX2)
-        HZ2_pad = _pad_g2(HZ2)
-
-        # Bridge chi-endpoint extensions: chi row 0 of each gadget gets a
-        # Pauli on its bridge endpoint.  For basis=X chi rows live in HX;
-        # for basis=Z they live in HZ.
+        HX1_pad, HZ1_pad = _pad_g1(HX1), _pad_g1(HZ1)
+        HX2_pad, HZ2_pad = _pad_g2(HX2), _pad_g2(HZ2)
+        # Chi row 0 of each gadget connects to its bridge endpoint.
         if g1.basis is Pauli.X:
-            HX1_pad[mX1 + 0, bridge_col_start + 0] = 1
-            HX2_pad[mX2 + 0, bridge_col_start + n_bridge - 1] = 1
-        else:  # Pauli.Z
-            HZ1_pad[mZ1 + 0, bridge_col_start + 0] = 1
-            HZ2_pad[mZ2 + 0, bridge_col_start + n_bridge - 1] = 1
+            HX1_pad[mX1, bridge_col_start] = 1
+            HX2_pad[mX2, bridge_col_start + n_bridge - 1] = 1
+        else:
+            HZ1_pad[mZ1, bridge_col_start] = 1
+            HZ2_pad[mZ2, bridge_col_start + n_bridge - 1] = 1
 
-        # Inter-code: both gadgets contribute all rows (no duplicates).
         u_b = np.asarray(bridge.U_B).astype(np.int_)
-        n_u_b = u_b.shape[0]
-        u_b_pad = np.zeros((n_u_b, n_merged), dtype=np.int_)
-        if n_u_b > 0:
+        u_b_pad = np.zeros((u_b.shape[0], n_merged), dtype=np.int_)
+        if u_b.shape[0] > 0:
             u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
 
         if g1.basis is Pauli.X:
             HX_joint = field(np.vstack([HX1_pad, HX2_pad, u_b_pad]))
             HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad]))
-        else:  # Pauli.Z: U_B rows go into HZ (Z-type bridge stabilizers)
+        else:
             HX_joint = field(np.vstack([HX1_pad, HX2_pad]))
             HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad, u_b_pad]))
 
         return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
 
-    # Intra-code path (shared data qubits)
-    n_data = n_data_1
+    # Intra-code: shared data qubits.  Columns: [data | kappa_1 | kappa_2 | bridge]
     mX, mZ = mX1, mZ1
 
     def _pad(matrix: np.ndarray, *, anc_offset: int) -> np.ndarray:
-        n_anc = matrix.shape[1] - n_data
+        n_anc = matrix.shape[1] - n_data_1
         out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
-        out[:, :n_data] = matrix[:, :n_data]
-        out[:, anc_offset : anc_offset + n_anc] = matrix[:, n_data:]
+        out[:, :n_data_1] = matrix[:, :n_data_1]
+        out[:, anc_offset : anc_offset + n_anc] = matrix[:, n_data_1:]
         return out
 
-    anc_off_1 = n_data
-    anc_off_2 = n_data + n_anc_1
-    bridge_col_start = n_data + n_anc_1 + n_anc_2
+    anc_off_1 = n_data_1
+    anc_off_2 = n_data_1 + n_anc_1
+    bridge_col_start = n_data_1 + n_anc_1 + n_anc_2
+    HX1_pad, HZ1_pad = _pad(HX1, anc_offset=anc_off_1), _pad(HZ1, anc_offset=anc_off_1)
+    HX2_pad, HZ2_pad = _pad(HX2, anc_offset=anc_off_2), _pad(HZ2, anc_offset=anc_off_2)
 
-    HX1_pad = _pad(HX1, anc_offset=anc_off_1)
-    HX2_pad = _pad(HX2, anc_offset=anc_off_2)
-    HZ1_pad = _pad(HZ1, anc_offset=anc_off_1)
-    HZ2_pad = _pad(HZ2, anc_offset=anc_off_2)
-
-    # Bridge chi-endpoint extension: chi row 0 of each gadget gets a Pauli
-    # on its bridge endpoint. For basis=X chi rows live in HX; for basis=Z
-    # they live in HZ.
+    # Chi row 0 of each gadget connects to its bridge endpoint.
     if g1.basis is Pauli.X:
-        HX1_pad[mX + 0, bridge_col_start + 0] = 1
-        HX2_pad[mX + 0, bridge_col_start + n_bridge - 1] = 1
-    else:  # Pauli.Z
-        HZ1_pad[mZ + 0, bridge_col_start + 0] = 1
-        HZ2_pad[mZ + 0, bridge_col_start + n_bridge - 1] = 1
-
-    HX2_pad_nondata = HX2_pad[mX:]
-
+        HX1_pad[mX, bridge_col_start] = 1
+        HX2_pad[mX, bridge_col_start + n_bridge - 1] = 1
+    else:
+        HZ1_pad[mZ, bridge_col_start] = 1
+        HZ2_pad[mZ, bridge_col_start + n_bridge - 1] = 1
     for k, j in enumerate(g2.C0):
         HZ1_pad[int(j), anc_off_2 + k] = 1
 
-    HZ2_pad_gaugefix = HZ2_pad[mZ:]
-
     u_b = np.asarray(bridge.U_B).astype(np.int_)
-    n_u_b = u_b.shape[0]
-    u_b_pad = np.zeros((n_u_b, n_merged), dtype=np.int_)
-    if n_u_b > 0:
+    u_b_pad = np.zeros((u_b.shape[0], n_merged), dtype=np.int_)
+    if u_b.shape[0] > 0:
         u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
 
     if g1.basis is Pauli.X:
-        HX_joint = field(np.vstack([HX1_pad, HX2_pad_nondata, u_b_pad]))
-        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad_gaugefix]))
-    else:  # Pauli.Z: U_B rows go into HZ; HX gets nondata chi rows only
-        HX_joint = field(np.vstack([HX1_pad, HX2_pad_nondata]))
-        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad_gaugefix, u_b_pad]))
+        HX_joint = field(np.vstack([HX1_pad, HX2_pad[mX:], u_b_pad]))
+        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad[mZ:]]))
+    else:
+        HX_joint = field(np.vstack([HX1_pad, HX2_pad[mX:]]))
+        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad[mZ:], u_b_pad]))
 
     return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
 
@@ -237,20 +179,13 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> tuple[stim.Circuit, CSSCode]:
-    """Stim circuit + merged joint CSS code implementing Cain §III.A joint PPM.
-
-    Same pipeline as build_single_ppm_circuit but on the joint merged code, with
-    chi rows = χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7 α* observable).
-    """
+    """Cain §III.A joint-PPM circuit; chi = χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7)."""
     joint_code = _stitch_to_joint_csscode(g1, g2, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
-
     intercode = g1.code is not g2.code
     n1 = g1.code.num_qudits
     n2 = g2.code.num_qudits if intercode else 0
-    n_anc_1 = len(g1.C0)
-    n_anc_2 = len(g2.C0)
-    n_bridge = bridge.width
+    n_anc = len(g1.C0) + len(g2.C0)
 
     if intercode:
         data_ids = qubit_ids.data[: n1 + n2]
@@ -259,33 +194,25 @@ def build_joint_ppm_circuit(
         data_ids = qubit_ids.data[:n1]
         v0_indices_combined = tuple(g1.V0) + tuple(g2.V0)
 
-    kappa_ids = qubit_ids.data[n1 + n2 : n1 + n2 + n_anc_1 + n_anc_2]
-    bridge_ids = qubit_ids.data[n1 + n2 + n_anc_1 + n_anc_2 :]
+    kappa_ids = qubit_ids.data[n1 + n2 : n1 + n2 + n_anc]
+    bridge_ids = qubit_ids.data[n1 + n2 + n_anc :]
 
     circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
     circuit += _surgery_state_prep(g1, data_ids, kappa_ids, bridge_ids)
-
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
         g1, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
     )
     circuit += qec_cycle
-
     circuit += _surgery_detach_and_readout(
         g1, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
 
-    # Chi rows: χ^(1) ∪ χ^(2) ∪ U_B per math.md §2.7 (α* observable).
-    # Row layout in HX_joint (basis=X) depends on intra- vs inter-code:
-    #   intracode: [data H_X (mX) | χ^(1) (nV1) | χ^(2) (nV2) | U_B (n_UB)]
-    #   intercode: [data H_X_1 (mX1) | χ^(1) (nV1) | data H_X_2 (mX2) | χ^(2) (nV2) | U_B (n_UB)]
-    # HZ_joint (basis=Z) has the same shape with X↔Z swapped (no U_B rows).
-    mX1 = g1.code.matrix_x.shape[0]
-    mZ1 = g1.code.matrix_z.shape[0]
+    # Chi check_ids: χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7). Row offsets mirror _stitch_to_joint_csscode.
+    mX1, mZ1 = g1.code.matrix_x.shape[0], g1.code.matrix_z.shape[0]
     mX2 = g2.code.matrix_x.shape[0] if intercode else 0
     mZ2 = g2.code.matrix_z.shape[0] if intercode else 0
-    n_V1 = len(g1.V0)
-    n_V2 = len(g2.V0)
+    n_V1, n_V2 = len(g1.V0), len(g2.V0)
     n_UB = bridge.U_B.shape[0]
 
     if g1.basis is Pauli.X:
@@ -295,18 +222,10 @@ def build_joint_ppm_circuit(
         check_ids = qubit_ids.checks_z
         m1, m2 = mZ1, mZ2
 
-    if intercode:
-        chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
-        chi2_ids = tuple(check_ids[m1 + n_V1 + m2 : m1 + n_V1 + m2 + n_V2])
-        ub_ids = tuple(
-            check_ids[m1 + n_V1 + m2 + n_V2 : m1 + n_V1 + m2 + n_V2 + n_UB]
-        ) if g1.basis is Pauli.X else ()
-    else:
-        chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
-        chi2_ids = tuple(check_ids[m1 + n_V1 : m1 + n_V1 + n_V2])
-        ub_ids = tuple(
-            check_ids[m1 + n_V1 + n_V2 : m1 + n_V1 + n_V2 + n_UB]
-        ) if g1.basis is Pauli.X else ()
+    chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
+    off2 = m1 + n_V1 + m2   # offset to χ^(2) block (m2=0 for intracode)
+    chi2_ids = tuple(check_ids[off2 : off2 + n_V2])
+    ub_ids = tuple(check_ids[off2 + n_V2 : off2 + n_V2 + n_UB]) if g1.basis is Pauli.X else ()
     chi_check_ids = chi1_ids + chi2_ids + ub_ids
 
     circuit += _surgery_observable(
@@ -326,31 +245,16 @@ def build_joint_ppm_circuit(
 
 def _classify_reliable_round1_checks(
     gadget: GadgetLayout,
-    merged_code: CSSCode,
     qubit_ids: QubitIDs,
 ) -> tuple[int, ...]:
-    """Return the subset of merged-code check ancillas whose round-1 syndrome
-    is reliable (= +1) given the surgery init state.
-
-    For basis=Pauli.X (data in |+⟩, κ in |0⟩):
-        reliable = data H_X rows (X-type, data |+⟩ → +1) +
-                   gauge-fix G rows (Z-type, κ |0⟩ → +1)
-        unreliable = χ rows (X on κ is random) + data H_Z rows (Z on data |+⟩ random)
-    For basis=Pauli.Z (data in |0⟩, κ in |+⟩): swap X↔Z in the above.
-    """
-    m_X = gadget.code.matrix_x.shape[0]
-    m_Z = gadget.code.matrix_z.shape[0]
-
+    """Check ancillas with deterministic round-1 syndrome given surgery init state."""
+    m_X, m_Z = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0]
     if gadget.basis is Pauli.X:
-        # X-checks: first m_X are data H_X (reliable), next n_V are χ (unreliable)
-        reliable_x = qubit_ids.checks_x[:m_X]
-        # Z-checks: first m_Z are data H_Z (unreliable), last r are G (reliable)
-        reliable_z = qubit_ids.checks_z[m_Z:]
-    else:  # Pauli.Z (basis swap)
-        # X-checks: first m_X are data H_X (unreliable), last r are G (reliable)
-        reliable_x = qubit_ids.checks_x[m_X:]
-        # Z-checks: first m_Z are data H_Z (reliable), next n_V are χ (unreliable)
-        reliable_z = qubit_ids.checks_z[:m_Z]
+        reliable_x = qubit_ids.checks_x[:m_X]   # data H_X rows (det. +1)
+        reliable_z = qubit_ids.checks_z[m_Z:]    # gauge-fix G rows (det. +1)
+    else:
+        reliable_x = qubit_ids.checks_x[m_X:]   # gauge-fix G rows
+        reliable_z = qubit_ids.checks_z[:m_Z]    # data H_Z rows
 
     return tuple(reliable_x) + tuple(reliable_z)
 
@@ -361,25 +265,15 @@ def _surgery_state_prep(
     kappa_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...] = (),
 ) -> stim.Circuit:
-    """Cain step 1: init data in logical |+⟩ (basis=X) or |0⟩ (basis=Z),
-    init κ ancillas in |0⟩ (basis=X) or |+⟩ (basis=Z). Bridge follows κ.
-    """
+    """Init data/κ/bridge: basis=X → data|+⟩, κ|0⟩; basis=Z → data|0⟩, κ|+⟩."""
     circuit = stim.Circuit()
     if gadget.basis is Pauli.X:
         circuit.append("RX", list(data_ids))
-        circuit.append("R", list(kappa_ids))
-        if bridge_ids:
-            circuit.append("R", list(bridge_ids))
-    else:  # Pauli.Z
+        circuit.append("R", list(kappa_ids) + (list(bridge_ids) if bridge_ids else []))
+    else:
         circuit.append("R", list(data_ids))
-        circuit.append("RX", list(kappa_ids))
-        if bridge_ids:
-            circuit.append("RX", list(bridge_ids))
+        circuit.append("RX", list(kappa_ids) + (list(bridge_ids) if bridge_ids else []))
     return circuit
-
-
-from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
-from qldpc.circuits.bookkeeping import MeasurementRecord, DetectorRecord
 
 
 def _surgery_qec_cycle(
@@ -388,46 +282,34 @@ def _surgery_qec_cycle(
     num_rounds: int,
     qubit_ids: QubitIDs,
 ) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
-    """Build num_rounds rounds of merged-code SE with surgery-aware round-1 detectors.
-
-    Mirrors qldpc.circuits.memory.memory._get_qec_cycle except round-1 DETECTORs
-    are only emitted for reliable checks (per _classify_reliable_round1_checks).
-    Rounds 2..N emit standard 2-arg consistency detectors for ALL checks.
-    """
+    """num_rounds of merged-code SE; round-1 detectors only for reliable checks."""
     strategy = EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
-    reliable = set(_classify_reliable_round1_checks(gadget, merged_code, qubit_ids))
+    reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
     all_check_ids = qubit_ids.check
 
     circuit = stim.Circuit()
     measurement_record = MeasurementRecord()
     detector_record = DetectorRecord()
 
-    # Round 1: classified DETECTOR emission
+    # Round 1: emit DETECTORs only for reliable checks.
     circuit += one_round
     measurement_record.append(round_measurement_record)
     for kk, check_id in enumerate(all_check_ids):
         if check_id in reliable:
-            circuit.append(
-                "DETECTOR",
-                [measurement_record.get_target_rec(check_id)],
-                (0, 0, kk),
-            )
-    # detector_record only tracks the reliable subset for round 1
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, 0, kk))
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
-    # Rounds 2..N: full consistency detectors for ALL checks
     if num_rounds > 1:
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
         repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
         for kk, check_id in enumerate(all_check_ids):
-            targets = [
+            repeat_circuit.append("DETECTOR", [
                 measurement_record.get_target_rec(check_id, -1),
                 measurement_record.get_target_rec(check_id, -2),
-            ]
-            repeat_circuit.append("DETECTOR", targets, (0, 0, kk))
+            ], (0, 0, kk))
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
@@ -447,18 +329,14 @@ def _surgery_observable(
     num_rounds: int,
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
-    """Two OBSERVABLE_INCLUDE: 0 = ⊕ chi-row records across rounds (Webster Eq. 1),
-    1 = ⊕ data measurements on V_0 (X̄_M / Z̄_M cross-check).
-    """
+    """Obs 0 = ⊕ chi-XOR over rounds (Webster Eq. 1); Obs 1 = data on V_0."""
     circuit = stim.Circuit()
-    # Observable 0: chi-XOR across all rounds
     chi_targets = [
         measurement_record.get_target_rec(cid, -1 - r)
         for r in range(num_rounds)
         for cid in chi_check_ids
     ]
     circuit.append("OBSERVABLE_INCLUDE", chi_targets, 0)
-    # Observable 1: data measurement on V_0
     data_targets = [
         measurement_record.get_target_rec(data_ids[i]) for i in v0_indices
     ]

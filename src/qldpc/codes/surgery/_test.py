@@ -881,7 +881,7 @@ def test_classify_reliable_round1_checks_basis_x():
         is_subsystem_code=False,
     )
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+    reliable = _classify_reliable_round1_checks(g, qubit_ids)
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
     # Reliable X-checks: first m_X of checks_x (the original data H_X rows)
@@ -913,7 +913,7 @@ def test_classify_reliable_round1_checks_basis_z():
         is_subsystem_code=False,
     )
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+    reliable = _classify_reliable_round1_checks(g, qubit_ids)
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
     r = g.G.shape[0]
@@ -993,7 +993,7 @@ def test_surgery_qec_cycle_round_1_detectors_classified():
         is_subsystem_code=False,
     )
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+    reliable = _classify_reliable_round1_checks(g, qubit_ids)
 
     circuit, meas_rec, det_rec = _surgery_qec_cycle(
         g, merged, num_rounds=2, qubit_ids=qubit_ids,
