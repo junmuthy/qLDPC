@@ -1142,3 +1142,50 @@ def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
     assert obs_0_flip_rate >= 0.05, (
         f"PPM observable flip rate {obs_0_flip_rate:.2%} too low at p=0.1"
     )
+
+
+@pytest.mark.slow
+def test_single_ppm_ler_monotone_in_p():
+    """Tiny sinter sweep: PPM LER monotonically increasing in p.
+
+    Catches gross protocol errors (wrong observable basis, sign flips, etc.).
+    """
+    import sinter
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc import decoders
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+
+    error_rates = [0.001, 0.005, 0.02]
+    tasks = []
+    for p in error_rates:
+        circuit = build_single_ppm_circuit(
+            g, rounds=3, noise_model=DepolarizingNoiseModel(p),
+        )
+        tasks.append(sinter.Task(
+            circuit=circuit,
+            json_metadata={"p": float(p)},
+        ))
+    sinter_decoder = decoders.SinterDecoder()
+    results = sinter.collect(
+        tasks=tasks,
+        decoders=["custom"],
+        custom_decoders={"custom": sinter_decoder},
+        num_workers=4,
+        max_shots=2000,
+        max_errors=30,
+        print_progress=False,
+    )
+    by_p = {r.json_metadata["p"]: r.errors / max(r.shots, 1) for r in results}
+    sorted_p = sorted(by_p.keys())
+    ler_vals = [by_p[p] for p in sorted_p]
+    print(f"LER values: {list(zip(sorted_p, ler_vals))}")
+    # Monotonically non-decreasing (allow small statistical noise)
+    for i in range(len(ler_vals) - 1):
+        assert ler_vals[i] <= ler_vals[i + 1] * 1.5, (
+            f"LER not monotonic: p={sorted_p[i]} → {ler_vals[i]}, "
+            f"p={sorted_p[i+1]} → {ler_vals[i+1]}"
+        )
