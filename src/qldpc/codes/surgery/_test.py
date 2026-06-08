@@ -1121,6 +1121,26 @@ def test_build_joint_ppm_circuit_noiseless_observables_zero():
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_joint_ppm_circuit_basis_parametrized_noiseless_observables_zero(basis):
+    """Both bases for the joint PPM circuit: noiseless observables = 0."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    op = (code.get_logical_ops(Pauli.X)[0]
+          if basis is Pauli.X
+          else code.get_logical_ops(Pauli.Z)[0])
+    op_arr = np.asarray(op).astype(np.uint8)
+    g1 = build_gadget(code, op_arr, basis=basis)
+    g2 = build_gadget(code, op_arr, basis=basis)
+    bridge = build_bridge(g1, g2)
+    circuit, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
+    sampler = circuit.compile_detector_sampler()
+    _, obs = sampler.sample(shots=16, separate_observables=True)
+    assert (obs == 0).all(), f"noiseless joint observables fired for basis={basis}: {obs.sum()} flips"
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
     """At p=0.1, the PPM observable (observable 0) flips ≥ 5% of shots."""
     from qldpc.codes.surgery.gadget import build_gadget

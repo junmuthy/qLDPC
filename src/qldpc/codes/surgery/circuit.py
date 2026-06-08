@@ -225,7 +225,7 @@ def build_joint_ppm_circuit(
     chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
     off2 = m1 + n_V1 + m2   # offset to χ^(2) block (m2=0 for intracode)
     chi2_ids = tuple(check_ids[off2 : off2 + n_V2])
-    ub_ids = tuple(check_ids[off2 + n_V2 : off2 + n_V2 + n_UB]) if g1.basis is Pauli.X else ()
+    ub_ids = tuple(check_ids[off2 + n_V2 : off2 + n_V2 + n_UB])
     chi_check_ids = chi1_ids + chi2_ids + ub_ids
 
     circuit += _surgery_observable(
