@@ -235,9 +235,17 @@ noisy = build_single_ppm_circuit(
     rounds=3,
     noise_model=DepolarizingNoiseModel(p=0.01),
 )
-samples_noisy = noisy.compile_detector_sampler().sample(shots=256)
-fire_frac = samples_noisy.any(axis=1).mean()
-print(f"Noisy (p=0.01) detector firing fraction: {fire_frac:.2%}")
+samples_noisy = noisy.compile_detector_sampler().sample(shots=2000)
+
+# Per-detector firing rate is the meaningful diagnostic: with N detectors
+# at independent firing probability q each, P(any detector fires per shot)
+# is 1 - (1-q)^N → 1 as N grows. That's why we report the per-detector
+# rate, not the per-shot rate.
+per_detector_rate = samples_noisy.mean()
+per_shot_any_fire = samples_noisy.any(axis=1).mean()
+print(f"Noisy (p=0.01):")
+print(f"  per-detector fire rate : {per_detector_rate:.2%}  (averaged over {noisy.num_detectors} detectors)")
+print(f"  per-shot any-fire rate : {per_shot_any_fire:.2%}  (≈ 1 by union bound when many detectors)")
 
 # %% [markdown]
 # ## 7. `build_bridge` — joining two gadgets
@@ -390,7 +398,106 @@ print(f"X̄_1 alone in HX_joint row span? {_gf2_in_row_span(HX, op1_padded)}  (e
 print(f"X̄_2 alone in HX_joint row span? {_gf2_in_row_span(HX, op2_padded)}  (expected False)")
 
 # %% [markdown]
-# ## 10. Summary
+# ## 10. End-to-end: decode the surgery circuit and plot LER
+#
+# We now plug the surgery circuit into a real decoder (BP+OSD via
+# `qldpc.decoders.SinterDecoder`) and estimate the logical error rate over a
+# small sweep of physical error rates `p`.  This mirrors the pattern used in
+# notebooks 2/3 of this directory.
+#
+# **Setup:**
+# - Webster code 0 (`l=31`, n=62) — small enough for fast sinter
+# - 4 error rates: `np.logspace(-3, -2, 4)` ≈ [0.001, 0.00215, 0.00464, 0.01]
+# - `max_shots=5_000`, `max_errors=50` per task
+# - 3 syndrome rounds
+# - Decoder: `qldpc.decoders.SinterDecoder()` (default BP+OSD)
+
+# %%
+import sinter
+import matplotlib.pyplot as plt
+from qldpc import circuits, decoders
+from qldpc.codes.common import CSSCode
+from qldpc.objects import Pauli
+import galois as _galois
+
+# Reconstruct the merged surgery CSSCode from g_boosted.
+# g_boosted is the boosted single-PPM gadget for Webster code 0, built in § 5.
+_F2 = _galois.GF(2)
+merged_code = CSSCode(
+    _F2(g_boosted.HX_merged.astype(int).tolist()),
+    _F2(g_boosted.HZ_merged.astype(int).tolist()),
+    is_subsystem_code=False,
+)
+print(f"Merged surgery code: [[{merged_code.num_qudits}, {merged_code.dimension}]]")
+
+# %%
+# Build a small sinter sweep over physical error rates.
+_error_rates = np.logspace(-3, -2, 4)  # ≈ [0.001, 0.00215, 0.00464, 0.01]
+_num_rounds = 3  # small for demo speed
+
+# Build base noiseless circuit, then add noise per-task (standard sinter pattern).
+_base_circuit = circuits.get_memory_experiment(
+    merged_code, basis=Pauli.X, num_rounds=_num_rounds
+)
+
+_tasks = []
+for _p in _error_rates:
+    _noise = circuits.DepolarizingNoiseModel(_p, include_idling_error=False)
+    _noisy_circuit = _noise.noisy_circuit(_base_circuit)
+    _tasks.append(
+        sinter.Task(
+            circuit=_noisy_circuit,
+            json_metadata={"p": float(_p)},
+        )
+    )
+
+print(f"Created {len(_tasks)} sinter tasks at p = {[f'{p:.4f}' for p in _error_rates]}")
+
+# %%
+# Run sinter with qldpc's SinterDecoder (default BP+OSD — works for general
+# qLDPC codes, unlike pymatching which is surface-code specific).
+#
+# Note: sinter.collect uses multiprocessing. On macOS the default start method
+# is 'spawn', which requires this guard when running as a plain script; in a
+# Jupyter kernel __name__ is always '__main__', so the guard is transparent.
+import multiprocessing as _mp
+
+_decoder = decoders.SinterDecoder()
+
+if __name__ == "__main__":
+    _results = sinter.collect(
+        tasks=_tasks,
+        decoders=["custom"],
+        custom_decoders={"custom": _decoder},
+        num_workers=4,
+        max_shots=5_000,
+        max_errors=50,
+        print_progress=False,
+    )
+    print(f"Collected {len(_results)} task results.")
+    for _r in sorted(_results, key=lambda r: r.json_metadata["p"]):
+        _ler = _r.errors / _r.shots if _r.shots > 0 else float("nan")
+        print(f"  p={_r.json_metadata['p']:.5f}  shots={_r.shots}  errors={_r.errors}  LER≈{_ler:.4f}")
+
+# %%
+# Plot LER vs p (only when results are available, i.e. in Jupyter or script __main__).
+if __name__ == "__main__":
+    _fig, _ax = plt.subplots(figsize=(6, 4))
+    _sorted_results = sorted(_results, key=lambda r: r.json_metadata["p"])
+    _ps = [r.json_metadata["p"] for r in _sorted_results]
+    _ler = [r.errors / r.shots if r.shots > 0 else float("nan") for r in _sorted_results]
+
+    _ax.loglog(_ps, _ler, "o-", label="Webster code 0 single-PPM (boosted)")
+    _ax.set_xlabel("physical error rate p")
+    _ax.set_ylabel("logical error rate")
+    _ax.set_title("Surgery walkthrough demo: end-to-end LER")
+    _ax.grid(True, which="both", alpha=0.3)
+    _ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+# %% [markdown]
+# ## 11. Summary
 #
 # The 5 public APIs of `qldpc.codes.surgery`, each in one sentence:
 #
