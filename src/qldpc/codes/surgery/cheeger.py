@@ -829,24 +829,48 @@ def boost_gadget_distance(
 
 def _gadget_to_legacy_layout(g):
     """Convert a GadgetLayout into the legacy (CSSCode, SurgeryLayout) pair
-    consumed by boost_gadget_cheeger* / boost_gadget_distance."""
+    consumed by boost_gadget_cheeger* / boost_gadget_distance.
+
+    For basis=Pauli.Z, we SWAP HX/HZ so the legacy boost code (designed for
+    X-basis chi rows in HX_merged) sees the chi rows where it expects them.
+    The boost result is dual-swapped back in _legacy_to_gadget.
+    """
+    from qldpc.objects import Pauli
     F2 = galois.GF(2)
     n = g.code.num_qudits
     n_anc = len(g.C0)
+
+    if g.basis is Pauli.X:
+        HX_for_legacy = g.HX_merged
+        HZ_for_legacy = g.HZ_merged
+        mX_data = g.code.matrix_x.shape[0]
+        mZ_data = g.code.matrix_z.shape[0]
+        hx_row_kind = np.array(
+            ["data"] * mX_data + ["ancilla_L1"] * len(g.V0), dtype=object
+        )
+        hz_row_kind = np.array(
+            ["data"] * mZ_data + ["gauge_fix"] * g.G.shape[0], dtype=object
+        )
+    else:  # Pauli.Z: swap so chi rows are in HX_for_legacy
+        HX_for_legacy = g.HZ_merged
+        HZ_for_legacy = g.HX_merged
+        # After swap: HX_for_legacy rows = Z-data checks + chi (ancilla_L1)
+        #             HZ_for_legacy rows = X-data checks + gauge_fix
+        mZ_data = g.code.matrix_z.shape[0]
+        mX_data = g.code.matrix_x.shape[0]
+        hx_row_kind = np.array(
+            ["data"] * mZ_data + ["ancilla_L1"] * len(g.V0), dtype=object
+        )
+        hz_row_kind = np.array(
+            ["data"] * mX_data + ["gauge_fix"] * g.G.shape[0], dtype=object
+        )
+
     merged = CSSCode(
-        F2(np.asarray(g.HX_merged).astype(np.int_).tolist()),
-        F2(np.asarray(g.HZ_merged).astype(np.int_).tolist()),
+        F2(np.asarray(HX_for_legacy).astype(np.int_).tolist()),
+        F2(np.asarray(HZ_for_legacy).astype(np.int_).tolist()),
         is_subsystem_code=False,
     )
     qubit_layer = np.array([0] * n + [1] * n_anc, dtype=np.int_)
-    mX = g.code.matrix_x.shape[0]
-    hx_row_kind = np.array(
-        ["data"] * mX + ["ancilla_L1"] * len(g.V0), dtype=object
-    )
-    mZ = g.code.matrix_z.shape[0]
-    hz_row_kind = np.array(
-        ["data"] * mZ + ["gauge_fix"] * g.G.shape[0], dtype=object
-    )
     layout = SurgeryLayout(
         num_data_qubits=n,
         num_ancilla_qubits=n_anc,
@@ -863,9 +887,19 @@ def _gadget_to_legacy_layout(g):
 
 
 def _legacy_to_gadget(merged: CSSCode, layout: SurgeryLayout, original_g):
-    """Reconstruct a GadgetLayout from a boost result (merged + legacy SurgeryLayout)."""
-    HX_m = np.asarray(merged.matrix_x).astype(np.uint8)
-    HZ_m = np.asarray(merged.matrix_z).astype(np.uint8)
+    """Reconstruct a GadgetLayout from a boost result (merged + legacy SurgeryLayout).
+
+    For basis=Pauli.Z, we undo the HX/HZ swap applied in _gadget_to_legacy_layout.
+    """
+    from qldpc.objects import Pauli
+    HX_m_legacy = np.asarray(merged.matrix_x).astype(np.uint8)
+    HZ_m_legacy = np.asarray(merged.matrix_z).astype(np.uint8)
+    if original_g.basis is Pauli.X:
+        HX_m = HX_m_legacy
+        HZ_m = HZ_m_legacy
+    else:  # undo the basis-Z swap
+        HX_m = HZ_m_legacy
+        HZ_m = HX_m_legacy
     F_new = np.asarray(layout.F).astype(np.uint8)
     G_new = np.asarray(layout.G).astype(np.uint8)
     n = original_g.code.num_qudits

@@ -832,3 +832,32 @@ def test_build_bridge_rejects_basis_mismatch():
     g_z = build_gadget(code, z, basis=Pauli.Z)
     with pytest.raises(ValueError, match="basis"):
         build_bridge(g_x, g_z)
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_boost_gadget_preserves_css_commutation_both_bases(basis):
+    """boost_gadget on a basis=X or basis=Z gadget preserves CSS commutation."""
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.cheeger import boost_gadget
+
+    def operator(d, name):
+        l = d["l"]
+        for seed in d["seeds"]:
+            if seed["name"] == name and seed["pauli_type"] == name[0]:
+                L = np.zeros(l, dtype=np.uint8); R = np.zeros(l, dtype=np.uint8)
+                for i in seed["L_support"]: L[i] = 1
+                for i in seed["R_support"]: R[i] = 1
+                return np.concatenate([L, R])
+        raise ValueError(f"{name} not found")
+
+    d = load_webster_seed_set(0)
+    c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+    op_name = "X_bar_1" if basis is Pauli.X else "Z_bar_1"
+    op = operator(d, op_name)
+    g = build_gadget(c, op, basis=basis)
+    boosted = boost_gadget(g, method="combinatorial", target=1.0, seed=0)
+    product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+    assert boosted.basis is basis  # boost preserves basis
