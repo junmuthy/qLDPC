@@ -210,13 +210,50 @@ prod_b = (HX_b @ HZ_b.T) % 2
 print(f"CSS commutation holds after boost (HX HZ^T = 0)? {(prod_b == 0).all()}")
 
 # %% [markdown]
-# ## 6. `build_single_ppm_circuit` — Stim measurement circuit
+# ## 5b. X̄ vs Z̄ — basis-symmetric API
 #
-# `build_single_ppm_circuit(gadget, *, rounds, noise_model)` builds a Stim
-# circuit that performs `rounds` of syndrome extraction on the merged CSS
-# code (data + κ ancillas).  An optional `noise_model` injects Pauli errors.
+# `build_gadget(code, x, basis=Pauli.X|Pauli.Z)` selects whether the gadget
+# measures an X̄ or Z̄ logical. The construction is dual-symmetric: for
+# `basis=Pauli.Z` the χ rows live in `HZ_merged` (Z-type) instead of `HX_merged`,
+# and the surgery circuit init swaps |+⟩ ↔ |0⟩ on data vs κ.
+
+# %%
+from qldpc.objects import Pauli
+
+def z_bar_1_operator(d: dict) -> np.ndarray:
+    l = d["l"]
+    for seed in d["seeds"]:
+        if seed["name"] == "Z_bar_1" and seed["pauli_type"] == "Z":
+            L = np.zeros(l, dtype=np.uint8); R = np.zeros(l, dtype=np.uint8)
+            for i in seed["L_support"]: L[i] = 1
+            for i in seed["R_support"]: R[i] = 1
+            return np.concatenate([L, R])
+    raise ValueError("Z_bar_1 not found")
+
+z = z_bar_1_operator(data)
+g_z = build_gadget(code, z, basis=Pauli.Z)
+print(f"basis=Z gadget: |V_0|={len(g_z.V0)}, |C_0|={len(g_z.C0)}, r={g_z.G.shape[0]}")
+print(f"basis=Z κ+χ+r = {len(g_z.kappa_qubits) + len(g_z.V0) + g_z.G.shape[0]} (same as X)")
+
+# %% [markdown]
+# ## 6. `build_single_ppm_circuit` — Cain §III.A surgery circuit
 #
-# Under noiseless conditions all detectors should remain silent.
+# `build_single_ppm_circuit(gadget, *, rounds, noise_model)` implements the
+# full Cain §III.A 3-step surgery protocol:
+# 1. Initialize κ ancillas in |0⟩ (or |+⟩ for basis=Z); data qubits in |+⟩
+#    (or |0⟩ for basis=Z).
+# 2. Run `rounds` cycles of merged-code syndrome extraction. Round-1
+#    detectors are emitted only for stabilizers in known eigenstate of the
+#    init state — data H_X and gauge-fix G for basis=X.
+# 3. Detach κ ancillas by Z-measurement; measure data qubits in X basis.
+#
+# The circuit emits two observables:
+# - `OBSERVABLE_INCLUDE(0)`: ⊕ χ-row records across all rounds (Webster Eq. 1
+#   — the PPM result).
+# - `OBSERVABLE_INCLUDE(1)`: ⊕ data measurements on V_0 (X̄_M cross-check
+#   inferred from the final data Mx).
+#
+# Under noiseless conditions both observables evaluate to 0 (= +1) deterministically.
 
 # %%
 circuit = build_single_ppm_circuit(g_boosted, rounds=3, noise_model=None)
@@ -398,84 +435,44 @@ print(f"X̄_1 alone in HX_joint row span? {_gf2_in_row_span(HX, op1_padded)}  (e
 print(f"X̄_2 alone in HX_joint row span? {_gf2_in_row_span(HX, op2_padded)}  (expected False)")
 
 # %% [markdown]
-# ## 10. End-to-end: decode the surgery circuit and plot LER
+# ## 10. End-to-end: PPM logical error rate vs physical p
 #
-# We now plug the surgery circuit into a real decoder (BP+OSD via
-# `qldpc.decoders.SinterDecoder`) and estimate the logical error rate over a
-# small sweep of physical error rates `p`.  This mirrors the pattern used in
-# notebooks 2/3 of this directory.
-#
-# **Setup:**
-# - Webster code 0 (`l=31`, n=62) — small enough for fast sinter
-# - 4 error rates: `np.logspace(-3, -2, 4)` ≈ [0.001, 0.00215, 0.00464, 0.01]
-# - `max_shots=5_000`, `max_errors=50` per task
-# - 3 syndrome rounds
-# - Decoder: `qldpc.decoders.SinterDecoder()` (default BP+OSD)
+# Since section 6's circuit implements the full Cain §III.A surgery protocol
+# (and not a generic memory experiment), the LER below is the **PPM failure
+# rate** — the probability that the surgery measurement of X̄_M returns a
+# flipped outcome relative to the noiseless +1. This is the correct
+# end-to-end quantity for evaluating surgery fault tolerance.
 
 # %%
 import sinter
 import matplotlib.pyplot as plt
 from qldpc import circuits, decoders
-from qldpc.codes.common import CSSCode
-from qldpc.objects import Pauli
-import galois as _galois
 
-# Reconstruct the merged surgery CSSCode from g_boosted.
-# g_boosted is the boosted single-PPM gadget for Webster code 0, built in § 5.
-_F2 = _galois.GF(2)
-merged_code = CSSCode(
-    _F2(g_boosted.HX_merged.astype(int).tolist()),
-    _F2(g_boosted.HZ_merged.astype(int).tolist()),
-    is_subsystem_code=False,
-)
-print(f"Merged surgery code: [[{merged_code.num_qudits}, {merged_code.dimension}]]")
+error_rates = np.logspace(-3, -2, 4)
+num_rounds = 3
 
-# %%
-# Build a small sinter sweep over physical error rates.
-_error_rates = np.logspace(-3, -2, 4)  # ≈ [0.001, 0.00215, 0.00464, 0.01]
-_num_rounds = 3  # small for demo speed
-
-# Build base noiseless circuit, then add noise per-task (standard sinter pattern).
-_base_circuit = circuits.get_memory_experiment(
-    merged_code, basis=Pauli.X, num_rounds=_num_rounds
-)
-
-_tasks = []
-for _p in _error_rates:
-    _noise = circuits.DepolarizingNoiseModel(_p, include_idling_error=False)
-    _noisy_circuit = _noise.noisy_circuit(_base_circuit)
-    _tasks.append(
-        sinter.Task(
-            circuit=_noisy_circuit,
-            json_metadata={"p": float(_p)},
-        )
+tasks = []
+for p in error_rates:
+    circuit = build_single_ppm_circuit(
+        g_boosted, rounds=num_rounds,
+        noise_model=circuits.DepolarizingNoiseModel(p, include_idling_error=False),
     )
+    tasks.append(sinter.Task(circuit=circuit, json_metadata={"p": float(p)}))
 
-print(f"Created {len(_tasks)} sinter tasks at p = {[f'{p:.4f}' for p in _error_rates]}")
-
-# %%
-# Run sinter with qldpc's SinterDecoder (default BP+OSD — works for general
-# qLDPC codes, unlike pymatching which is surface-code specific).
-#
-# Note: sinter.collect uses multiprocessing. On macOS the default start method
-# is 'spawn', which requires this guard when running as a plain script; in a
-# Jupyter kernel __name__ is always '__main__', so the guard is transparent.
-import multiprocessing as _mp
-
-_decoder = decoders.SinterDecoder()
-
+# Use sinter.collect with custom_decoders dict (matches the pattern from R16)
+sinter_decoder = decoders.SinterDecoder()
 if __name__ == "__main__":
-    _results = sinter.collect(
-        tasks=_tasks,
+    results = sinter.collect(
+        tasks=tasks,
         decoders=["custom"],
-        custom_decoders={"custom": _decoder},
+        custom_decoders={"custom": sinter_decoder},
         num_workers=4,
         max_shots=5_000,
         max_errors=50,
         print_progress=False,
     )
-    print(f"Collected {len(_results)} task results.")
-    for _r in sorted(_results, key=lambda r: r.json_metadata["p"]):
+    print(f"Collected {len(results)} task results.")
+    for _r in sorted(results, key=lambda r: r.json_metadata["p"]):
         _ler = _r.errors / _r.shots if _r.shots > 0 else float("nan")
         print(f"  p={_r.json_metadata['p']:.5f}  shots={_r.shots}  errors={_r.errors}  LER≈{_ler:.4f}")
 
@@ -483,14 +480,14 @@ if __name__ == "__main__":
 # Plot LER vs p (only when results are available, i.e. in Jupyter or script __main__).
 if __name__ == "__main__":
     _fig, _ax = plt.subplots(figsize=(6, 4))
-    _sorted_results = sorted(_results, key=lambda r: r.json_metadata["p"])
+    _sorted_results = sorted(results, key=lambda r: r.json_metadata["p"])
     _ps = [r.json_metadata["p"] for r in _sorted_results]
     _ler = [r.errors / r.shots if r.shots > 0 else float("nan") for r in _sorted_results]
 
     _ax.loglog(_ps, _ler, "o-", label="Webster code 0 single-PPM (boosted)")
     _ax.set_xlabel("physical error rate p")
     _ax.set_ylabel("logical error rate")
-    _ax.set_title("Surgery walkthrough demo: end-to-end LER")
+    _ax.set_title("Webster code 0 single-PPM LER (Cain §III.A)")
     _ax.grid(True, which="both", alpha=0.3)
     _ax.legend()
     plt.tight_layout()
