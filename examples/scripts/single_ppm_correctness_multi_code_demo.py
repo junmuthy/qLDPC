@@ -170,6 +170,18 @@ def main() -> None:
         verify("Webster 1 [[126, 6, 12]] X̄_1", w1, x_w1),
     ))
 
+    # 6. Gross / IBM bivariate-bicycle [[144, 12, 12]]
+    # A = x^3 + y + y^2, B = y^3 + x + x^2, orders (R_x=12, R_y=6)
+    # Reference: Bravyi-Cross-Cohn-Tillich-Yoder arXiv:2308.07915
+    import sympy
+    x, y = sympy.symbols("x y")
+    gross = codes.BBCode({x: 12, y: 6}, x**3 + y + y**2, y**3 + x + x**2)
+    x_gross = np.asarray(gross.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    results.append((
+        "Gross BB [[144, 12, 12]] X̄_1",
+        verify("Gross BB [[144, 12, 12]] X̄_1", gross, x_gross, shots=2000),
+    ))
+
     # Summary
     print("\n" + "=" * 65)
     print("Summary:")
