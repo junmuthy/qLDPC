@@ -1227,6 +1227,22 @@ def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis):
     )
 
 
+def test_build_joint_ppm_circuit_noiseless_no_detector_fires():
+    """Joint noiseless: NO detector fires (including final detectors)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g1 = build_gadget(code, x, basis=Pauli.X)
+    g2 = build_gadget(code, x, basis=Pauli.X)
+    bridge = build_bridge(g1, g2)
+    circuit, _ = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
+    sampler = circuit.compile_detector_sampler()
+    dets, _ = sampler.sample(shots=64, separate_observables=True)
+    assert not dets.any(), f"{dets.sum()} detector fires noiselessly"
+
+
 @pytest.mark.slow
 def test_single_ppm_ler_monotone_in_p():
     """Tiny sinter sweep: PPM LER monotonically increasing in p.

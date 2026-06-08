@@ -211,6 +211,10 @@ def build_joint_ppm_circuit(
         g1, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
+    circuit += _surgery_final_detectors(
+        g1, joint_code, qubit_ids,
+        measurement_record=measurement_record,
+    )
 
     # Chi check_ids: χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7). Row offsets mirror _stitch_to_joint_csscode.
     mX1, mZ1 = g1.code.matrix_x.shape[0], g1.code.matrix_z.shape[0]
