@@ -11,8 +11,8 @@ import stim
 
 from qldpc.codes.common import CSSCode
 from qldpc.circuits.bookkeeping import QubitIDs
-from qldpc.circuits.memory.memory import get_memory_experiment, get_qubit_coordinates
-from qldpc.objects import Pauli, PauliXZ
+from qldpc.circuits.memory.memory import get_qubit_coordinates
+from qldpc.objects import Pauli
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
@@ -217,14 +217,90 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> tuple[stim.Circuit, CSSCode]:
-    """Stim circuit + merged joint CSS code for two-PPM joint measurement.
+    """Stim circuit + merged joint CSS code implementing Cain §III.A joint PPM.
 
-    Intra-code path (g1.code is g2.code). Inter-code support is added in Task 16.
+    Same pipeline as build_single_ppm_circuit but on the joint merged code, with
+    chi rows = χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7 α* observable).
     """
     joint_code = _stitch_to_joint_csscode(g1, g2, bridge)
-    circuit = get_memory_experiment(
-        joint_code, basis=Pauli.X, num_rounds=rounds, noise_model=noise_model,
+    qubit_ids = QubitIDs.from_code(joint_code)
+
+    intercode = g1.code is not g2.code
+    n1 = g1.code.num_qudits
+    n2 = g2.code.num_qudits if intercode else 0
+    n_anc_1 = len(g1.C0)
+    n_anc_2 = len(g2.C0)
+    n_bridge = bridge.width
+
+    if intercode:
+        data_ids = qubit_ids.data[: n1 + n2]
+        v0_indices_combined = tuple(g1.V0) + tuple(n1 + i for i in g2.V0)
+    else:
+        data_ids = qubit_ids.data[:n1]
+        v0_indices_combined = tuple(g1.V0) + tuple(g2.V0)
+
+    kappa_ids = qubit_ids.data[n1 + n2 : n1 + n2 + n_anc_1 + n_anc_2]
+    bridge_ids = qubit_ids.data[n1 + n2 + n_anc_1 + n_anc_2 :]
+
+    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
+    circuit += _surgery_state_prep(g1, data_ids, kappa_ids, bridge_ids)
+
+    qec_cycle, measurement_record, _ = _surgery_qec_cycle(
+        g1, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
     )
+    circuit += qec_cycle
+
+    circuit += _surgery_detach_and_readout(
+        g1, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
+
+    # Chi rows: χ^(1) ∪ χ^(2) ∪ U_B per math.md §2.7 (α* observable).
+    # Row layout in HX_joint (basis=X) depends on intra- vs inter-code:
+    #   intracode: [data H_X (mX) | χ^(1) (nV1) | χ^(2) (nV2) | U_B (n_UB)]
+    #   intercode: [data H_X_1 (mX1) | χ^(1) (nV1) | data H_X_2 (mX2) | χ^(2) (nV2) | U_B (n_UB)]
+    # HZ_joint (basis=Z) has the same shape with X↔Z swapped (no U_B rows).
+    mX1 = g1.code.matrix_x.shape[0]
+    mZ1 = g1.code.matrix_z.shape[0]
+    mX2 = g2.code.matrix_x.shape[0] if intercode else 0
+    mZ2 = g2.code.matrix_z.shape[0] if intercode else 0
+    n_V1 = len(g1.V0)
+    n_V2 = len(g2.V0)
+    n_UB = bridge.U_B.shape[0]
+
+    if g1.basis is Pauli.X:
+        check_ids = qubit_ids.checks_x
+        m1, m2 = mX1, mX2
+    else:
+        check_ids = qubit_ids.checks_z
+        m1, m2 = mZ1, mZ2
+
+    if intercode:
+        chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
+        chi2_ids = tuple(check_ids[m1 + n_V1 + m2 : m1 + n_V1 + m2 + n_V2])
+        ub_ids = tuple(
+            check_ids[m1 + n_V1 + m2 + n_V2 : m1 + n_V1 + m2 + n_V2 + n_UB]
+        ) if g1.basis is Pauli.X else ()
+    else:
+        chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
+        chi2_ids = tuple(check_ids[m1 + n_V1 : m1 + n_V1 + n_V2])
+        ub_ids = tuple(
+            check_ids[m1 + n_V1 + n_V2 : m1 + n_V1 + n_V2 + n_UB]
+        ) if g1.basis is Pauli.X else ()
+    chi_check_ids = chi1_ids + chi2_ids + ub_ids
+
+    circuit += _surgery_observable(
+        g1,
+        chi_check_ids=chi_check_ids,
+        data_ids=data_ids,
+        v0_indices=v0_indices_combined,
+        num_rounds=rounds,
+        measurement_record=measurement_record,
+    )
+
+    if noise_model is not None:
+        circuit = noise_model.noisy_circuit(circuit)
+
     return circuit, joint_code
 
 
