@@ -688,3 +688,22 @@ def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
     assert g.basis is Pauli.X
+
+
+def test_step1_restriction_basis_z_uses_HX():
+    """For basis=Pauli.Z, F = H_X[C_0, V_0] (not H_Z)."""
+    from qldpc.codes.surgery.gadget import _step1_restriction
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    V0, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    # V_0 = supp(z)
+    assert V0 == tuple(int(i) for i in np.where(z)[0])
+    # C_0 = X-checks touching V_0
+    touched = sorted({j for j in range(HX.shape[0]) for i in V0 if HX[j, i] == 1})
+    assert C0 == tuple(touched)
+    # F = H_X[C_0, V_0]
+    assert np.array_equal(F, HX[np.ix_(C0, V0)])
+    # math.md §1.1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
+    ones = np.ones(len(V0), dtype=np.uint8)
+    assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))

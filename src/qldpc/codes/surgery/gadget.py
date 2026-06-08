@@ -38,18 +38,31 @@ class GadgetLayout:
 
 
 def _step1_restriction(
-    code: CSSCode, x: np.ndarray
+    code: CSSCode, x: np.ndarray, *, basis: PauliXZ = Pauli.X,
 ) -> tuple[tuple[int, ...], tuple[int, ...], np.ndarray]:
-    """math.md §1.1 — V_0 = supp(x); C_0 = Z-checks touching V_0; F = H_Z[C_0, V_0]."""
+    """math.md §1.1 — V_0 = supp(x); C_0 = checks touching V_0; F = H_complement[C_0, V_0].
+
+    For basis=Pauli.X: F = H_Z[C_0, V_0] (the complementary basis to the measured logical).
+    For basis=Pauli.Z: F = H_X[C_0, V_0].
+    """
     x = np.asarray(x).astype(np.uint8)
     if x.shape != (code.num_qudits,):
         raise ValueError(f"x has shape {x.shape}, expected ({code.num_qudits},)")
     V0 = tuple(int(i) for i in np.where(x)[0])
-    HZ = np.asarray(code.matrix_z).astype(np.uint8)
-    C0 = tuple(
-        int(j) for j in range(HZ.shape[0]) if HZ[j, list(V0)].any()
+    # Use the COMPLEMENTARY check matrix to the measured logical type
+    H_complement = (
+        np.asarray(code.matrix_z).astype(np.uint8)
+        if basis is Pauli.X
+        else np.asarray(code.matrix_x).astype(np.uint8)
     )
-    F = HZ[np.ix_(C0, V0)] if C0 and V0 else np.zeros((len(C0), len(V0)), dtype=np.uint8)
+    C0 = tuple(
+        int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(V0)].any()
+    )
+    F = (
+        H_complement[np.ix_(C0, V0)]
+        if C0 and V0
+        else np.zeros((len(C0), len(V0)), dtype=np.uint8)
+    )
     return V0, C0, F.astype(np.uint8)
 
 
