@@ -10,8 +10,9 @@ import numpy as np
 import stim
 
 from qldpc.codes.common import CSSCode
+from qldpc.circuits.bookkeeping import QubitIDs
 from qldpc.circuits.memory.memory import get_memory_experiment
-from qldpc.objects import Pauli
+from qldpc.objects import Pauli, PauliXZ
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
@@ -182,3 +183,34 @@ def build_joint_ppm_circuit(
         joint_code, basis=Pauli.X, num_rounds=rounds, noise_model=noise_model,
     )
     return circuit, joint_code
+
+
+def _classify_reliable_round1_checks(
+    gadget: GadgetLayout,
+    merged_code: CSSCode,
+    qubit_ids: QubitIDs,
+) -> tuple[int, ...]:
+    """Return the subset of merged-code check ancillas whose round-1 syndrome
+    is reliable (= +1) given the surgery init state.
+
+    For basis=Pauli.X (data in |+⟩, κ in |0⟩):
+        reliable = data H_X rows (X-type, data |+⟩ → +1) +
+                   gauge-fix G rows (Z-type, κ |0⟩ → +1)
+        unreliable = χ rows (X on κ is random) + data H_Z rows (Z on data |+⟩ random)
+    For basis=Pauli.Z (data in |0⟩, κ in |+⟩): swap X↔Z in the above.
+    """
+    m_X = gadget.code.matrix_x.shape[0]
+    m_Z = gadget.code.matrix_z.shape[0]
+
+    if gadget.basis is Pauli.X:
+        # X-checks: first m_X are data H_X (reliable), next n_V are χ (unreliable)
+        reliable_x = qubit_ids.checks_x[:m_X]
+        # Z-checks: first m_Z are data H_Z (unreliable), last r are G (reliable)
+        reliable_z = qubit_ids.checks_z[m_Z:]
+    else:  # Pauli.Z (basis swap)
+        # X-checks: first m_X are data H_X (unreliable), last r are G (reliable)
+        reliable_x = qubit_ids.checks_x[m_X:]
+        # Z-checks: first m_Z are data H_Z (reliable), next n_V are χ (unreliable)
+        reliable_z = qubit_ids.checks_z[:m_Z]
+
+    return tuple(reliable_x) + tuple(reliable_z)

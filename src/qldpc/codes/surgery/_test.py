@@ -861,3 +861,64 @@ def test_boost_gadget_preserves_css_commutation_both_bases(basis):
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
     assert boosted.basis is basis  # boost preserves basis
+
+
+def test_classify_reliable_round1_checks_basis_x():
+    """For basis=X: reliable round-1 checks are data H_X (first m_X X-checks)
+    plus gauge-fix G (last r Z-checks)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.codes.common import CSSCode
+    import galois
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    F2 = galois.GF(2)
+    merged = CSSCode(
+        F2(g.HX_merged.astype(np.int_).tolist()),
+        F2(g.HZ_merged.astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_ids = QubitIDs.from_code(merged)
+    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+    m_X = code.matrix_x.shape[0]
+    m_Z = code.matrix_z.shape[0]
+    # Reliable X-checks: first m_X of checks_x (the original data H_X rows)
+    expected_x_reliable = set(qubit_ids.checks_x[:m_X])
+    # Reliable Z-checks: last r of checks_z (the gauge-fix G rows)
+    r = g.G.shape[0]
+    expected_z_reliable = set(qubit_ids.checks_z[m_Z:])
+    expected = expected_x_reliable | expected_z_reliable
+    assert set(reliable) == expected, (
+        f"reliable={set(reliable)}, expected={expected}"
+    )
+
+
+def test_classify_reliable_round1_checks_basis_z():
+    """For basis=Z: reliable round-1 checks are data H_Z (first m_Z Z-checks)
+    plus gauge-fix G (last r X-checks)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.codes.common import CSSCode
+    import galois
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    F2 = galois.GF(2)
+    merged = CSSCode(
+        F2(g.HX_merged.astype(np.int_).tolist()),
+        F2(g.HZ_merged.astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_ids = QubitIDs.from_code(merged)
+    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+    m_X = code.matrix_x.shape[0]
+    m_Z = code.matrix_z.shape[0]
+    r = g.G.shape[0]
+    # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last r X-checks
+    expected_z_reliable = set(qubit_ids.checks_z[:m_Z])
+    expected_x_reliable = set(qubit_ids.checks_x[m_X:])
+    expected = expected_z_reliable | expected_x_reliable
+    assert set(reliable) == expected
