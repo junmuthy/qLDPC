@@ -11,6 +11,8 @@ import galois
 import networkx as nx
 import numpy as np
 
+from qldpc.objects import Pauli, PauliXZ
+
 from .gadget import GadgetLayout
 
 GF2 = galois.GF(2)
@@ -25,6 +27,7 @@ class Bridge:
     intercode: bool
     aux_graph_edges: tuple[tuple[int, int], ...] | None
     z_extensions: dict[int, np.ndarray] | None
+    basis: PauliXZ = dataclasses.field(default=Pauli.X)
 
 
 def _build_path_graph_U_B(w: int) -> np.ndarray:
@@ -227,6 +230,11 @@ def _solve_chi_z_bridge_choices(
 
 def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
     """Two-PPM bridge between gadgets. math.md §2."""
+    if g1.basis is not g2.basis:
+        raise ValueError(
+            f"build_bridge requires g1.basis == g2.basis, got {g1.basis!r} vs {g2.basis!r}"
+        )
+    basis = g1.basis
     intercode = g1.code is not g2.code
     w = min(len(g1.V0), len(g2.V0))
     if w < 2:
@@ -243,6 +251,7 @@ def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
             width=w, qubits=qubits, U_B=U_B,
             chi_endpoint_extensions=chi_endpoint_extensions,
             intercode=False, aux_graph_edges=None, z_extensions=None,
+            basis=basis,
         )
 
     # Inter-code path (Ide §VII C)
@@ -274,4 +283,5 @@ def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
         intercode=True,
         aux_graph_edges=aux_graph_edges,
         z_extensions=z_extensions,
+        basis=basis,
     )

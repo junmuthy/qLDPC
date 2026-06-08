@@ -293,7 +293,7 @@ def test_bridge_dataclass_fields():
     assert fields == {
         "width", "qubits", "U_B",
         "chi_endpoint_extensions", "intercode",
-        "aux_graph_edges", "z_extensions",
+        "aux_graph_edges", "z_extensions", "basis",
     }
     assert dataclasses.is_dataclass(Bridge)
 
@@ -808,3 +808,27 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         assert kappa + chi + r == expected, (
             f"code {code_index}: Z-basis got κ+χ+r={kappa+chi+r}, expected {expected}"
         )
+
+
+def test_bridge_has_basis_field_and_inherits_from_gadgets():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge, Bridge
+    code = codes.SteaneCode()
+    z1 = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(code, z1, basis=Pauli.Z)
+    g2 = build_gadget(code, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    assert bridge.basis is Pauli.Z
+
+
+def test_build_bridge_rejects_basis_mismatch():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_x = build_gadget(code, x, basis=Pauli.X)
+    g_z = build_gadget(code, z, basis=Pauli.Z)
+    with pytest.raises(ValueError, match="basis"):
+        build_bridge(g_x, g_z)
