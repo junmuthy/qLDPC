@@ -1164,6 +1164,47 @@ def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
     )
 
 
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_surgery_final_detectors_count_matches_reliable_round1(basis):
+    """Number of final DETECTORs equals |reliable round-1 set|.
+
+    Tests the helper in isolation: build a circuit through detach_and_readout,
+    then call _surgery_final_detectors and count emitted DETECTOR instructions.
+    """
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import (
+        _surgery_state_prep, _surgery_qec_cycle, _surgery_detach_and_readout,
+        _surgery_final_detectors, _classify_reliable_round1_checks,
+        _gadget_merged_csscode,
+    )
+    from qldpc.circuits.bookkeeping import QubitIDs
+
+    code = codes.SteaneCode()
+    op = (code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X
+          else code.get_logical_ops(Pauli.Z)[0])
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    merged = _gadget_merged_csscode(g)
+    qubit_ids = QubitIDs.from_code(merged)
+    n_data = code.num_qudits
+    data_ids = qubit_ids.data[:n_data]
+    kappa_ids = qubit_ids.data[n_data:]
+
+    # Simulate the pipeline through detach (we need measurement_record populated).
+    _qec, mrec, _det = _surgery_qec_cycle(g, merged, num_rounds=2, qubit_ids=qubit_ids)
+    _surgery_detach_and_readout(
+        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=(),
+        measurement_record=mrec,
+    )
+
+    circuit = _surgery_final_detectors(g, merged, qubit_ids, measurement_record=mrec)
+    n_final_det = str(circuit).count("DETECTOR")
+    expected = len(_classify_reliable_round1_checks(g, qubit_ids))
+    assert n_final_det == expected, (
+        f"basis={basis}: emitted {n_final_det} DETECTORs, expected {expected}"
+    )
+
+
 @pytest.mark.slow
 def test_single_ppm_ler_monotone_in_p():
     """Tiny sinter sweep: PPM LER monotonically increasing in p.

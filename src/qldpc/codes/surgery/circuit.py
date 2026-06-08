@@ -344,6 +344,48 @@ def _surgery_observable(
     return circuit
 
 
+def _surgery_final_detectors(
+    gadget: GadgetLayout,
+    merged_code: CSSCode,
+    qubit_ids: QubitIDs,
+    *,
+    measurement_record: MeasurementRecord,
+) -> stim.Circuit:
+    """Emit DETECTORs for reliable stabs inferable from final readouts.
+
+    For basis=X: data H_X (from Mx data) + G (from Mz κ).
+    For basis=Z: data H_Z (from Mz data) + G (from Mx κ).
+    Each DETECTOR XORs ⊕(final M-record on stab support) ⊕ last-round syndrome.
+    """
+    m_X = gadget.code.matrix_x.shape[0]
+    m_Z = gadget.code.matrix_z.shape[0]
+    HX = np.asarray(merged_code.matrix_x).astype(np.uint8)
+    HZ = np.asarray(merged_code.matrix_z).astype(np.uint8)
+
+    circuit = stim.Circuit()
+
+    def _emit_detector(stab_row: np.ndarray, check_id: int, det_idx: int) -> None:
+        supp = np.where(stab_row)[0]
+        targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
+        targets.append(measurement_record.get_target_rec(check_id, -1))
+        circuit.append("DETECTOR", targets, (0, 0, det_idx))
+
+    if gadget.basis is Pauli.X:
+        # data H_X rows (X-checks indices [:m_X])
+        for kk in range(m_X):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk], kk)
+        # G rows (Z-checks indices [m_Z:])
+        for offset, kk in enumerate(range(m_Z, HZ.shape[0])):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], m_X + offset)
+    else:  # Pauli.Z (symmetric: chi in HZ, G in HX)
+        for kk in range(m_Z):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], kk)
+        for offset, kk in enumerate(range(m_X, HX.shape[0])):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk], m_Z + offset)
+
+    return circuit
+
+
 def _surgery_detach_and_readout(
     gadget: GadgetLayout,
     *,
