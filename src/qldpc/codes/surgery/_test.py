@@ -81,6 +81,26 @@ def test_step2_gauge_fix_deterministic():
     assert np.array_equal((G1 @ F) % 2, np.zeros((1, F.shape[1]), dtype=np.uint8))
 
 
+def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
+    """basis=Pauli.Z: χ rows added to HZ_merged (Z-type); G added to HX_merged (X-type)."""
+    from qldpc.codes.surgery.gadget import (
+        _step1_restriction, _step2_gauge_fix, _step3_assemble,
+    )
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    V0, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    G = _step2_gauge_fix(F)
+    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G, basis=Pauli.Z)
+
+    n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
+    # For basis=Z: HX_merged grows by r rows (gauge-fix), HZ_merged by |V_0| rows (chi).
+    assert HX_m.shape == (mX + G.shape[0], n + len(C0)), f"HX shape {HX_m.shape}"
+    assert HZ_m.shape == (mZ + len(V0), n + len(C0)), f"HZ shape {HZ_m.shape}"
+    # CSS commutation
+    product = (HX_m @ HZ_m.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+
+
 def test_step3_assemble_steane_css_commutes():
     from qldpc.codes.surgery.gadget import (
         _step1_restriction, _step2_gauge_fix, _step3_assemble,

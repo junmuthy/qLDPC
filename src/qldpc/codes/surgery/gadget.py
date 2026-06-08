@@ -83,8 +83,14 @@ def _step3_assemble(
     C0: tuple[int, ...],
     F: np.ndarray,
     G: np.ndarray,
+    *,
+    basis: PauliXZ = Pauli.X,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """math.md §1.4 — block assembly of HX_merged, HZ_merged."""
+    """math.md §1.4 — block assembly of HX_merged, HZ_merged.
+
+    basis=X (default): χ rows added to HX_merged, G to HZ_merged.
+    basis=Z: χ rows added to HZ_merged, G to HX_merged (basis-symmetric dual).
+    """
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     n = code.num_qudits
@@ -92,29 +98,39 @@ def _step3_assemble(
     nV, nC = len(V0), len(C0)
     r = G.shape[0]
 
-    # E_{V0}^T : (nV × n), single 1 per row at position V0[i]
     E_V0_T = np.zeros((nV, n), dtype=np.uint8)
     for i, v in enumerate(V0):
         E_V0_T[i, v] = 1
-
-    # F^T (nV × nC)
     F_T = F.T.astype(np.uint8)
 
-    # \tilde F : (mZ × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
-    # (math.md §1.4). Previous form F_tilde[j] = F[k] only worked when nV == nC.
-    F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
+    # F_tilde : (mZ_or_mX × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
+    if basis is Pauli.X:
+        F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
+    else:
+        F_tilde = np.zeros((mX, nC), dtype=np.uint8)
     for k, j in enumerate(C0):
         F_tilde[j, k] = 1
 
-    HX_merged = np.block([
-        [HX, np.zeros((mX, nC), dtype=np.uint8)],
-        [E_V0_T, F_T],
-    ]).astype(np.uint8)
-
-    HZ_merged = np.block([
-        [HZ, F_tilde],
-        [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
-    ]).astype(np.uint8)
+    if basis is Pauli.X:
+        # χ rows extend HX_merged; G rows extend HZ_merged
+        HX_merged = np.block([
+            [HX, np.zeros((mX, nC), dtype=np.uint8)],
+            [E_V0_T, F_T],
+        ]).astype(np.uint8)
+        HZ_merged = np.block([
+            [HZ, F_tilde],
+            [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
+        ]).astype(np.uint8)
+    else:
+        # basis=Z: χ rows extend HZ_merged; G rows extend HX_merged (symmetric)
+        HZ_merged = np.block([
+            [HZ, np.zeros((mZ, nC), dtype=np.uint8)],
+            [E_V0_T, F_T],
+        ]).astype(np.uint8)
+        HX_merged = np.block([
+            [HX, F_tilde],
+            [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
+        ]).astype(np.uint8)
 
     return HX_merged, HZ_merged
 
