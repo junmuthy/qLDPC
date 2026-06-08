@@ -1118,3 +1118,27 @@ def test_build_joint_ppm_circuit_noiseless_observables_zero():
     sampler = circuit.compile_detector_sampler()
     _, obs = sampler.sample(shots=16, separate_observables=True)
     assert (obs == 0).all(), f"noiseless joint observables fired: {obs.sum()} flips"
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
+    """At p=0.1, the PPM observable (observable 0) flips ≥ 5% of shots."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.noise_model import DepolarizingNoiseModel
+    code = codes.SteaneCode()
+    op = (code.get_logical_ops(Pauli.X)[0]
+          if basis is Pauli.X
+          else code.get_logical_ops(Pauli.Z)[0])
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=DepolarizingNoiseModel(p=0.1),
+    )
+    sampler = circuit.compile_detector_sampler()
+    _, obs = sampler.sample(shots=400, separate_observables=True)
+    # Observable 0 (PPM) flips a nontrivial fraction at p=0.1
+    obs_0_flip_rate = float(obs[:, 0].mean())
+    assert obs_0_flip_rate >= 0.05, (
+        f"PPM observable flip rate {obs_0_flip_rate:.2%} too low at p=0.1"
+    )
