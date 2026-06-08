@@ -18,7 +18,7 @@ def test_gadget_layout_is_frozen_dataclass():
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert fields == {
         "code", "x", "V0", "C0", "F", "G",
-        "HX_merged", "HZ_merged", "kappa_qubits",
+        "HX_merged", "HZ_merged", "kappa_qubits", "basis",
     }
     # Verify actually frozen: mutation must raise
     inst = GadgetLayout(
@@ -673,3 +673,18 @@ def test_alpha_star_yields_joint_op_on_webster(code_index: int) -> None:
         f"Code {data.get('name', code_index)}: α* · HX_joint != (op1+op2, 0, 0). "
         f"Mismatch at columns: {np.flatnonzero(product ^ expected)[:20]}"
     )
+
+
+def test_gadget_layout_has_basis_field():
+    from qldpc.codes.surgery.gadget import GadgetLayout
+    fields = {f.name for f in dataclasses.fields(GadgetLayout)}
+    assert "basis" in fields, f"basis field missing; got {fields}"
+
+
+def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
+    """Backward compatibility: build_gadget without explicit basis defaults to Pauli.X."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    assert g.basis is Pauli.X

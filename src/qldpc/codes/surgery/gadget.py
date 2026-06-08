@@ -16,6 +16,7 @@ import galois
 import numpy as np
 
 from qldpc.codes.common import CSSCode
+from qldpc.objects import Pauli, PauliXZ
 
 GF2 = galois.GF(2)
 
@@ -33,6 +34,7 @@ class GadgetLayout:
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
     kappa_qubits: tuple[int, ...]
+    basis: PauliXZ = Pauli.X
 
 
 def _step1_restriction(
@@ -118,6 +120,7 @@ def build_gadget(code: CSSCode, x: np.ndarray) -> GadgetLayout:
     return GadgetLayout(
         code=code, x=x, V0=V0, C0=C0, F=F, G=G,
         HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
+        basis=Pauli.X,
     )
 
 
