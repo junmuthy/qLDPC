@@ -214,3 +214,26 @@ def _classify_reliable_round1_checks(
         reliable_z = qubit_ids.checks_z[:m_Z]
 
     return tuple(reliable_x) + tuple(reliable_z)
+
+
+def _surgery_state_prep(
+    gadget: GadgetLayout,
+    data_ids: tuple[int, ...],
+    kappa_ids: tuple[int, ...],
+    bridge_ids: tuple[int, ...] = (),
+) -> stim.Circuit:
+    """Cain step 1: init data in logical |+⟩ (basis=X) or |0⟩ (basis=Z),
+    init κ ancillas in |0⟩ (basis=X) or |+⟩ (basis=Z). Bridge follows κ.
+    """
+    circuit = stim.Circuit()
+    if gadget.basis is Pauli.X:
+        circuit.append("RX", list(data_ids))
+        circuit.append("R", list(kappa_ids))
+        if bridge_ids:
+            circuit.append("R", list(bridge_ids))
+    else:  # Pauli.Z
+        circuit.append("R", list(data_ids))
+        circuit.append("RX", list(kappa_ids))
+        if bridge_ids:
+            circuit.append("RX", list(bridge_ids))
+    return circuit

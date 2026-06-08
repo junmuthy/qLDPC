@@ -922,3 +922,55 @@ def test_classify_reliable_round1_checks_basis_z():
     expected_x_reliable = set(qubit_ids.checks_x[m_X:])
     expected = expected_z_reliable | expected_x_reliable
     assert set(reliable) == expected
+
+
+def test_surgery_state_prep_basis_x_resets():
+    """basis=X: data RX (→|+⟩), kappa R (→|0⟩)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _surgery_state_prep
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.codes.common import CSSCode
+    import galois
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    F2 = galois.GF(2)
+    merged = CSSCode(
+        F2(g.HX_merged.astype(np.int_).tolist()),
+        F2(g.HZ_merged.astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_ids = QubitIDs.from_code(merged)
+    n_data = code.num_qudits
+    data_ids = qubit_ids.data[:n_data]
+    kappa_ids = qubit_ids.data[n_data:]
+    circuit = _surgery_state_prep(g, data_ids, kappa_ids, bridge_ids=())
+    text = str(circuit)
+    assert f"RX {' '.join(str(q) for q in data_ids)}" in text
+    assert f"R {' '.join(str(q) for q in kappa_ids)}" in text
+
+
+def test_surgery_state_prep_basis_z_resets():
+    """basis=Z: data R (→|0⟩), kappa RX (→|+⟩)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _surgery_state_prep
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.codes.common import CSSCode
+    import galois
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    F2 = galois.GF(2)
+    merged = CSSCode(
+        F2(g.HX_merged.astype(np.int_).tolist()),
+        F2(g.HZ_merged.astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_ids = QubitIDs.from_code(merged)
+    n_data = code.num_qudits
+    data_ids = qubit_ids.data[:n_data]
+    kappa_ids = qubit_ids.data[n_data:]
+    circuit = _surgery_state_prep(g, data_ids, kappa_ids, bridge_ids=())
+    text = str(circuit)
+    assert f"R {' '.join(str(q) for q in data_ids)}" in text
+    assert f"RX {' '.join(str(q) for q in kappa_ids)}" in text
