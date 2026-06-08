@@ -47,6 +47,10 @@ def build_single_ppm_circuit(
         gadget, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
+    circuit += _surgery_final_detectors(
+        gadget, merged_code, qubit_ids,
+        measurement_record=measurement_record,
+    )
 
     m_X, m_Z, n_V = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0], len(gadget.V0)
     if gadget.basis is Pauli.X:

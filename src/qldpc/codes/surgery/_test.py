@@ -1205,6 +1205,28 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis):
     )
 
 
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis):
+    """Noiseless: NO detector fires (including the new final detectors).
+
+    The total detector count must equal: round-1 reliable + (rounds-1)*all_checks + final reliable.
+    Under noiseless conditions all of them must remain silent.
+    """
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    op = (code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X
+          else code.get_logical_ops(Pauli.Z)[0])
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    circuit = build_single_ppm_circuit(g, rounds=3, noise_model=None)
+    sampler = circuit.compile_detector_sampler()
+    dets, _ = sampler.sample(shots=64, separate_observables=True)
+    assert not dets.any(), (
+        f"basis={basis}: {dets.sum()} detector fires noiselessly across {dets.shape[0]} shots"
+    )
+
+
 @pytest.mark.slow
 def test_single_ppm_ler_monotone_in_p():
     """Tiny sinter sweep: PPM LER monotonically increasing in p.
