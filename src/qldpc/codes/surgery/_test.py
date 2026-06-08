@@ -1288,3 +1288,43 @@ def test_single_ppm_ler_monotone_in_p():
             f"LER not monotonic: p={sorted_p[i]} → {ler_vals[i]}, "
             f"p={sorted_p[i+1]} → {ler_vals[i+1]}"
         )
+
+
+@pytest.mark.slow
+def test_single_ppm_ler_with_final_detectors_below_threshold():
+    """With final detectors wired, LER at p=0.001 should be ≤ 0.01.
+
+    Reference: before the final-detector wiring, LER at p=0.001 was ~0.024
+    (from test_single_ppm_ler_monotone_in_p in the surgery-circuit-rewrite plan).
+    Adding the inferred detectors should drop it significantly.
+    """
+    import sinter
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc import decoders
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+
+    p = 0.001
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=DepolarizingNoiseModel(p),
+    )
+    sinter_decoder = decoders.SinterDecoder()
+    results = sinter.collect(
+        tasks=[sinter.Task(circuit=circuit, json_metadata={"p": float(p)})],
+        decoders=["custom"],
+        custom_decoders={"custom": sinter_decoder},
+        num_workers=4,
+        max_shots=5000,
+        max_errors=50,
+        print_progress=False,
+    )
+    assert len(results) == 1
+    ler = results[0].errors / max(results[0].shots, 1)
+    assert ler <= 0.01, (
+        f"LER at p=0.001 = {ler:.4f} (errors={results[0].errors}/{results[0].shots} shots). "
+        f"Expected ≤ 0.01 with final detectors wired. Was ~0.024 without them."
+    )
