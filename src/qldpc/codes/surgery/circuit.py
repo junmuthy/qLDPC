@@ -150,10 +150,15 @@ def _stitch_to_joint_csscode(
         HX2_pad = _pad_g2(HX2)
         HZ2_pad = _pad_g2(HZ2)
 
-        # Bridge chi-endpoint extensions: chi row 0 of each gadget gets an
-        # X on its bridge endpoint.
-        HX1_pad[mX1 + 0, bridge_col_start + 0] = 1
-        HX2_pad[mX2 + 0, bridge_col_start + n_bridge - 1] = 1
+        # Bridge chi-endpoint extensions: chi row 0 of each gadget gets a
+        # Pauli on its bridge endpoint.  For basis=X chi rows live in HX;
+        # for basis=Z they live in HZ.
+        if g1.basis is Pauli.X:
+            HX1_pad[mX1 + 0, bridge_col_start + 0] = 1
+            HX2_pad[mX2 + 0, bridge_col_start + n_bridge - 1] = 1
+        else:  # Pauli.Z
+            HZ1_pad[mZ1 + 0, bridge_col_start + 0] = 1
+            HZ2_pad[mZ2 + 0, bridge_col_start + n_bridge - 1] = 1
 
         # Inter-code: both gadgets contribute all rows (no duplicates).
         u_b = np.asarray(bridge.U_B).astype(np.int_)
@@ -162,8 +167,12 @@ def _stitch_to_joint_csscode(
         if n_u_b > 0:
             u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
 
-        HX_joint = field(np.vstack([HX1_pad, HX2_pad, u_b_pad]))
-        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad]))
+        if g1.basis is Pauli.X:
+            HX_joint = field(np.vstack([HX1_pad, HX2_pad, u_b_pad]))
+            HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad]))
+        else:  # Pauli.Z: U_B rows go into HZ (Z-type bridge stabilizers)
+            HX_joint = field(np.vstack([HX1_pad, HX2_pad]))
+            HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad, u_b_pad]))
 
         return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
 
@@ -187,8 +196,15 @@ def _stitch_to_joint_csscode(
     HZ1_pad = _pad(HZ1, anc_offset=anc_off_1)
     HZ2_pad = _pad(HZ2, anc_offset=anc_off_2)
 
-    HX1_pad[mX + 0, bridge_col_start + 0] = 1
-    HX2_pad[mX + 0, bridge_col_start + n_bridge - 1] = 1
+    # Bridge chi-endpoint extension: chi row 0 of each gadget gets a Pauli
+    # on its bridge endpoint. For basis=X chi rows live in HX; for basis=Z
+    # they live in HZ.
+    if g1.basis is Pauli.X:
+        HX1_pad[mX + 0, bridge_col_start + 0] = 1
+        HX2_pad[mX + 0, bridge_col_start + n_bridge - 1] = 1
+    else:  # Pauli.Z
+        HZ1_pad[mZ + 0, bridge_col_start + 0] = 1
+        HZ2_pad[mZ + 0, bridge_col_start + n_bridge - 1] = 1
 
     HX2_pad_nondata = HX2_pad[mX:]
 
@@ -203,8 +219,12 @@ def _stitch_to_joint_csscode(
     if n_u_b > 0:
         u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
 
-    HX_joint = field(np.vstack([HX1_pad, HX2_pad_nondata, u_b_pad]))
-    HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad_gaugefix]))
+    if g1.basis is Pauli.X:
+        HX_joint = field(np.vstack([HX1_pad, HX2_pad_nondata, u_b_pad]))
+        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad_gaugefix]))
+    else:  # Pauli.Z: U_B rows go into HZ; HX gets nondata chi rows only
+        HX_joint = field(np.vstack([HX1_pad, HX2_pad_nondata]))
+        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad_gaugefix, u_b_pad]))
 
     return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
 

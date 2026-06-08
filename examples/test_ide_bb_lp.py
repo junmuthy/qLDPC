@@ -28,6 +28,8 @@ from _ide_fixtures import (  # noqa: E402
 import numpy as np
 import pytest
 
+from qldpc.objects import Pauli
+
 
 @pytest.mark.skipif(
     not fixtures_available(),
@@ -37,9 +39,9 @@ def test_load_ide_BB_input_with_operator_returns_csscode_and_op():
     code, x = load_ide_BB_input_with_operator()
     # The operator vector must have nontrivial support
     assert x.sum() > 0
-    # The operator must commute with all Z-stabilizers (so build_gadget accepts it)
-    HZ = np.asarray(code.matrix_z).astype(np.uint8)
-    assert ((HZ @ x) % 2 == 0).all(), "x is not in ker(HZ); build_gadget will reject it"
+    # Z̄_1 commutes with all X-stabilizers (HX @ x = 0 mod 2)
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    assert ((HX @ x) % 2 == 0).all(), "x is not in ker(HX); build_gadget(basis=Pauli.Z) will reject it"
 
 
 @pytest.mark.skipif(
@@ -49,8 +51,9 @@ def test_load_ide_BB_input_with_operator_returns_csscode_and_op():
 def test_load_ide_LP_input_with_operator_returns_csscode_and_op():
     code, x = load_ide_LP_input_with_operator()
     assert x.sum() > 0
-    HZ = np.asarray(code.matrix_z).astype(np.uint8)
-    assert ((HZ @ x) % 2 == 0).all()
+    # Z̄_2 commutes with all X-stabilizers (HX @ x = 0 mod 2)
+    HX = np.asarray(code.matrix_x).astype(np.uint8)
+    assert ((HX @ x) % 2 == 0).all()
 
 
 @pytest.mark.skipif(
@@ -94,8 +97,8 @@ def test_intercode_joint_bb_lp_exact():
 
     bb, x_bb = load_ide_BB_input_with_operator()
     lp, x_lp = load_ide_LP_input_with_operator()
-    g1 = build_gadget(bb, x_bb)
-    g2 = build_gadget(lp, x_lp)
+    g1 = build_gadget(bb, x_bb, basis=Pauli.Z)
+    g2 = build_gadget(lp, x_lp, basis=Pauli.Z)
     bridge = build_bridge(g1, g2)
     _, joint = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
     # k matches exactly
