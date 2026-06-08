@@ -1007,3 +1007,51 @@ def test_surgery_qec_cycle_round_1_detectors_classified():
     assert n_det == len(reliable), (
         f"round-1 detectors={n_det}, expected len(reliable)={len(reliable)}"
     )
+
+
+def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
+    """basis=X: detach with M (Z-basis) on κ, then MX on data."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _surgery_detach_and_readout
+    from qldpc.circuits.bookkeeping import MeasurementRecord
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    n_data = code.num_qudits
+    data_ids = tuple(range(n_data))
+    kappa_ids = tuple(range(n_data, n_data + len(g.kappa_qubits)))
+    bridge_ids = ()
+    meas_rec = MeasurementRecord()
+    circuit = _surgery_detach_and_readout(
+        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        measurement_record=meas_rec,
+    )
+    text = str(circuit)
+    # κ measured first (in Z), then data (in X)
+    m_kappa_idx = text.find(f"M {' '.join(str(q) for q in kappa_ids)}")
+    m_data_idx = text.find(f"MX {' '.join(str(q) for q in data_ids)}")
+    assert m_kappa_idx >= 0 and m_data_idx >= 0
+    assert m_kappa_idx < m_data_idx
+
+
+def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z():
+    """basis=Z: detach with MX on κ, then M on data."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _surgery_detach_and_readout
+    from qldpc.circuits.bookkeeping import MeasurementRecord
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    n_data = code.num_qudits
+    data_ids = tuple(range(n_data))
+    kappa_ids = tuple(range(n_data, n_data + len(g.kappa_qubits)))
+    meas_rec = MeasurementRecord()
+    circuit = _surgery_detach_and_readout(
+        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=(),
+        measurement_record=meas_rec,
+    )
+    text = str(circuit)
+    m_kappa_idx = text.find(f"MX {' '.join(str(q) for q in kappa_ids)}")
+    m_data_idx = text.find(f"M {' '.join(str(q) for q in data_ids)}")
+    assert m_kappa_idx >= 0 and m_data_idx >= 0
+    assert m_kappa_idx < m_data_idx

@@ -297,3 +297,24 @@ def _surgery_qec_cycle(
         )
 
     return circuit, measurement_record, detector_record
+
+
+def _surgery_detach_and_readout(
+    gadget: GadgetLayout,
+    *,
+    data_ids: tuple[int, ...],
+    kappa_ids: tuple[int, ...],
+    bridge_ids: tuple[int, ...],
+    measurement_record: MeasurementRecord,
+) -> stim.Circuit:
+    """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
+    circuit = stim.Circuit()
+    detach_qubits = list(kappa_ids) + list(bridge_ids)
+    kappa_op = "M" if gadget.basis is Pauli.X else "MX"
+    data_op = "MX" if gadget.basis is Pauli.X else "M"
+    circuit.append(kappa_op, detach_qubits)
+    measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
+    circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+    circuit.append(data_op, list(data_ids))
+    measurement_record.append({q: i for i, q in enumerate(data_ids)})
+    return circuit
