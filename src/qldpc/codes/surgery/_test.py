@@ -750,3 +750,61 @@ def test_build_gadget_z_basis_rejects_non_z_logical():
     if ((HX @ x_logical) % 2).any():
         with pytest.raises(ValueError, match="logical"):
             build_gadget(code, x_logical, basis=Pauli.Z)
+
+
+def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code():
+    """basis-symmetric invariant: build_gadget(code, z, basis=Z) gives the same
+    merged matrices as build_gadget(dual_code, z, basis=X), where dual_code has
+    HX/HZ swapped. The swap labels swap too, so we compare HX_z vs HZ_dx_x and
+    HZ_z vs HX_dx_x."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.common import CSSCode
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_z = build_gadget(code, z, basis=Pauli.Z)
+    # Dual code: swap matrix_x and matrix_z
+    dual = CSSCode(
+        np.asarray(code.matrix_z).astype(np.int_),
+        np.asarray(code.matrix_x).astype(np.int_),
+        is_subsystem_code=False,
+    )
+    g_dual = build_gadget(dual, z, basis=Pauli.X)
+    # In the dual construction, the basis-X chi rows end up in dual.HX_merged
+    # which corresponds to original.HZ_merged in the basis-Z construction.
+    assert np.array_equal(g_z.HZ_merged, g_dual.HX_merged), (
+        "basis-Z chi (in HZ_merged) should equal basis-X chi (in HX_merged) on dual"
+    )
+    assert np.array_equal(g_z.HX_merged, g_dual.HZ_merged), (
+        "basis-Z gauge-fix (in HX_merged) should equal basis-X gauge-fix (in HZ_merged) on dual"
+    )
+
+
+def test_webster_table_i_z_basis_kappa_chi_r_exact():
+    """Webster Z̄_1 seed produces the same κ+χ+r counts (basis-symmetric)."""
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+
+    def z_bar_1_operator(d: dict) -> np.ndarray:
+        l = d["l"]
+        for seed in d["seeds"]:
+            if seed["name"] == "Z_bar_1" and seed["pauli_type"] == "Z":
+                L = np.zeros(l, dtype=np.uint8); R = np.zeros(l, dtype=np.uint8)
+                for i in seed["L_support"]:
+                    L[i] = 1
+                for i in seed["R_support"]:
+                    R[i] = 1
+                return np.concatenate([L, R])
+        raise ValueError("Z_bar_1 not found")
+
+    for code_index, expected in [(0, 19), (1, 31), (2, 49), (3, 79)]:
+        d = load_webster_seed_set(code_index)
+        c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+        z = z_bar_1_operator(d)
+        g = build_gadget(c, z, basis=Pauli.Z)
+        kappa = len(g.kappa_qubits)
+        chi = len(g.V0)
+        r = g.G.shape[0]
+        assert kappa + chi + r == expected, (
+            f"code {code_index}: Z-basis got κ+χ+r={kappa+chi+r}, expected {expected}"
+        )
