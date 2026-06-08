@@ -17,7 +17,7 @@ from scipy.io import mmread
 
 from qldpc.codes.common import CSSCode
 
-_FIXTURE_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "ide_zenodo"
+_FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "ide_zenodo"
 
 
 def fixtures_available() -> bool:
