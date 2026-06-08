@@ -974,3 +974,36 @@ def test_surgery_state_prep_basis_z_resets():
     text = str(circuit)
     assert f"R {' '.join(str(q) for q in data_ids)}" in text
     assert f"RX {' '.join(str(q) for q in kappa_ids)}" in text
+
+
+def test_surgery_qec_cycle_round_1_detectors_classified():
+    """Round-1 detectors are 1-arg only for RELIABLE checks; unreliable ones skipped."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.circuit import _surgery_qec_cycle, _classify_reliable_round1_checks
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.codes.common import CSSCode
+    import galois
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    F2 = galois.GF(2)
+    merged = CSSCode(
+        F2(g.HX_merged.astype(np.int_).tolist()),
+        F2(g.HZ_merged.astype(np.int_).tolist()),
+        is_subsystem_code=False,
+    )
+    qubit_ids = QubitIDs.from_code(merged)
+    reliable = _classify_reliable_round1_checks(g, merged, qubit_ids)
+
+    circuit, meas_rec, det_rec = _surgery_qec_cycle(
+        g, merged, num_rounds=2, qubit_ids=qubit_ids,
+    )
+    # Count round-1 1-arg DETECTORs (those appearing before any REPEAT_BLOCK).
+    text = str(circuit)
+    # Number of "DETECTOR" instructions in the first round (before the REPEAT block)
+    # should equal len(reliable).
+    first_round_str = text.split("REPEAT")[0]
+    n_det = first_round_str.count("DETECTOR")
+    assert n_det == len(reliable), (
+        f"round-1 detectors={n_det}, expected len(reliable)={len(reliable)}"
+    )

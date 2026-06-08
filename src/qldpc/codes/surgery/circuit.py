@@ -237,3 +237,63 @@ def _surgery_state_prep(
         if bridge_ids:
             circuit.append("RX", list(bridge_ids))
     return circuit
+
+
+from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
+from qldpc.circuits.bookkeeping import MeasurementRecord, DetectorRecord
+
+
+def _surgery_qec_cycle(
+    gadget: GadgetLayout,
+    merged_code: CSSCode,
+    num_rounds: int,
+    qubit_ids: QubitIDs,
+) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
+    """Build num_rounds rounds of merged-code SE with surgery-aware round-1 detectors.
+
+    Mirrors qldpc.circuits.memory.memory._get_qec_cycle except round-1 DETECTORs
+    are only emitted for reliable checks (per _classify_reliable_round1_checks).
+    Rounds 2..N emit standard 2-arg consistency detectors for ALL checks.
+    """
+    strategy = EdgeColoring()
+    one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
+    reliable = set(_classify_reliable_round1_checks(gadget, merged_code, qubit_ids))
+    all_check_ids = qubit_ids.check
+
+    circuit = stim.Circuit()
+    measurement_record = MeasurementRecord()
+    detector_record = DetectorRecord()
+
+    # Round 1: classified DETECTOR emission
+    circuit += one_round
+    measurement_record.append(round_measurement_record)
+    for kk, check_id in enumerate(all_check_ids):
+        if check_id in reliable:
+            circuit.append(
+                "DETECTOR",
+                [measurement_record.get_target_rec(check_id)],
+                (0, 0, kk),
+            )
+    # detector_record only tracks the reliable subset for round 1
+    reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
+    detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
+
+    # Rounds 2..N: full consistency detectors for ALL checks
+    if num_rounds > 1:
+        repeat_circuit = one_round.copy()
+        measurement_record.append(round_measurement_record)
+        repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+        for kk, check_id in enumerate(all_check_ids):
+            targets = [
+                measurement_record.get_target_rec(check_id, -1),
+                measurement_record.get_target_rec(check_id, -2),
+            ]
+            repeat_circuit.append("DETECTOR", targets, (0, 0, kk))
+        circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
+        measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
+        detector_record.append(
+            {cid: dd for dd, cid in enumerate(all_check_ids)},
+            repeat=num_rounds - 1,
+        )
+
+    return circuit, measurement_record, detector_record
