@@ -39,6 +39,20 @@ sbatch examples/scripts/slurm/submit.sbatch
 
 3. Check status: `squeue -u $USER`, logs at `logs/webster0_ler_<jobid>.out`.
 
+## Running on PBS / Torque
+
+1. Edit `submit.pbs` to set `PROJECT_DIR` and `VENV_DIR`.
+2. Adjust the `#PBS -l select=...` line for your site (some sites use the older
+   `#PBS -l nodes=1:ppn=N` syntax — the file has both with one commented out).
+3. Submit:
+
+```bash
+mkdir -p logs results
+qsub examples/scripts/slurm/submit.pbs
+```
+
+4. Check status: `qstat -u $USER`, logs at `logs/webster0_ler.out`.
+
 ## Resuming
 
 The script uses `sinter.collect(save_resume_filepath=...)`. If interrupted,

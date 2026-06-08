@@ -1,0 +1,43 @@
+#!/bin/bash
+#PBS -N webster0_ler
+#PBS -o logs/webster0_ler.out
+#PBS -e logs/webster0_ler.err
+#PBS -l walltime=04:00:00
+#PBS -l select=1:ncpus=32:mem=16gb
+# If your cluster uses the older syntax, replace the line above with:
+# #PBS -l nodes=1:ppn=32
+# #PBS -l mem=16gb
+
+# --- adjust these for your cluster ---
+PROJECT_DIR="${PROJECT_DIR:-$HOME/qLDPC}"
+VENV_DIR="${VENV_DIR:-$PROJECT_DIR/.venv}"
+# -------------------------------------
+
+# PBS lands in $HOME by default; cd into the project.
+cd "$PROJECT_DIR"
+mkdir -p logs results
+
+if [ -d "$VENV_DIR" ]; then
+    source "$VENV_DIR/bin/activate"
+fi
+
+# Show config for debugging
+echo "PROJECT_DIR=$PROJECT_DIR"
+echo "VENV_DIR=$VENV_DIR"
+echo "PBS_JOBID=${PBS_JOBID:-local}"
+python --version
+which python
+
+# Pick CPU count from PBS env vars (vary by site). Falls through to default 8.
+CPUS="${PBS_NCPUS:-${PBS_NUM_PPN:-${NCPUS:-8}}}"
+echo "workers = $CPUS"
+
+# Note: the Python script also reads SLURM_CPUS_PER_TASK if set. To force
+# the PBS count, pass --workers explicitly:
+python -u examples/scripts/slurm/run_webster0_ler_sweep.py \
+    --out-dir "results/webster0_run_${PBS_JOBID:-local}" \
+    --workers "$CPUS" \
+    --rounds 3 \
+    --max-shots 200000 \
+    --max-errors 200 \
+    --p-values 0.001 0.002 0.004 0.008 0.015 0.025
