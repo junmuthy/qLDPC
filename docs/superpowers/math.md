@@ -94,115 +94,66 @@ qLDPC Surgery 实现的数学总结
   gauge-fix $G$-rows add and remove exactly matched degrees of freedom).
 
   ---
-  2. Joint measurement — build_joint_measurement_code
+  2. Joint measurement — universal adapter (arXiv:2410.03628 §IV / §VII)
 
-  2.1 Bridge data qubits
+  2.1 Adapter width and port subsets
 
-  Given two logical-X support vectors $\mathbf{x}_1, \mathbf{x}_2 \in \mathbb{F}_2^n$ with $V_0^{(1)} =
-  \mathrm{supp}(\mathbf{x}_1)$, $V_0^{(2)} = \mathrm{supp}(\mathbf{x}_2)$ (Webster: disjoint):
-  $$
-  w := \min(|V_0^{(1)}|, |V_0^{(2)}|).
-  $$
+  Given two GadgetLayouts (g_l, g_r) measuring X̄_l, X̄_r (or Z̄_l, Z̄_r) we pick port subsets
+  𝒫_l* ⊆ V_0^(l), 𝒫_r* ⊆ V_0^(r) of equal size w = min(|V_0^(l)|, |V_0^(r)|), and a bijection
+  𝒜: 𝒫_l* → 𝒫_r*. Each adapter edge ∈ 𝒜 is one new "adapter" data qubit.
 
-  Introduce $w$ new bridge data qubits $b_0, b_1, \ldots, b_{w-1}$.
+  2.2 Auxiliary graph augmentation
 
-  2.2 Bridge $X$-stabilizers $U_B$
+  For each side build 𝒢_s = (V_0^(s), {edges = weight-2 F_s rows}). When 𝒢_s[𝒫_s*] is
+  disconnected, add weight-2 edges (= new κ qubits) until connected. Cellulate basis cycles
+  to length ≤ max_len.
 
-  Path graph on bridge qubits, $w-1$ rows:
-  $$
-  U_B = \begin{pmatrix} 1 & 1 & 0 & \cdots & 0 \ 0 & 1 & 1 & \cdots & 0 \ \vdots & & \ddots & \ddots &
-  \vdots \ 0 & \cdots & 0 & 1 & 1 \end{pmatrix} \in \mathbb{F}_2^{(w-1) \times w}.
-  $$
+  2.3 SkipTree key identity
 
-  Telescoping property:
-  $$
-  \sum_{i=0}^{w-2} (U_B)_{i,\cdot} = \mathbf{e}0 + \mathbf{e}{w-1} \in \mathbb{F}_2^w.
-  $$
+  Run SkipTree (paper §III Algorithm 1) on 𝒢_s_aug to obtain T_s ∈ F_2^{(w-1) × |E_aug|},
+  P_s ∈ F_2^{|V_0^(s)| × w} satisfying
 
-  2.3 Endpoint $\chi$-extension
+    T_s · G_s_aug · P_s = H_R    (canonical full-rank rep-code parity, (w-1) × w)
 
-  In each gadget, pick row $\chi_0^{(s)}$ (first $\chi$ row in $V_0^{(s)}$) and extend with $X$ on the
-  corresponding bridge endpoint:
-  $$
-  \chi_0^{(1)} \mapsto \chi_0^{(1)} \otimes X_{b_0}, \qquad \chi_0^{(2)} \mapsto \chi_0^{(2)} \otimes
-  X_{b_{w-1}}.
-  $$
+  where G_s_aug = F_aug^(s) is the auxiliary-graph incidence matrix.
 
-  2.4 Merged register layout
+  2.4 Merged check matrices (basis=X, inter-code)
 
-  $$
-  \underbrace{n}{\text{data}} + \underbrace{|C_0^{(1)}|}{\kappa^{(1)}} +
-  \underbrace{|C_0^{(2)}|}{\kappa^{(2)}} + \underbrace{w}{\text{bridge}} = n_{\text{merged}}.
-  $$
+  H_X^merged blocks (rows × support):
+     data H_X^(l)     : m_X^(l) × data_l
+     data H_X^(r)     : m_X^(r) × data_r
+     χ^(l)            : |V_0^(l)| × (data_l + κ_l_aug + adapter)  via E_V0^T, F_aug^(l)^T, Π_l
+     χ^(r)            : |V_0^(r)| × (data_r + κ_r_aug + adapter)  via E_V0^T, F_aug^(r)^T, Π_r
 
-  2.5 $H_X^{\text{joint}}$ — block form
+  H_Z^merged blocks:
+     data H_Z^(l) ext : m_Z^(l) × (data_l + κ_l_aug)
+     data H_Z^(r) ext : m_Z^(r) × (data_r + κ_r_aug)
+     G^(l)_aug        : r_l × κ_l_aug
+     G^(r)_aug        : r_r × κ_r_aug
+     new cycle-Z      : (w-1) × (κ_l_aug + κ_r_aug + adapter)  via [T_l | T_r | H_R]
 
-  Stack of three blocks:
-  $$
-  H_X^{\text{joint}} = \begin{pmatrix}
-  H_X & 0 & 0 & 0 \
-  E_{V_0^{(1)}}^\top & F^{(1)\top} & 0 & \mathbf{e}0 \cdot \delta{i=0} \
-  E_{V_0^{(2)}}^\top & 0 & F^{(2)\top} & \mathbf{e}{w-1} \cdot \delta{i=0} \
-  0 & 0 & 0 & U_B
-  \end{pmatrix}
-  $$
+  Π_s ∈ F_2^{|V_0^(s)| × w} satisfies Π_s[v, k] = 1 iff v ∈ 𝒫_s* and label_s(v) = k.
 
-  where $\delta_{i=0}$ means only the row $\chi_0^{(s)}$ carries the bridge column entry.
+  basis=Z is the symmetric X↔Z dual; intra-code merges the two data column blocks.
 
-  2.6 $H_Z^{\text{joint}}$ — block form (κ-splicing)
+  2.5 Commutation (CSS)
 
-  For each data Z-check $j \in [m_Z]$:
-  $$
-  H_Z^{\text{joint}}[j, :n] = (H_Z){j,\cdot}, \quad H_Z^{\text{joint}}[j, n:n+|C_0^{(1)}|] =
-  \tilde{F}^{(1)}{j,\cdot}, \quad H_Z^{\text{joint}}[j, n+|C_0^{(1)}|:n+|C_0^{(1)}|+|C_0^{(2)}|] =
-  \tilde{F}^{(2)}_{j,\cdot}.
-  $$
+  The only non-trivial pairing is χ^(s) vs new cycle-Z^(s'). For s = s':
+    (χ_v on κ + adapter) · (cycle_c on κ + adapter)
+      = (T_s · F_aug^(s))[c, v] + H_R[c, label_s(v)] · [v ∈ 𝒫_s*]
+      = (T_s · G_s_aug · P_s)[c, v]                       (by SkipTree identity)
+      = H_R[c, k] − H_R[c, k]                              (when label_s(v) = k)
+      = 0.
+  For v ∉ 𝒫_s*, both halves are zero (T_s has zero columns on edges outside 𝒢_s[𝒫_s*]).
 
-  Gauge-fix rows for both gadgets stacked on $\kappa^{(1)}, \kappa^{(2)}$ blocks separately:
-  $$
-  \begin{pmatrix} 0 & G^{(1)} & 0 & 0 \ 0 & 0 & G^{(2)} & 0 \end{pmatrix}.
-  $$
+  2.6 Joint observable (α* derivation)
 
-  No Z-extension onto bridge qubits.
+  α* picks Σ χ^(l) + Σ χ^(r). On the merged register:
+     data side: 1_{V_0^(l)} + 1_{V_0^(r)} = x_l + x_r (XOR support, joint X̄_l X̄_r).
+     κ side:    F_aug^(s)^T · 1_{V_0^(s)} = 0          (κ-cancellation).
+     adapter:   Σ_{v ∈ 𝒫_l*} e_{label_l(v)} + Σ_{v ∈ 𝒫_r*} e_{label_r(v)} = 1_𝒜 + 1_𝒜 = 0.
 
-  2.7 Cross §3.6 protocol formula (verified)
-
-  Define $\alpha^* \in \mathbb{F}_2^{m_X^{\text{joint}}}$ by
-  $$
-  \alpha^*_r = \begin{cases} 0 & r \in \text{data } H_X \text{ rows} \ 1 & r \in \chi^{(1)} \cup
-  \chi^{(2)} \cup U_B \end{cases}
-  $$
-
-  Then
-  $$
-  \alpha^{*\top} H_X^{\text{joint}} = (\mathbf{x}1 + \mathbf{x}2, \mathbf{0}{\kappa^{(1)}},
-  \mathbf{0}{\kappa^{(2)}}, \mathbf{0}_w).
-  $$
-
-  Derivation:
-  $$
-  \begin{aligned}
-  \sum_{i \in V_0^{(1)}} \chi_i^{(1)} &= \mathbf{x}1 \otimes \underbrace{F^{(1)\top}
-  \mathbf{1}{V_0^{(1)}}}{= 0 \text{ since } F^{(1)} \mathbf{1} = 0} \otimes X{b_0} \
-  &= \mathbf{x}1 \otimes \mathbf{0}{\kappa^{(1)}} \otimes X_{b_0}. \
-  \sum_i \chi_i^{(2)} &= \mathbf{x}2 \otimes \mathbf{0}{\kappa^{(2)}} \otimes X_{b_{w-1}}. \
-  \sum U_B \text{ rows} &= \mathbf{0} \otimes \mathbf{0} \otimes \mathbf{0} \otimes (X_{b_0} +
-  X_{b_{w-1}}). \
-  \text{Sum} &= (\mathbf{x}_1 + \mathbf{x}_2) \otimes \mathbf{0} \otimes \mathbf{0} \otimes \mathbf{0}.
-  \quad \blacksquare
-  \end{aligned}
-  $$
-
-  This is exactly $\bar{X}_1 \otimes \bar{X}_2$ as an operator on the merged register.
-
-  2.8 Logical-qubit reduction
-
-  $$
-  k_{\text{joint}} = k_{\text{data}} - 1
-  $$
-
-  (Cross §3.6: one logical dof consumed by $\bar{X}_1 \bar{X}_2$ measurement). Verified via
-  CSSCode.dimension.
+  New cycle-Z rows are not in α* (they're Z-type; orthogonal to the X-type joint observable).
 
   ---
   3. Cheeger boost — boost_gadget_cheeger
@@ -229,28 +180,23 @@ qLDPC Surgery 实现的数学总结
   ---
   4. 验证矩阵（完整证据链）
 
-  ┌──────────────────┬───────────────────────────────────────────────────────┬───────────────────────┐
-  │    Invariant     │                       Statement                       │       验证手段        │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ CSS commutation  │ $H_X^{\text{merged}} H_Z^{\text{merged}\top} = 0$     │ 直接 GF(2) 矩阵乘     │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ κ-cancellation   │ $F \mathbf{1}_{V_0} = 0$                              │ 推出 $\sum \chi_i$ 在 │
-  │                  │                                                       │  κ 上为 0             │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Bridge           │ $\sum U_B = \mathbf{e}0 + \mathbf{e}{w-1}$            │ 直接构造              │
-  │ telescoping      │                                                       │                       │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Joint membership │ $\bar{X}_1 \bar{X}_2 \otimes \mathbf{0} \in           │ $\mathrm{rank}$ check │
-  │                  │ \mathrm{rowspan}(H_X^{\text{joint}})$                 │                       │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Singletons       │ $\bar{X}_s \otimes \mathbf{0} \notin                  │ $\mathrm{rank}$ check │
-  │ excluded         │ \mathrm{rowspan}$                                     │                       │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Protocol formula │ $\alpha^{*\top} H_X^{\text{joint}} = (\mathbf{x}_1 +  │ 直接矩阵乘            │
-  │                  │ \mathbf{x}_2, \mathbf{0})$                            │                       │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Dim count        │ $k_{\text{joint}} = k_{\text{data}} - 1$              │ CSSCode.dimension     │
-  ├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────┤
-  │ Webster Table I  │ $\kappa + \chi + r = {19, 31, 49, 79}$, $2w - 1 =     │ numerical exact match │
-  │ sizes            │ {11, 19, 31, 51}$                                     │                       │
-  └──────────────────┴───────────────────────────────────────────────────────┴───────────────────────┘
+  ┌──────────────────────┬────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
+  │      Invariant       │                         Statement                          │                           验证手段                               │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ CSS commutation      │ H_X^merged · H_Z^merged^T = 0                              │ 直接 GF(2) 矩阵乘                                                │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ SkipTree identity    │ T_s · F_aug · P_s = H_R                                    │ _test.py test_skip_tree_fullrank_on_K4 +                          │
+  │                      │                                                            │ test_build_bridge_skiptree_invariant_holds                        │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ Adapter cycle weight │ new cycle-Z rows weight ≤ 8                                │ test_adapter_cycle_check_weight_bounded                           │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ Cellulation cap      │ basis cycles ≤ cellulate_max_len                           │ test_cellulation_caps_aug_aux_cycle_length_on_webster             │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ Joint membership     │ (x_l + x_r) ⊗ 0 ∈ rowspan(H_X^merged)                    │ test_stitch_*_joint_logical_in_stabilizer                         │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ Singletons excluded  │ x_s ⊗ 0 ∉ rowspan(H_X^merged)                             │ test_stitch_*_singletons_excluded                                 │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ Dim count            │ k_joint = k_l + k_r - 1 (inter) or k - 1 (intra)          │ test_stitch_*_k_reduces_by_one                                    │
+  ├──────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+  │ LER monotone         │ LER(p) non-increasing as p decreases                       │ test_joint_ppm_ler_monotone_steane_intercode                      │
+  └──────────────────────┴────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
