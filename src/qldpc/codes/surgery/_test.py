@@ -1082,3 +1082,60 @@ def test_bridge_dataclass_fields_universal_adapter():
         "T_l", "T_r", "H_R",
         "g_l_aug", "g_r_aug",
     }
+
+
+def test_build_bridge_smoke_steane_intracode():
+    """Steane × Steane intra-code joint X̄ X̄: build_bridge returns valid Bridge."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code = codes.SteaneCode()
+    x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)  # same logical
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    assert bridge.width == min(len(g_l.V0), len(g_r.V0))
+    assert bridge.basis is Pauli.X
+    assert len(bridge.port_l) == bridge.width
+    assert len(bridge.port_r) == bridge.width
+    assert bridge.T_l.shape == (bridge.width - 1, bridge.g_l_aug.F.shape[0])
+    assert bridge.T_r.shape == (bridge.width - 1, bridge.g_r_aug.F.shape[0])
+    assert bridge.H_R.shape == (bridge.width - 1, bridge.width)
+
+
+def test_build_bridge_skiptree_invariant_holds():
+    """T_s · G_s_aug · P_s = H_R for both sides on Steane × Steane."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(code, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    for side in ("l", "r"):
+        T = getattr(bridge, f"T_{side}")
+        g_aug = getattr(bridge, f"g_{side}_aug")
+        label = getattr(bridge, f"label_{side}")
+        # G_aug = F_aug (incidence: rows = edges = κ qubits, cols = V_0 vertices)
+        G_aug = g_aug.F.astype(np.int_)
+        # P_s: |V_0^(s)| × w; P_s[v, k] = 1 iff v ∈ port AND label[v] == k
+        P = np.zeros((G_aug.shape[1], bridge.width), dtype=np.int_)
+        for v_idx, lab in enumerate(label):
+            if lab >= 0:
+                P[v_idx, lab] = 1
+        lhs = (T @ G_aug @ P) % 2
+        assert np.array_equal(lhs, bridge.H_R), f"side {side}:\n{lhs}\nvs\n{bridge.H_R}"
+
+
+def test_build_bridge_rejects_basis_mismatch():
+    """Bridge requires g_l.basis == g_r.basis."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(code, z, basis=Pauli.Z)
+    with pytest.raises(ValueError, match=r"basis"):
+        build_bridge(g_l, g_r)

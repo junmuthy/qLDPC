@@ -249,6 +249,126 @@ def _connect_induced_subgraph(
         added.append((u, v))
 
 
-def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
-    """Two-PPM bridge between gadgets. arXiv:2410.03628 §IV / §VII."""
-    raise NotImplementedError("rewritten in Task 7")
+def build_bridge(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    *,
+    port_subset_l: tuple[int, ...] | None = None,
+    port_subset_r: tuple[int, ...] | None = None,
+    spanning_tree_root_l: int = 0,
+    spanning_tree_root_r: int = 0,
+    cellulate_max_len: int = 6,
+) -> Bridge:
+    """Universal-adapter bridge between two gadgets (arXiv:2410.03628 §IV).
+
+    See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
+    7-step recipe.
+    """
+    if g_l.basis is not g_r.basis:
+        raise ValueError(
+            f"build_bridge requires g_l.basis == g_r.basis, "
+            f"got {g_l.basis!r} vs {g_r.basis!r}"
+        )
+    basis = g_l.basis
+
+    # Step 1: auxiliary graphs
+    G_l_aux, _ = _build_aux_graph_strict(g_l.F)
+    G_r_aux, _ = _build_aux_graph_strict(g_r.F)
+
+    # Step 2: port subsets + width
+    port_l_all = tuple(port_subset_l) if port_subset_l is not None else tuple(range(len(g_l.V0)))
+    port_r_all = tuple(port_subset_r) if port_subset_r is not None else tuple(range(len(g_r.V0)))
+    width = min(len(port_l_all), len(port_r_all))
+    if width < 2:
+        raise ValueError(f"bridge width must be >= 2, got {width}")
+    port_l = port_l_all[:width]
+    port_r = port_r_all[:width]
+
+    # Step 3: induced-subgraph connectivity augmentation
+    extras_l_conn = _connect_induced_subgraph(G_l_aux, port_l)
+    extras_r_conn = _connect_induced_subgraph(G_r_aux, port_r)
+
+    # Step 4: cellulation
+    extras_l_cell = _cellulate_strict(G_l_aux, port_l, max_len=cellulate_max_len)
+    extras_r_cell = _cellulate_strict(G_r_aux, port_r, max_len=cellulate_max_len)
+
+    # Collect extra weight-2 rows (one per added edge) for each side
+    def _edges_to_F_extra(edges: list[tuple[int, int]], n_V0: int) -> np.ndarray:
+        out = np.zeros((len(edges), n_V0), dtype=np.uint8)
+        for r, (u, v) in enumerate(edges):
+            out[r, u] = 1
+            out[r, v] = 1
+        return out
+
+    extras_l_edges = extras_l_conn + extras_l_cell
+    extras_r_edges = extras_r_conn + extras_r_cell
+    extra_kappa_l = _edges_to_F_extra(extras_l_edges, len(g_l.V0))
+    extra_kappa_r = _edges_to_F_extra(extras_r_edges, len(g_r.V0))
+
+    # Step 7 (early): rebuild augmented gadgets so we have F_aug + G_aug + tilde_F
+    from .gadget import build_gadget_augmented
+    g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_kappa_l, basis=basis)
+    g_r_aug = build_gadget_augmented(g_r.code, g_r.x, extra_kappa_r, basis=basis)
+
+    # Step 5: SkipTree on induced subgraph (relabel to [0, |port|) first so the
+    # internal n×n P allocation in _skip_tree is square and valid); embed back.
+    def _run_skiptree(
+        G_aux_full: nx.Graph,
+        port: tuple[int, ...],
+        root_port_idx: int,
+        F_aug: np.ndarray,
+    ) -> tuple[np.ndarray, list[int]]:
+        sub_orig = G_aux_full.subgraph(port).copy()
+        port_sorted = sorted(port)
+        new_of_orig = {orig: new for new, orig in enumerate(port_sorted)}
+        orig_of_new = {new: orig for orig, new in new_of_orig.items()}
+        sub_relab = nx.relabel_nodes(sub_orig, new_of_orig, copy=True)
+        # Take a spanning tree (Algorithm 1 of paper expects a tree input). MST
+        # is deterministic; for unweighted graphs nx returns a BFS-like tree.
+        sub_tree = nx.minimum_spanning_tree(sub_relab)
+        tree_edges = sorted(tuple(sorted(e)) for e in sub_tree.edges())
+        edge_idx_tree = {e: i for i, e in enumerate(tree_edges)}
+        root_orig = port[root_port_idx]
+        root_relab = new_of_orig[root_orig]
+        T_relab, P_relab = _skip_tree_fullrank(sub_tree, root=root_relab, edge_index_verts=edge_idx_tree)
+        # labels[orig_v_idx] = k iff orig_v ∈ port  (else -1)
+        labels = [-1] * F_aug.shape[1]
+        for new_v in range(len(port)):
+            orig_v = orig_of_new[new_v]
+            nz = np.flatnonzero(P_relab[new_v])
+            assert len(nz) == 1, f"vertex {orig_v} (relab {new_v}) has {len(nz)} labels"
+            labels[orig_v] = int(nz[0])
+        # T_relab columns are spanning-tree edges (relabeled). Map each F_aug
+        # row to a tree-edge column if applicable; F_aug rows that are non-tree
+        # edges or that touch a non-port vertex stay zero in T_full.
+        T_full = np.zeros((T_relab.shape[0], F_aug.shape[0]), dtype=np.int_)
+        for r in range(F_aug.shape[0]):
+            cols = np.flatnonzero(F_aug[r])
+            if len(cols) != 2:
+                continue
+            u_orig, v_orig = sorted(int(x) for x in cols)
+            if u_orig not in new_of_orig or v_orig not in new_of_orig:
+                continue
+            e_relab = tuple(sorted((new_of_orig[u_orig], new_of_orig[v_orig])))
+            if e_relab in edge_idx_tree:
+                T_full[:, r] = T_relab[:, edge_idx_tree[e_relab]]
+        return T_full.astype(np.int_), labels
+
+    T_l, label_l = _run_skiptree(G_l_aux, port_l, 0, g_l_aug.F)
+    T_r, label_r = _run_skiptree(G_r_aux, port_r, 0, g_r_aug.F)
+
+    return Bridge(
+        width=width,
+        basis=basis,
+        port_l=port_l,
+        port_r=port_r,
+        label_l=tuple(label_l),
+        label_r=tuple(label_r),
+        extra_kappa_l=extra_kappa_l.astype(np.uint8),
+        extra_kappa_r=extra_kappa_r.astype(np.uint8),
+        T_l=T_l,
+        T_r=T_r,
+        H_R=_canonical_H_R(width).astype(np.int_),
+        g_l_aug=g_l_aug,
+        g_r_aug=g_r_aug,
+    )
