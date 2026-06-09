@@ -1446,8 +1446,6 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle():
     by exactly 1.  Z-logical 0 has a weight-4 F row (triggers Bug 1); the pair
     together exercises the full _cellulate_port_subgraph path (Bug 2)."""
     import sympy
-    from qldpc import codes
-    from qldpc.objects import Pauli
     from qldpc.codes.surgery import build_gadget, build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
 
@@ -1472,8 +1470,8 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle():
     # Intra-code joint Z̄_1 ⊗ Z̄_2: k_merged == k_orig − 1
     assert merged.dimension == code.dimension - 1
     # CSS commutation on merged code
-    HX = np.asarray(merged.matrix_x).astype(np.uint8)
-    HZ = np.asarray(merged.matrix_z).astype(np.uint8)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    HZ = np.asarray(merged.matrix_z).astype(np.int_)
     assert not ((HX @ HZ.T) % 2).any(), "CSS commutation broken on merged code"
 
 
