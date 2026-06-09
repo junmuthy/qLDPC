@@ -198,15 +198,24 @@ def _cellulate_strict(
 
 
 def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, int], int]]:
-    """Build auxiliary graph from F; raise on hyperedges.
+    """Build auxiliary graph from F; weight-2 rows become edges, hyperedges are skipped.
 
     Vertices: range(|V_0|) = range(F.shape[1]).
     Edges: one per weight-2 row of F, between the two columns where the row has 1s.
 
+    Weight-≥3 rows (hyperedges) are silently ignored — they remain in F_aug so
+    the gadget structure (G_aug = ker(F_aug^T), deformed check c → c · X(κ_r))
+    is unchanged, but T_s assigns them zero columns (existing skip at
+    _run_skiptree_on_port_subgraph). CSS commutation, κ-cancellation, joint
+    observable, and dimension counting all hold by direct calculation;
+    see docs/superpowers/specs/2026-06-09-bridge-hyperedge-and-cellulate-fix-design.md
+    §correctness-proof. Paper Eq. 9's perfect-matching decomposition (§II.C)
+    is not applied; structural Theorem 12 distance argument is substituted
+    by empirical LER smoke tests.
+
     Raises:
-        ValueError: if any row of F has weight 1 (would-be self-loop / dangling edge).
-        NotImplementedError: if any row of F has weight >= 3 (hyperedge), pointing to
-        paper §II.C decomposition.
+        ValueError: if any row of F has weight 1 (defensive — F · 1 = 0 mod 2
+        forbids odd weights for a valid logical).
     """
     F_arr = np.asarray(F).astype(int)
     G = nx.Graph()
@@ -214,18 +223,13 @@ def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, in
     edge_index: dict[tuple[int, int], int] = {}
     for i, row in enumerate(F_arr):
         eps = np.flatnonzero(row).tolist()
-        if len(eps) == 0:
+        if len(eps) == 0 or len(eps) >= 3:
             continue
         if len(eps) == 1:
             raise ValueError(
                 f"F row {i} has weight 1 (column {eps[0]}). "
-                f"Auxiliary-graph edges require exactly 2 endpoints."
-            )
-        if len(eps) >= 3:
-            raise NotImplementedError(
-                f"F row {i} has weight {len(eps)} (hyperedge). "
-                f"Universal-adapter construction here requires weight-2 rows. "
-                f"To handle hyperedges, decompose them per arXiv:2410.03628 §II.C."
+                f"Auxiliary-graph edges require exactly 2 endpoints "
+                f"(F · 1 = 0 mod 2 forbids odd weights — invalid logical?)."
             )
         u, v = sorted(eps)
         if (u, v) not in edge_index:

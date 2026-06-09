@@ -992,12 +992,27 @@ def test_build_aux_graph_weight2_rows_become_edges():
     assert edge_idx[(2, 3)] == 2
 
 
-def test_build_aux_graph_rejects_hyperedge():
-    """F rows of weight >= 3 raise NotImplementedError with §II.C reference."""
+def test_build_aux_graph_filters_hyperedges():
+    """F rows of weight >= 3 (hyperedges) are silently skipped; weight-2 rows survive."""
     from qldpc.codes.surgery.bridge import _build_aux_graph_strict
-    F = np.array([[1, 1, 1, 0], [0, 1, 1, 0]], dtype=np.uint8)
-    with pytest.raises(NotImplementedError, match=r"hyperedge.*§II\.C"):
-        _build_aux_graph_strict(F)
+    F = np.array([
+        [1, 1, 0, 0, 0],  # weight-2 → edge (0,1)
+        [1, 1, 1, 1, 0],  # weight-4 hyperedge → skipped
+        [0, 0, 1, 1, 0],  # weight-2 → edge (2,3)
+        [0, 0, 0, 1, 1],  # weight-2 → edge (3,4)
+    ], dtype=np.uint8)
+    G_nx, edge_idx = _build_aux_graph_strict(F)
+    assert set(G_nx.nodes) == {0, 1, 2, 3, 4}
+    # Three weight-2 rows → three edges; hyperedge row contributes nothing
+    assert G_nx.number_of_edges() == 3
+    assert (0, 1) in edge_idx
+    assert (2, 3) in edge_idx
+    assert (3, 4) in edge_idx
+    # Hyperedge would have produced edges (0,1), (0,2), (0,3), (1,2), (1,3), (2,3)
+    # but only edges from weight-2 rows are present
+    assert (0, 2) not in edge_idx
+    assert (0, 3) not in edge_idx
+    assert (1, 3) not in edge_idx
 
 
 def test_build_aux_graph_rejects_weight1_row():
