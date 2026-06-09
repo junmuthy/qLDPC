@@ -74,105 +74,87 @@ def build_single_ppm_circuit(
 
 
 def _stitch_to_joint_csscode(
-    g1: GadgetLayout,
-    g2: GadgetLayout,
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
     bridge: Bridge,
 ) -> CSSCode:
-    """Assemble joint CSS code for two-PPM surgery (math.md §2.5–2.6)."""
-    intercode = g1.code is not g2.code
-    field = g1.code.field
+    """Assemble merged CSSCode for two-PPM surgery (spec §3 block tables)."""
+    intercode = g_l.code is not g_r.code
+    if not intercode:
+        return _stitch_intracode_joint_csscode(g_l, g_r, bridge)  # added in Task 9
+    if bridge.basis is not Pauli.X:
+        return _stitch_intercode_joint_csscode_basis_z(g_l, g_r, bridge)  # added in Task 10
 
-    n_data_1 = g1.code.num_qubits
-    n_data_2 = g2.code.num_qubits if intercode else 0
-    n_anc_1, n_anc_2 = len(g1.C0), len(g2.C0)
-    n_bridge = bridge.width
-    n_merged = n_data_1 + n_data_2 + n_anc_1 + n_anc_2 + n_bridge
-    mX1, mZ1 = int(g1.code.matrix_x.shape[0]), int(g1.code.matrix_z.shape[0])
-    mX2, mZ2 = int(g2.code.matrix_x.shape[0]), int(g2.code.matrix_z.shape[0])
-    HX1 = np.asarray(g1.HX_merged).astype(np.int_)
-    HZ1 = np.asarray(g1.HZ_merged).astype(np.int_)
-    HX2 = np.asarray(g2.HX_merged).astype(np.int_)
-    HZ2 = np.asarray(g2.HZ_merged).astype(np.int_)
+    field = g_l.code.field
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits
+    k_l = g_l_aug.F.shape[0]      # |C_0^(l)| + e_l
+    k_r = g_r_aug.F.shape[0]
+    w = bridge.width
+    n_merged = n_l + n_r + k_l + k_r + w
+    mX_l = g_l.code.matrix_x.shape[0]
+    mX_r = g_r.code.matrix_x.shape[0]
+    mZ_l = g_l.code.matrix_z.shape[0]
+    mZ_r = g_r.code.matrix_z.shape[0]
+    r_l = g_l_aug.G.shape[0]      # r_l_aug
+    r_r = g_r_aug.G.shape[0]
 
-    if intercode:
-        # Columns: [data_1 | data_2 | kappa_1 | kappa_2 | bridge]
-        anc_off_1 = n_data_1 + n_data_2
-        anc_off_2 = anc_off_1 + n_anc_1
-        bridge_col_start = anc_off_2 + n_anc_2
+    # Column ranges
+    cl_data = slice(0, n_l)
+    cr_data = slice(n_l, n_l + n_r)
+    cl_kappa = slice(n_l + n_r, n_l + n_r + k_l)
+    cr_kappa = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
+    c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
 
-        def _pad_g1(m: np.ndarray) -> np.ndarray:
-            out = np.zeros((m.shape[0], n_merged), dtype=np.int_)
-            out[:, :n_data_1] = m[:, :n_data_1]
-            out[:, anc_off_1 : anc_off_1 + n_anc_1] = m[:, n_data_1:]
-            return out
-        def _pad_g2(m: np.ndarray) -> np.ndarray:
-            out = np.zeros((m.shape[0], n_merged), dtype=np.int_)
-            out[:, n_data_1 : n_data_1 + n_data_2] = m[:, :n_data_2]
-            out[:, anc_off_2 : anc_off_2 + n_anc_2] = m[:, n_data_2:]
-            return out
-        HX1_pad, HZ1_pad = _pad_g1(HX1), _pad_g1(HZ1)
-        HX2_pad, HZ2_pad = _pad_g2(HX2), _pad_g2(HZ2)
-        # Chi row 0 of each gadget connects to its bridge endpoint.
-        if g1.basis is Pauli.X:
-            HX1_pad[mX1, bridge_col_start] = 1
-            HX2_pad[mX2, bridge_col_start + n_bridge - 1] = 1
-        else:
-            HZ1_pad[mZ1, bridge_col_start] = 1
-            HZ2_pad[mZ2, bridge_col_start + n_bridge - 1] = 1
+    HX = np.zeros((mX_l + mX_r + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
+    HZ = np.zeros((mZ_l + mZ_r + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
 
-        u_b = np.asarray(bridge.U_B).astype(np.int_)
-        u_b_pad = np.zeros((u_b.shape[0], n_merged), dtype=np.int_)
-        if u_b.shape[0] > 0:
-            u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
+    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
+    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
+    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
+    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
 
-        if g1.basis is Pauli.X:
-            HX_joint = field(np.vstack([HX1_pad, HX2_pad, u_b_pad]))
-            HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad]))
-        else:
-            HX_joint = field(np.vstack([HX1_pad, HX2_pad]))
-            HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad, u_b_pad]))
+    # H_X rows: data H_X^(l), data H_X^(r), χ^(l), χ^(r)
+    HX[: mX_l, cl_data] = HX_l[: mX_l, : n_l]
+    HX[mX_l : mX_l + mX_r, cr_data] = HX_r[: mX_r, : n_r]
+    # χ^(l) = HX_l[mX_l:, :]: cols [: n_l] -> cl_data, cols [n_l:] -> cl_kappa
+    chi_l_rows = HX_l[mX_l :, :]
+    HX[mX_l + mX_r : mX_l + mX_r + len(g_l.V0), cl_data] = chi_l_rows[:, : n_l]
+    HX[mX_l + mX_r : mX_l + mX_r + len(g_l.V0), cl_kappa] = chi_l_rows[:, n_l :]
+    chi_r_rows = HX_r[mX_r :, :]
+    HX[mX_l + mX_r + len(g_l.V0) :, cr_data] = chi_r_rows[:, : n_r]
+    HX[mX_l + mX_r + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n_r :]
+    # Π_l, Π_r adapter extensions on χ rows
+    for v_idx, lab in enumerate(bridge.label_l):
+        if lab >= 0:
+            HX[mX_l + mX_r + v_idx, c_adapter.start + lab] = 1
+    for v_idx, lab in enumerate(bridge.label_r):
+        if lab >= 0:
+            HX[mX_l + mX_r + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
 
-        return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
+    # H_Z rows: data H_Z^(l) extended, data H_Z^(r) extended, G^(l)_aug, G^(r)_aug, new cycle-Z
+    HZ[: mZ_l, cl_data] = HZ_l[: mZ_l, : n_l]
+    HZ[: mZ_l, cl_kappa] = HZ_l[: mZ_l, n_l :]
+    HZ[mZ_l : mZ_l + mZ_r, cr_data] = HZ_r[: mZ_r, : n_r]
+    HZ[mZ_l : mZ_l + mZ_r, cr_kappa] = HZ_r[: mZ_r, n_r :]
+    HZ[mZ_l + mZ_r : mZ_l + mZ_r + r_l, cl_kappa] = HZ_l[mZ_l :, n_l :]
+    HZ[mZ_l + mZ_r + r_l : mZ_l + mZ_r + r_l + r_r, cr_kappa] = HZ_r[mZ_r :, n_r :]
+    # New cycle Z-checks: [T_l | T_r | H_R]
+    new_z_start = mZ_l + mZ_r + r_l + r_r
+    HZ[new_z_start :, cl_kappa] = bridge.T_l
+    HZ[new_z_start :, cr_kappa] = bridge.T_r
+    HZ[new_z_start :, c_adapter] = bridge.H_R
 
-    # Intra-code: shared data qubits.  Columns: [data | kappa_1 | kappa_2 | bridge]
-    mX, mZ = mX1, mZ1
+    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
 
-    def _pad(matrix: np.ndarray, *, anc_offset: int) -> np.ndarray:
-        n_anc = matrix.shape[1] - n_data_1
-        out = np.zeros((matrix.shape[0], n_merged), dtype=np.int_)
-        out[:, :n_data_1] = matrix[:, :n_data_1]
-        out[:, anc_offset : anc_offset + n_anc] = matrix[:, n_data_1:]
-        return out
 
-    anc_off_1 = n_data_1
-    anc_off_2 = n_data_1 + n_anc_1
-    bridge_col_start = n_data_1 + n_anc_1 + n_anc_2
-    HX1_pad, HZ1_pad = _pad(HX1, anc_offset=anc_off_1), _pad(HZ1, anc_offset=anc_off_1)
-    HX2_pad, HZ2_pad = _pad(HX2, anc_offset=anc_off_2), _pad(HZ2, anc_offset=anc_off_2)
+def _stitch_intracode_joint_csscode(g_l, g_r, bridge):
+    raise NotImplementedError("intra-code stitching — Task 9")
 
-    # Chi row 0 of each gadget connects to its bridge endpoint.
-    if g1.basis is Pauli.X:
-        HX1_pad[mX, bridge_col_start] = 1
-        HX2_pad[mX, bridge_col_start + n_bridge - 1] = 1
-    else:
-        HZ1_pad[mZ, bridge_col_start] = 1
-        HZ2_pad[mZ, bridge_col_start + n_bridge - 1] = 1
-    for k, j in enumerate(g2.C0):
-        HZ1_pad[int(j), anc_off_2 + k] = 1
 
-    u_b = np.asarray(bridge.U_B).astype(np.int_)
-    u_b_pad = np.zeros((u_b.shape[0], n_merged), dtype=np.int_)
-    if u_b.shape[0] > 0:
-        u_b_pad[:, bridge_col_start : bridge_col_start + n_bridge] = u_b
-
-    if g1.basis is Pauli.X:
-        HX_joint = field(np.vstack([HX1_pad, HX2_pad[mX:], u_b_pad]))
-        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad[mZ:]]))
-    else:
-        HX_joint = field(np.vstack([HX1_pad, HX2_pad[mX:]]))
-        HZ_joint = field(np.vstack([HZ1_pad, HZ2_pad[mZ:], u_b_pad]))
-
-    return CSSCode(HX_joint, HZ_joint, is_subsystem_code=False)
+def _stitch_intercode_joint_csscode_basis_z(g_l, g_r, bridge):
+    raise NotImplementedError("basis=Z stitching — Task 10")
 
 
 def build_joint_ppm_circuit(
@@ -184,71 +166,7 @@ def build_joint_ppm_circuit(
     noise_model=None,
 ) -> tuple[stim.Circuit, CSSCode]:
     """Cain §III.A joint-PPM circuit; chi = χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7)."""
-    joint_code = _stitch_to_joint_csscode(g1, g2, bridge)
-    qubit_ids = QubitIDs.from_code(joint_code)
-    intercode = g1.code is not g2.code
-    n1 = g1.code.num_qudits
-    n2 = g2.code.num_qudits if intercode else 0
-    n_anc = len(g1.C0) + len(g2.C0)
-
-    if intercode:
-        data_ids = qubit_ids.data[: n1 + n2]
-        v0_indices_combined = tuple(g1.V0) + tuple(n1 + i for i in g2.V0)
-    else:
-        data_ids = qubit_ids.data[:n1]
-        v0_indices_combined = tuple(g1.V0) + tuple(g2.V0)
-
-    kappa_ids = qubit_ids.data[n1 + n2 : n1 + n2 + n_anc]
-    bridge_ids = qubit_ids.data[n1 + n2 + n_anc :]
-
-    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
-    circuit += _surgery_state_prep(g1, data_ids, kappa_ids, bridge_ids)
-    qec_cycle, measurement_record, _ = _surgery_qec_cycle(
-        g1, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
-    )
-    circuit += qec_cycle
-    circuit += _surgery_detach_and_readout(
-        g1, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
-        measurement_record=measurement_record,
-    )
-    circuit += _surgery_final_detectors(
-        g1, joint_code, qubit_ids,
-        measurement_record=measurement_record,
-    )
-
-    # Chi check_ids: χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7). Row offsets mirror _stitch_to_joint_csscode.
-    mX1, mZ1 = g1.code.matrix_x.shape[0], g1.code.matrix_z.shape[0]
-    mX2 = g2.code.matrix_x.shape[0] if intercode else 0
-    mZ2 = g2.code.matrix_z.shape[0] if intercode else 0
-    n_V1, n_V2 = len(g1.V0), len(g2.V0)
-    n_UB = bridge.U_B.shape[0]
-
-    if g1.basis is Pauli.X:
-        check_ids = qubit_ids.checks_x
-        m1, m2 = mX1, mX2
-    else:
-        check_ids = qubit_ids.checks_z
-        m1, m2 = mZ1, mZ2
-
-    chi1_ids = tuple(check_ids[m1 : m1 + n_V1])
-    off2 = m1 + n_V1 + m2   # offset to χ^(2) block (m2=0 for intracode)
-    chi2_ids = tuple(check_ids[off2 : off2 + n_V2])
-    ub_ids = tuple(check_ids[off2 + n_V2 : off2 + n_V2 + n_UB])
-    chi_check_ids = chi1_ids + chi2_ids + ub_ids
-
-    circuit += _surgery_observable(
-        g1,
-        chi_check_ids=chi_check_ids,
-        data_ids=data_ids,
-        v0_indices=v0_indices_combined,
-        num_rounds=rounds,
-        measurement_record=measurement_record,
-    )
-
-    if noise_model is not None:
-        circuit = noise_model.noisy_circuit(circuit)
-
-    return circuit, joint_code
+    raise NotImplementedError("build_joint_ppm_circuit rewritten in Task 11")
 
 
 def _classify_reliable_round1_checks(

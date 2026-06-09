@@ -1139,3 +1139,89 @@ def test_build_bridge_rejects_basis_mismatch():
     g_r = build_gadget(code, z, basis=Pauli.Z)
     with pytest.raises(ValueError, match=r"basis"):
         build_bridge(g_l, g_r)
+
+
+def test_stitch_intercode_basis_x_css_commutation():
+    """Inter-code Steane × Steane joint X̄X̄ merged code commutes."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code1 = codes.SteaneCode()
+    code2 = codes.SteaneCode()
+    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code1, x1, basis=Pauli.X)
+    g_r = build_gadget(code2, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    HZ = np.asarray(merged.matrix_z).astype(np.int_)
+    product = (HX @ HZ.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_stitch_intercode_basis_x_k_reduces_by_one():
+    """k_joint = k_l + k_r - 1 for inter-code Steane × Steane joint X̄X̄."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code1 = codes.SteaneCode()
+    code2 = codes.SteaneCode()
+    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code1, x1, basis=Pauli.X)
+    g_r = build_gadget(code2, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    assert merged.dimension == code1.dimension + code2.dimension - 1
+
+
+def test_stitch_intercode_basis_x_joint_logical_in_stabilizer():
+    """(x_1, x_2, 0, 0, 0) lies in rowspan(H_X^merged) — joint X̄_l X̄_r is a stabilizer."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code1 = codes.SteaneCode()
+    code2 = codes.SteaneCode()
+    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code1, x1, basis=Pauli.X)
+    g_r = build_gadget(code2, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    import galois
+    GF2 = galois.GF(2)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    n_l = code1.num_qudits
+    n_r = code2.num_qudits
+    joint = np.zeros(HX.shape[1], dtype=np.int_)
+    joint[:n_l] = x1
+    joint[n_l : n_l + n_r] = x2
+    augmented = np.vstack([HX, joint.reshape(1, -1)])
+    assert np.linalg.matrix_rank(GF2(HX.tolist())) == np.linalg.matrix_rank(GF2(augmented.tolist()))
+
+
+def test_stitch_intercode_basis_x_singletons_excluded():
+    """(x_1, 0, ...) and (0, x_2, ...) alone are NOT in rowspan(H_X^merged)."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    import galois
+    GF2 = galois.GF(2)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    n_l = code.num_qudits
+    base = np.linalg.matrix_rank(GF2(HX.tolist()))
+    for which in ("left", "right"):
+        single = np.zeros(HX.shape[1], dtype=np.int_)
+        if which == "left":
+            single[:n_l] = x
+        else:
+            single[n_l : 2 * n_l] = x
+        augmented = np.vstack([HX, single.reshape(1, -1)])
+        assert np.linalg.matrix_rank(GF2(augmented.tolist())) == base + 1, which
