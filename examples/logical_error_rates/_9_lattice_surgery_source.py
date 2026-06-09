@@ -33,7 +33,7 @@ Convert with:
 # | Function | Returns | Purpose |
 # |---|---|---|
 # | `build_gadget(code, x)` | `GadgetLayout` | Webster 3-step gadget for single logical X̄ |
-# | `build_bridge(g1, g2)` | `Bridge` | Path-graph bridge joining two gadgets |
+# | `build_bridge(g1, g2)` | `Bridge` | Universal adapter (arXiv:2410.03628 §IV) joining two gadgets |
 # | `build_single_ppm_circuit(g, *, rounds, noise_model)` | `stim.Circuit` | Stim circuit for single-PPM measurement |
 # | `build_joint_ppm_circuit(g1, g2, bridge, *, rounds, noise_model)` | `(stim.Circuit, CSSCode)` | Stim circuit + merged code for joint PPM |
 # | `boost_gadget(g, *, method, target, seed)` | `GadgetLayout` | Cheeger/distance augmentation to preserve code distance |
@@ -287,16 +287,28 @@ print(f"  per-shot any-fire rate : {per_shot_any_fire:.2%}  (≈ 1 by union boun
 # %% [markdown]
 # ## 7. `build_bridge` — joining two gadgets
 #
-# `build_bridge(g1, g2)` constructs the path-graph bridge that links the
-# χ endpoints of two gadgets, enabling a **joint** PPM of the product
-# X̄_1 ⊗ X̄_2 (Cross §3.6 / math.md §2).
+# `build_bridge(g1, g2)` constructs a **universal adapter** (Ide et al.,
+# arXiv:2410.03628 §IV) that links each gadget's χ endpoints through an
+# auxiliary register of `w = min(|V₀(g1)|, |V₀(g2)|)` qubits, enabling a
+# **joint** PPM of the product Z̄_1 ⊗ Z̄_2 (math.md §2).
 #
 # **How it works (math.md §2):**
-# - The bridge is a path graph on `w` qubits, where `w = min(|V₀(g1)|, |V₀(g2)|)`.
-# - `w - 1` path-graph X-stabilizers U_B form a telescoping sum (e₀ + e_{w-1}).
-# - The χ endpoint rows of each gadget get an X on their respective bridge endpoint.
-# - XOR-ing all χ rows from g1, all χ rows from g2, and all U_B rows yields
-#   exactly (x̄₁ + x̄₂) on data qubits and 0 on all ancillas/bridge qubits.
+# - Build the auxiliary graph G_aux^(s) on each side (vertices = V_0^(s),
+#   one edge per weight-2 F row).
+# - Augment with chord/connector edges so the induced subgraph on the
+#   chosen port subset is connected and all basis cycles fit under
+#   `cellulate_max_len` (these become `extra_kappa_{l,r}` rows).
+# - Rebuild each gadget over the augmented F to get `g_l_aug, g_r_aug`.
+# - Run the SkipTree transform (arXiv:2410.03628 Algorithm 1) on the
+#   induced port subgraph to produce a (3,2)-sparse matrix `T_s` such
+#   that `T_s · F_aug · P_s == H_R` (canonical repetition-code parity
+#   of the w-qubit adapter register).
+#
+# The Bridge dataclass exposes only the field-level products of these
+# steps (`port_l`, `port_r`, `label_l`, `label_r`, `extra_kappa_l`,
+# `extra_kappa_r`, `T_l`, `T_r`, `H_R`, `g_l_aug`, `g_r_aug`). There is
+# **no** explicit path-graph stabilizer matrix any more; the adapter's
+# (w−1) parity rows are H_R.
 #
 # `build_bridge` auto-dispatches:
 # - **intra-code** (`g1.code is g2.code`): shared data qubits, used for measuring X̄_1 ⊗ X̄_2 on the same physical code
@@ -322,15 +334,30 @@ x2 = x_bar_k2p1_operator(data)
 g2 = build_gadget(code, x2)
 bridge = build_bridge(g, g2)
 
-print(f"Bridge width w = {bridge.width}")
-print(f"Intercode flag : {bridge.intercode}  (False = intra-code joint)")
-print(f"U_B shape      : {bridge.U_B.shape}  ((w-1) × w path-graph X-stabilizers)")
-print(f"Path telescoping: XOR of U_B rows = e_0 + e_(w-1)? ", end="")
-col_sum = bridge.U_B.sum(axis=0) % 2
-expected_ends = np.zeros(bridge.width, dtype=np.uint8)
-expected_ends[0] = 1
-expected_ends[-1] = 1
-print(np.array_equal(col_sum, expected_ends))
+print(f"Bridge width w               : {bridge.width}  (universal adapter qubits)")
+print(f"port_l                       : {bridge.port_l}")
+print(f"port_r                       : {bridge.port_r}")
+print(f"extra_κ_l (connect+cellulate): {bridge.extra_kappa_l.shape[0]} new κ qubits")
+print(f"extra_κ_r                    : {bridge.extra_kappa_r.shape[0]} new κ qubits")
+print(f"T_l shape                    : {bridge.T_l.shape}  (SkipTree, (3,2)-sparse)")
+print(f"T_r shape                    : {bridge.T_r.shape}")
+print(f"H_R shape                    : {bridge.H_R.shape}  (canonical rep-code parity)")
+
+# SkipTree key identity (arXiv:2410.03628 Theorem 5): T · G_aug · P == H_R
+# where P is the port-permutation matrix built from label_l.
+P_l = np.zeros((bridge.g_l_aug.F.shape[1], bridge.width), dtype=np.int_)
+for v_idx, lab in enumerate(bridge.label_l):
+    if lab >= 0:
+        P_l[v_idx, lab] = 1
+lhs_l = (bridge.T_l @ bridge.g_l_aug.F.astype(np.int_) @ P_l) % 2
+print(f"SkipTree identity (left)     : {'PASS' if np.array_equal(lhs_l, bridge.H_R) else 'FAIL'}")
+
+P_r = np.zeros((bridge.g_r_aug.F.shape[1], bridge.width), dtype=np.int_)
+for v_idx, lab in enumerate(bridge.label_r):
+    if lab >= 0:
+        P_r[v_idx, lab] = 1
+lhs_r = (bridge.T_r @ bridge.g_r_aug.F.astype(np.int_) @ P_r) % 2
+print(f"SkipTree identity (right)    : {'PASS' if np.array_equal(lhs_r, bridge.H_R) else 'FAIL'}")
 
 # %% [markdown]
 # ## 8. Verify Webster Table I bridge width (2w−1)
@@ -366,22 +393,18 @@ for code_index, expected in WEBSTER_TABLE_I_BRIDGE:
 # ## 9. `build_joint_ppm_circuit` — joint measurement Stim circuit
 #
 # `build_joint_ppm_circuit(g1, g2, bridge, *, rounds, noise_model)` assembles
-# the full joint CSS code (data + g1-κ + g2-κ + bridge qubits) and returns
+# the full joint CSS code (data + g1-κ + g2-κ + adapter qubits) and returns
 # both the Stim measurement circuit and the merged `CSSCode` object.
 #
-# **Protocol formula (math.md §2.7 / Cross §3.6):**
-# The canonical measurement vector α* has 1 on every χ row from both
-# gadgets and every U_B bridge-path row, and 0 on data X-check rows:
-#
-#   Σ(χ₁ rows) = x̄₁ on data | 0 on g1-κ | X on bridge[0]
-#   Σ(χ₂ rows) = x̄₂ on data | 0 on g2-κ | X on bridge[w−1]
-#   Σ(U_B rows)= 0 on data   | 0 on κ    | e₀ + e_{w−1}  (path telescoping)
-#   ─────────────────────────────────────────────────────
-#   Total      = (x̄₁⊕x̄₂) on data | 0 on ancillas | 0 on bridge
-#
-# This means measuring this circuit is equivalent to a projective measurement
-# of the joint Pauli product X̄_1 ⊗ X̄_2, reducing the logical dimension by 1
-# (Cross §3.6 / math.md §2.8).
+# **Protocol formula (math.md §2 / arXiv:2410.03628 §IV):**
+# The adapter register carries the canonical repetition-code parity rows
+# `H_R` (shape `(w-1, w)`); the SkipTree matrices `T_l, T_r` deform the
+# original gadget χ rows so that, when written in the labelled basis of
+# the augmented F matrices, they restrict cleanly onto the adapter.
+# Summing all transformed χ rows from both sides together with the H_R
+# rows yields exactly `x̄₁⊕x̄₂` on data and 0 on every ancilla/adapter
+# qubit. This is equivalent to a projective measurement of the joint
+# Pauli product X̄_1 ⊗ X̄_2, reducing the logical dimension by 1.
 
 # %%
 joint_circuit, joint_code = build_joint_ppm_circuit(g, g2, bridge, rounds=1, noise_model=None)
@@ -502,9 +525,11 @@ if __name__ == "__main__":
 #   (restriction → gauge-fix → assembly) to produce a merged CSS code with
 #   κ ancilla qubits that absorbs the logical operator x̄ into a stabilizer.
 #
-# - **`build_bridge(g1, g2)`**: constructs a path-graph bridge of width
-#   `w = min(|V₀(g1)|, |V₀(g2)|)` that links two gadgets for a joint PPM;
-#   auto-dispatches intra-code vs inter-code based on `g1.code is g2.code`.
+# - **`build_bridge(g1, g2)`**: constructs the Ide universal adapter
+#   (arXiv:2410.03628 §IV) of width `w = min(|V₀(g1)|, |V₀(g2)|)` that
+#   links two gadgets through SkipTree-deformed χ rows on a canonical
+#   repetition-code adapter register; auto-dispatches intra-code vs
+#   inter-code based on `g1.code is g2.code`.
 #
 # - **`build_single_ppm_circuit(g, *, rounds, noise_model)`**: wraps the
 #   merged code in a Stim memory-experiment circuit for `rounds` rounds of

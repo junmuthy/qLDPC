@@ -85,7 +85,10 @@ def main() -> None:
     print(f"  code1 = code2 = Steane [[7, 1, 3]]")
     print(f"  basis = Pauli.Z  (joint Z̄_1 ⊗ Z̄_2)")
     print(f"  rounds = {rounds}")
-    print(f"  bridge.width = {bridge.width}, intercode = {bridge.intercode}")
+    print(f"  bridge.width = {bridge.width}  (universal adapter, arXiv:2410.03628 §IV)")
+    print(f"  extra_κ_l: {bridge.extra_kappa_l.shape[0]} qubits, extra_κ_r: {bridge.extra_kappa_r.shape[0]} qubits")
+    print(f"  T_l shape  : {bridge.T_l.shape}  (SkipTree, (3,2)-sparse)")
+    print(f"  H_R shape  : {bridge.H_R.shape}  (canonical rep-code parity)")
 
     circuit, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=rounds, noise_model=None)
     print(f"  joint code: [[{joint_code.num_qudits}, {joint_code.dimension}]]")
