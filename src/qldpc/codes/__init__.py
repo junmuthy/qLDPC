@@ -56,7 +56,6 @@ from .surgery import (
     build_single_ppm_circuit,
     build_joint_ppm_circuit,
     boost_gadget,
-    load_webster_seed_set,
 )
 
 __all__ = [
@@ -107,7 +106,6 @@ __all__ = [
     "build_single_ppm_circuit",
     "build_joint_ppm_circuit",
     "boost_gadget",
-    "load_webster_seed_set",
     "get_distance_classical",
     "get_distance_quantum",
 ]

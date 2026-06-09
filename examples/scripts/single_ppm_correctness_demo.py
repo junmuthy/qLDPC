@@ -22,12 +22,17 @@ from __future__ import annotations
 import numpy as np
 
 from qldpc import codes
+import sys
+from pathlib import Path
+
 from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
-from qldpc.codes.surgery.gadget import (
-    _build_generalised_bicycle_code,
+from qldpc.objects import Pauli
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _webster_seed_set import (  # noqa: E402
+    build_generalised_bicycle_code,
     load_webster_seed_set,
 )
-from qldpc.objects import Pauli
 
 
 def verify_ppm_correctness(name: str, code, x_logical: np.ndarray, rounds: int, shots: int) -> None:
@@ -91,7 +96,7 @@ def main() -> None:
 
     # Example 2: Webster Appendix A code 0 — matches paper Table I
     data0 = load_webster_seed_set(0)
-    webster0 = _build_generalised_bicycle_code(data0["l"], data0["A"], data0["B"])
+    webster0 = build_generalised_bicycle_code(data0["l"], data0["A"], data0["B"])
     x_webster0 = _x_bar_1_operator(data0)
     verify_ppm_correctness(
         "Webster code 0 [[62, 10, 6]]", webster0, x_webster0, rounds=3, shots=1000

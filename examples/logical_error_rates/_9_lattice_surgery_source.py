@@ -54,6 +54,9 @@ Convert with:
 # %%
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 
 from qldpc.codes.surgery import (
@@ -64,9 +67,13 @@ from qldpc.codes.surgery import (
     build_single_ppm_circuit,
     build_joint_ppm_circuit,
     boost_gadget,
-    load_webster_seed_set,
 )
-from qldpc.codes.surgery.gadget import _build_generalised_bicycle_code
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _webster_seed_set import (  # noqa: E402
+    load_webster_seed_set,
+    build_generalised_bicycle_code,
+)
 
 print("Imports OK")
 
@@ -80,7 +87,7 @@ print("Imports OK")
 # %%
 # Pick Webster Appendix A code 0: l=31, n=62, k=10, d=6
 data = load_webster_seed_set(0)
-code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
 print(f"Code: [[{code.num_qudits}, {code.dimension}]]  (l={data['l']})")
 print(f"Code name from JSON: {data.get('name', 'N/A')}")
 
@@ -169,7 +176,7 @@ print("-" * 56)
 
 for code_index, expected in WEBSTER_TABLE_I_KAPPA_CHI_R:
     d = load_webster_seed_set(code_index)
-    c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+    c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
     xv = x_bar_1_operator(d)
     gg = build_gadget(c, xv)
     kappa = len(gg.kappa_qubits)
@@ -381,7 +388,7 @@ print("-" * 30)
 
 for code_index, expected in WEBSTER_TABLE_I_BRIDGE:
     d = load_webster_seed_set(code_index)
-    c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+    c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
     g_a = build_gadget(c, x_bar_1_operator(d))
     g_b = build_gadget(c, x_bar_k2p1_operator(d))
     br = build_bridge(g_a, g_b)

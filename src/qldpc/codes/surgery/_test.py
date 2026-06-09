@@ -4,11 +4,21 @@ docs/superpowers/specs/2026-06-07-surgery-simplification-design.md)."""
 from __future__ import annotations
 
 import dataclasses
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from qldpc import codes
 from qldpc.objects import Pauli
+
+# Webster seed-set helpers live under examples/ (the JSON fixture is there too).
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "examples"))
+from _webster_seed_set import (  # noqa: E402
+    load_webster_seed_set,
+    build_generalised_bicycle_code,
+)
 
 
 def test_gadget_layout_is_frozen_dataclass():
@@ -229,18 +239,14 @@ def test_build_gadget_rejects_non_x_logical():
 
 
 def test_load_webster_seed_set_returns_known_shape():
-    from qldpc.codes.surgery.gadget import load_webster_seed_set
     data = load_webster_seed_set(0)
     assert "l" in data and "A" in data and "B" in data
     assert "seeds" in data
 
 
 def test_build_generalised_bicycle_code_constructs_css():
-    from qldpc.codes.surgery.gadget import (
-        load_webster_seed_set, _build_generalised_bicycle_code,
-    )
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     assert code.num_qudits == 2 * data["l"]
     # CSS commutation
     HX = np.asarray(code.matrix_x).astype(np.uint8)
@@ -290,10 +296,10 @@ def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
 def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     """Webster Table I: κ + χ + r matches for each of the 4 codes."""
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_1_operator(data)
     g1 = build_gadget(code, x1)
     kappa = len(g1.kappa_qubits)
@@ -372,15 +378,14 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
 
 def test_boost_gadget_dispatches_to_three_methods():
     from qldpc.codes.surgery.gadget import (
-        build_gadget, GadgetLayout, load_webster_seed_set,
-        _build_generalised_bicycle_code,
+        build_gadget, GadgetLayout,
     )
     from qldpc.codes.surgery.cheeger import boost_gadget
     # Use Webster code 0 (l=31, k>=2): Steane gadget has dimension 0 (Steane
     # k=1 minus 1 gadget-consumed logical), which causes the BP+OSD decoder
     # used by boost_gadget_distance to hang searching for nonexistent logicals.
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_x_bar_1_operator(data)
     g = build_gadget(code, x)
     for method in ("spectral", "combinatorial", "distance"):
@@ -403,12 +408,12 @@ def test_boost_gadget_seed_reproducible():
 @pytest.mark.parametrize("method", ["spectral", "combinatorial", "distance"])
 def test_boost_gadget_preserves_css_commutation(method):
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.cheeger import boost_gadget
     # Webster code 0 — Steane causes distance-boost decoder to hang on k=0 merged.
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_x_bar_1_operator(data)
     g = build_gadget(code, x)
     boosted = boost_gadget(g, method=method, target=1.0, seed=0)
@@ -503,7 +508,7 @@ def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code():
 def test_webster_table_i_z_basis_kappa_chi_r_exact():
     """Webster Z̄_1 seed produces the same κ+χ+r counts (basis-symmetric)."""
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
 
     def z_bar_1_operator(d: dict) -> np.ndarray:
@@ -520,7 +525,7 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
 
     for code_index, expected in [(0, 19), (1, 31), (2, 49), (3, 79)]:
         d = load_webster_seed_set(code_index)
-        c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+        c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
         z = z_bar_1_operator(d)
         g = build_gadget(c, z, basis=Pauli.Z)
         kappa = len(g.kappa_qubits)
@@ -535,7 +540,7 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
 def test_boost_gadget_preserves_css_commutation_both_bases(basis):
     """boost_gadget on a basis=X or basis=Z gadget preserves CSS commutation."""
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.cheeger import boost_gadget
 
@@ -550,7 +555,7 @@ def test_boost_gadget_preserves_css_commutation_both_bases(basis):
         raise ValueError(f"{name} not found")
 
     d = load_webster_seed_set(0)
-    c = _build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+    c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
     op_name = "X_bar_1" if basis is Pauli.X else "Z_bar_1"
     op = operator(d, op_name)
     g = build_gadget(c, op, basis=basis)
@@ -1268,13 +1273,13 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
     # the degenerate joint X̄ · X̄ = I case where the spurious bridge logical
     # leaves the dimension at k_data instead of k_data - 1.
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
 
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data, "X_bar_1")
     x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
     g_l = build_gadget(code, x1, basis=Pauli.X)
@@ -1327,12 +1332,12 @@ def test_stitch_intracode_both_bases_commute(basis):
     Steane intra-code (k=1) yields the degenerate joint X̄·X̄ = I case.
     """
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     if basis is Pauli.X:
         x1 = _webster_x_bar_operator(data, "X_bar_1")
         x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
@@ -1406,12 +1411,12 @@ def test_adapter_cycle_check_weight_bounded():
     Total: weight <= 3 + 2 + 3 = 8.
     """
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     # Use Z̄_1 for both sides (intra-code, same logical) — bridge.width =
     # |V_0| = weight of Z̄_1, exercising the maximum-width cellulation path
     x = _webster_z_bar_operator(data, "Z_bar_1")
@@ -1430,11 +1435,11 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
     """After cellulation, every basis cycle in the augmented aux graph has length <= 6."""
     import networkx as nx
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge, _build_aux_graph_strict
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_z_bar_operator(data, "Z_bar_1")
     g_l = build_gadget(code, x, basis=Pauli.Z)
     g_r = build_gadget(code, x, basis=Pauli.Z)
@@ -1484,13 +1489,13 @@ def test_joint_xx_in_stabilizer_on_webster_intracode(code_index):
     """
     import galois
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
     GF2 = galois.GF(2)
     data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data, "X_bar_1")
     x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
     g_l = build_gadget(code, x1, basis=Pauli.X)
@@ -1513,12 +1518,12 @@ def test_build_joint_ppm_circuit_intracode_noiseless_observables_zero():
     Replaces deleted path-graph noiseless intracode tests.
     """
     from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+        build_gadget,
     )
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
     data = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data, "X_bar_1")
     x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
     g_l = build_gadget(code, x1, basis=Pauli.X)

@@ -36,15 +36,21 @@ import sinter
 import stim
 
 from qldpc import circuits, codes, decoders
+import sys
+
 from qldpc.codes.surgery import (
     boost_gadget,
     build_bridge,
     build_gadget,
-    load_webster_seed_set,
 )
 from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
-from qldpc.codes.surgery.gadget import _build_generalised_bicycle_code
 from qldpc.objects import Pauli
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _webster_seed_set import (  # noqa: E402
+    build_generalised_bicycle_code,
+    load_webster_seed_set,
+)
 
 
 def _stitch_compat(g1_boosted, g2_boosted):
@@ -68,7 +74,7 @@ def build_webster_setup() -> tuple[codes.CSSCode, codes.CSSCode, np.ndarray, np.
     (data_code, joint_code, op1, op2, n_data).
     """
     data = load_webster_seed_set(0)
-    data_code = _build_generalised_bicycle_code(
+    data_code = build_generalised_bicycle_code(
         l=data["l"], A_set=data["A"], B_set=data["B"]
     )
     x_seeds = [s for s in data["seeds"] if s["pauli_type"] == "X"]

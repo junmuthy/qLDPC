@@ -34,14 +34,18 @@ import numpy as np
 import sinter
 import stim
 
+import sys
+
 from qldpc import circuits, decoders
 from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
-from qldpc.codes.surgery.gadget import (
-    _build_generalised_bicycle_code,
-    load_webster_seed_set,
-)
 from qldpc.circuits.noise_model import DepolarizingNoiseModel
 from qldpc.objects import Pauli
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _webster_seed_set import (  # noqa: E402
+    build_generalised_bicycle_code,
+    load_webster_seed_set,
+)
 
 
 def _strip_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
@@ -76,7 +80,7 @@ def _x_bar_1_operator(d: dict) -> np.ndarray:
 
 def build_tasks(rounds: int, p_values: list[float]) -> list[sinter.Task]:
     d0 = load_webster_seed_set(0)
-    code = _build_generalised_bicycle_code(d0["l"], d0["A"], d0["B"])
+    code = build_generalised_bicycle_code(d0["l"], d0["A"], d0["B"])
     x = _x_bar_1_operator(d0)
     g = build_gadget(code, x)
 

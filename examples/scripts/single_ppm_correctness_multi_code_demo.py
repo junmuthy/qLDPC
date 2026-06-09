@@ -24,12 +24,17 @@ import numpy as np
 import stim
 
 from qldpc import codes
+import sys
+from pathlib import Path
+
 from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
-from qldpc.codes.surgery.gadget import (
-    _build_generalised_bicycle_code,
+from qldpc.objects import Pauli
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _webster_seed_set import (  # noqa: E402
+    build_generalised_bicycle_code,
     load_webster_seed_set,
 )
-from qldpc.objects import Pauli
 
 
 def _swap_data_init_to_zero(circuit: stim.Circuit, data_ids: list[int]) -> stim.Circuit:
@@ -147,7 +152,7 @@ def main() -> None:
 
     # 3. Webster code 0 [[62, 10, 6]] — X̄_1
     d0 = load_webster_seed_set(0)
-    w0 = _build_generalised_bicycle_code(d0["l"], d0["A"], d0["B"])
+    w0 = build_generalised_bicycle_code(d0["l"], d0["A"], d0["B"])
     x_w0 = _webster_operator(d0, "X_bar_1")
     results.append((
         "Webster 0 [[62, 10, 6]] X̄_1",
@@ -163,7 +168,7 @@ def main() -> None:
 
     # 5. Webster code 1 [[126, 6, 12]]
     d1 = load_webster_seed_set(1)
-    w1 = _build_generalised_bicycle_code(d1["l"], d1["A"], d1["B"])
+    w1 = build_generalised_bicycle_code(d1["l"], d1["A"], d1["B"])
     x_w1 = _webster_operator(d1, "X_bar_1")
     results.append((
         "Webster 1 [[126, 6, 12]] X̄_1",

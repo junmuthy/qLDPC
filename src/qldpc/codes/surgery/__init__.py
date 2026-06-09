@@ -9,7 +9,7 @@ Public API:
 
 from __future__ import annotations
 
-from .gadget import GadgetLayout, build_gadget, load_webster_seed_set
+from .gadget import GadgetLayout, build_gadget
 from .bridge import Bridge, build_bridge
 from .circuit import build_single_ppm_circuit, build_joint_ppm_circuit
 from .cheeger import boost_gadget
@@ -22,5 +22,4 @@ __all__ = [
     "build_single_ppm_circuit",
     "build_joint_ppm_circuit",
     "boost_gadget",
-    "load_webster_seed_set",
 ]
