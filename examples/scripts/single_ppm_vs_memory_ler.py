@@ -21,26 +21,9 @@ import matplotlib.pyplot as plt
 import stim
 
 from qldpc import codes, circuits, decoders
-from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
+from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit, keep_only_observable
 from qldpc.circuits.noise_model import DepolarizingNoiseModel
 from qldpc.objects import Pauli
-
-
-def _strip_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
-    """Return a new circuit keeping only OBSERVABLE_INCLUDE(keep_idx)."""
-    out = stim.Circuit()
-    for op in circuit:
-        if isinstance(op, stim.CircuitRepeatBlock):
-            out.append(stim.CircuitRepeatBlock(
-                op.repeat_count, _strip_observable(op.body_copy(), keep_idx),
-            ))
-            continue
-        if op.name == "OBSERVABLE_INCLUDE":
-            args = list(op.gate_args_copy())
-            if int(args[0]) != keep_idx:
-                continue
-        out.append(op)
-    return out
 
 
 def main() -> None:
@@ -65,7 +48,7 @@ def main() -> None:
 
         # Surgery PPM: keep only obs0 = Webster Eq.1
         surg = build_single_ppm_circuit(g, rounds=rounds, noise_model=noise)
-        surg_obs0 = _strip_observable(surg, keep_idx=0)
+        surg_obs0 = keep_only_observable(surg, keep_idx=0)
         surgery_tasks.append(sinter.Task(
             circuit=surg_obs0,
             json_metadata={"p": float(p), "kind": "surgery"},

@@ -4,6 +4,7 @@ docs/superpowers/specs/2026-06-07-surgery-simplification-design.md).
 Public API:
     build_gadget, build_bridge,
     build_single_ppm_circuit, build_joint_ppm_circuit,
+    keep_only_observable,
     boost_gadget
 """
 
@@ -11,7 +12,7 @@ from __future__ import annotations
 
 from .gadget import GadgetLayout, build_gadget
 from .bridge import Bridge, build_bridge
-from .circuit import build_single_ppm_circuit, build_joint_ppm_circuit
+from .circuit import build_single_ppm_circuit, build_joint_ppm_circuit, keep_only_observable
 from .cheeger import boost_gadget
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "build_bridge",
     "build_single_ppm_circuit",
     "build_joint_ppm_circuit",
+    "keep_only_observable",
     "boost_gadget",
 ]

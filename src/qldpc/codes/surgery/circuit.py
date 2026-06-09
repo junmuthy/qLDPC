@@ -23,6 +23,28 @@ def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
     )
 
 
+def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
+    """Return a copy of ``circuit`` with all OBSERVABLE_INCLUDE entries dropped
+    except the one whose first argument equals ``keep_idx``. Recurses into
+    REPEAT blocks so observables inside loops are filtered the same way.
+
+    Useful for sinter LER sweeps that compare one observable against a
+    memory-experiment baseline — sinter expects exactly one observable per task.
+    """
+    out = stim.Circuit()
+    for op in circuit:
+        if isinstance(op, stim.CircuitRepeatBlock):
+            out.append(stim.CircuitRepeatBlock(
+                op.repeat_count, keep_only_observable(op.body_copy(), keep_idx),
+            ))
+            continue
+        if op.name == "OBSERVABLE_INCLUDE":
+            if int(op.gate_args_copy()[0]) != keep_idx:
+                continue
+        out.append(op)
+    return out
+
+
 def build_single_ppm_circuit(
     gadget: GadgetLayout,
     *,

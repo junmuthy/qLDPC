@@ -37,7 +37,7 @@ import stim
 import sys
 
 from qldpc import circuits, decoders
-from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
+from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit, keep_only_observable
 from qldpc.circuits.noise_model import DepolarizingNoiseModel
 from qldpc.objects import Pauli
 
@@ -46,22 +46,6 @@ from _webster_seed_set import (  # noqa: E402
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
-
-
-def _strip_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
-    out = stim.Circuit()
-    for op in circuit:
-        if isinstance(op, stim.CircuitRepeatBlock):
-            out.append(stim.CircuitRepeatBlock(
-                op.repeat_count, _strip_observable(op.body_copy(), keep_idx),
-            ))
-            continue
-        if op.name == "OBSERVABLE_INCLUDE":
-            args = list(op.gate_args_copy())
-            if int(args[0]) != keep_idx:
-                continue
-        out.append(op)
-    return out
 
 
 def _x_bar_1_operator(d: dict) -> np.ndarray:
@@ -88,7 +72,7 @@ def build_tasks(rounds: int, p_values: list[float]) -> list[sinter.Task]:
     for p in p_values:
         noise = DepolarizingNoiseModel(p, include_idling_error=False)
         surg = build_single_ppm_circuit(g, rounds=rounds, noise_model=noise)
-        surg_obs0 = _strip_observable(surg, keep_idx=0)
+        surg_obs0 = keep_only_observable(surg, keep_idx=0)
         tasks.append(sinter.Task(
             circuit=surg_obs0,
             json_metadata={"p": float(p), "kind": "surgery", "rounds": rounds},
