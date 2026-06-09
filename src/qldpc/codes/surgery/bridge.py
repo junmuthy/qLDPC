@@ -199,10 +199,9 @@ def _cellulate_strict(
             return added
         cycle = long_cycles[0]
         n = len(cycle)
-        # Try chord at antipodal position; otherwise scan for any port-port chord
+        # Scan linearly from cycle[0] for the first port-port chord we can add.
         for offset in range(1, n):
-            u = cycle[0]
-            v = cycle[offset % n]
+            u, v = cycle[0], cycle[offset]
             if u not in ports_set or v not in ports_set:
                 continue
             u, v = sorted((u, v))

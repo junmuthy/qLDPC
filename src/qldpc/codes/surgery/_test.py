@@ -1431,3 +1431,13 @@ def test_cellulate_no_op_when_already_short():
     G_aux = nx.cycle_graph(4)  # one 4-cycle
     added = _cellulate_strict(G_aux, ports=(0, 1, 2, 3), max_len=6)
     assert added == []
+
+
+def test_cellulate_raises_when_no_port_chord_available():
+    """RuntimeError when long cycle exists but no port-port chord can be added."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_strict
+    G_aux = nx.cycle_graph(10)
+    # Only cycle[0] is a port → no port-port pair exists in the cycle
+    with pytest.raises(RuntimeError, match=r"No port-port chord"):
+        _cellulate_strict(G_aux, ports=(0,), max_len=6)
