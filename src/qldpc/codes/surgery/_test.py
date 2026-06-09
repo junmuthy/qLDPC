@@ -1269,3 +1269,63 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
     bridge = build_bridge(g_l, g_r)
     merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
     assert merged.dimension == code.dimension - 1
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis):
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code = codes.SteaneCode()
+    if basis is Pauli.X:
+        x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    else:
+        x = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=basis)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=basis)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    HZ = np.asarray(merged.matrix_z).astype(np.int_)
+    product = (HX @ HZ.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+    assert merged.dimension == 2 * code.dimension - 1
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_stitch_intracode_both_bases_commute(basis):
+    """Intra-code commutation for both bases. Use a Webster code with 2 distinct logicals.
+
+    Steane intra-code (k=1) yields the degenerate joint X̄·X̄ = I case.
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    if basis is Pauli.X:
+        x1 = _webster_x_bar_operator(data, "X_bar_1")
+        x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
+    else:
+        # Z-type analogs from the Webster seed set.
+        l = data["l"]
+        def _z_op(name):
+            for s in data["seeds"]:
+                if s["name"] == name and s["pauli_type"] == "Z":
+                    v = np.zeros(2 * l, dtype=np.uint8)
+                    v[:l][s["L_support"]] = 1
+                    v[l:][s["R_support"]] = 1
+                    return v
+            raise ValueError(f"{name} not found")
+        x1 = _z_op("Z_bar_1")
+        x2 = _z_op("Z_bar_k2p1")
+    g_l = build_gadget(code, x1, basis=basis)
+    g_r = build_gadget(code, x2, basis=basis)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    HZ = np.asarray(merged.matrix_z).astype(np.int_)
+    product = (HX @ HZ.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
