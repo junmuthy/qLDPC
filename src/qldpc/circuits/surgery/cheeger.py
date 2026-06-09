@@ -2,85 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import galois
 import numpy as np
-import numpy.typing as npt
 
 from qldpc.codes.common import CSSCode
-from .gadget import GadgetLayout, _assemble_HX_L1
-
-
-@dataclasses.dataclass(frozen=True, eq=False)
-class SurgeryLayout:
-    """Provenance of qubits and checks in a merged L=1 surgery code.
-
-    Internal type used by the boost dispatcher and the legacy-layout bridge
-    (_gadget_to_legacy_layout / _legacy_to_gadget).
-
-    Attributes:
-        num_data_qubits: Number of qubits in the original data code.
-        num_ancilla_qubits: Number of κ ancilla qubits (= |C_0| + boost extras).
-        num_data_x_checks: Number of rows of HX_merged that are "data" rows
-            (i.e. the original X-checks). Boost code uses this to slice off
-            data rows from the merged check matrix when extracting the data
-            block.
-        num_data_z_checks: Number of rows of HZ_merged that are "data" rows.
-        v0_indices: Indices (within data qubits) of supp(X̄_M) = V_0.
-        c0_indices: Row indices (within H_Z of data code) of Z-checks adjacent
-            to V_0 = C_0.
-        F: Step-1 restriction matrix; shape (|C_0|, |V_0|).
-        G: Step-2 gauge-fix basis; rows span the left null space of F.
-    """
-
-    num_data_qubits: int
-    num_ancilla_qubits: int
-    num_data_x_checks: int
-    num_data_z_checks: int
-    v0_indices: npt.NDArray[np.int_]
-    c0_indices: npt.NDArray[np.int_]
-    F: galois.FieldArray
-    G: galois.FieldArray
-
-
-def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
-    """Compute G whose rows form a basis of the left null space of F."""
-    return F.left_null_space()
-
-
-def _build_layout(
-    data_code: CSSCode,
-    F: galois.FieldArray,
-    G: galois.FieldArray,
-    v0_indices: np.ndarray,
-    c0_indices: np.ndarray,
-) -> SurgeryLayout:
-    """Assemble SurgeryLayout from the building blocks (L=1)."""
-    n_data = data_code.num_qubits
-    n_ancilla = int(F.shape[0])
-    num_data_x_checks = int(data_code.matrix_x.shape[0])
-    num_data_z_checks = int(data_code.matrix_z.shape[0])
-    return SurgeryLayout(
-        num_data_qubits=n_data,
-        num_ancilla_qubits=n_ancilla,
-        num_data_x_checks=num_data_x_checks,
-        num_data_z_checks=num_data_z_checks,
-        v0_indices=v0_indices,
-        c0_indices=c0_indices,
-        F=F,
-        G=G,
-    )
-
-
-@dataclasses.dataclass(frozen=True, eq=False)
-class BoostResult:
-    """Statistics about a Cheeger boost run."""
-
-    extra_qubits_added: int
-    final_h_lower_bound: float
-    iterations: int
-    terminated_by: str  # "target_reached" | "max_qubits_exhausted" | "no_progress"
+from .gadget import GadgetLayout
 
 
 def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
@@ -195,74 +121,6 @@ def cheeger_constant(g: GadgetLayout) -> float:
     return _spectral_cheeger_lower_bound(F)
 
 
-
-@dataclasses.dataclass(frozen=True, eq=False)
-class DistanceBoostResult:
-    """Statistics about a Williamson-Yoder / Webster distance-verify boost run."""
-
-    extra_qubits_added: int
-    target_distance: int
-    final_d_x_bound: int | float
-    final_d_z_bound: int | float
-    trials_attempted: int
-    terminated_by: str  # "target_reached" | "max_qubits_exhausted" | "no_progress"
-
-
-def _reassemble_gadget_with_new_F(
-    merged: CSSCode,
-    layout: SurgeryLayout,
-    augmented_F: galois.FieldArray,
-    n_extra: int,
-) -> tuple[CSSCode, SurgeryLayout]:
-    """Rebuild merged code + layout from an augmented restriction matrix (L=1).
-
-    Boost-added κ' qubits (rows of F_aug beyond original C_0) are GAUGE qubits:
-    they have no data-Z extension (no S_j in C_0 to extend). Their Z-stab
-    contribution comes purely through the augmented gauge-fix matrix
-    G_aug = basis of left null space of F_aug.
-    """
-    field = augmented_F.__class__
-    G_aug = _compute_gauge_fix(augmented_F)
-    n_data = layout.num_data_qubits
-
-    data_x_arr = np.asarray(merged.matrix_x[:layout.num_data_x_checks]).astype(np.int_)
-    data_z_arr = np.asarray(merged.matrix_z[:layout.num_data_z_checks]).astype(np.int_)
-    data_x_gf = field(data_x_arr[:, :n_data])
-    data_z_gf = field(data_z_arr[:, :n_data])
-
-    data_code_proxy = CSSCode(data_x_gf, data_z_gf, is_subsystem_code=False)
-
-    HX_data_uint8 = np.asarray(data_x_gf).astype(np.uint8)
-    F_uint8 = np.asarray(augmented_F).astype(np.uint8)
-    HX_new_uint8 = _assemble_HX_L1(HX_data_uint8, layout.v0_indices, F_uint8)
-    HX_new = field(HX_new_uint8.astype(np.int_).tolist())
-
-    # Manually build HZ_new: new κ' qubits get NO data-Z extension — only G_aug
-    # rows mention them.
-    n_c0 = int(augmented_F.shape[0])
-    n_merged = n_data + n_c0
-    n_kappa_orig = int(layout.F.shape[0])
-
-    old_z = field.Zeros((data_z_gf.shape[0], n_merged))
-    old_z[:, :n_data] = data_z_gf
-    I_partial = field.Identity(n_kappa_orig)
-    old_z[layout.c0_indices, n_data:n_data + n_kappa_orig] = I_partial
-
-    gauge_rows: list[galois.FieldArray] = []
-    if G_aug.shape[0] > 0:
-        gf = field.Zeros((G_aug.shape[0], n_merged))
-        gf[:, n_data:] = G_aug
-        gauge_rows.append(gf)
-
-    HZ_new = field(np.vstack([old_z, *gauge_rows]))
-
-    boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
-    boosted_layout = _build_layout(
-        data_code_proxy, augmented_F, G_aug, layout.v0_indices, layout.c0_indices,
-    )
-    return boosted_merged, boosted_layout
-
-
 def _augment_F_with_random_edges(
     F_base: np.ndarray,
     n_new_edges: int,
@@ -310,13 +168,12 @@ def _augment_F_with_random_edges(
 
 
 def boost_gadget_cheeger_combinatorial(
-    merged: CSSCode,
-    layout: SurgeryLayout,
+    g: GadgetLayout,
     *,
     target_h: float = 1.0,
     max_extra_qubits: int = 50,
     seed: int | None = None,
-) -> tuple[CSSCode, SurgeryLayout, BoostResult]:
+) -> GadgetLayout:
     """Greedy combinatorial Cheeger boost — deterministic distance guarantee.
 
     Computes the exact boundary Cheeger constant h(F) via subset enumeration
@@ -326,36 +183,33 @@ def boost_gadget_cheeger_combinatorial(
     decreasing any other |∂v|.
 
     By Cross §III Thm 6, h(F) >= 1 implies d_merged >= d_data, so reaching
-    target_h = 1.0 GUARANTEES distance preservation (no decoder verification
-    needed). Tractable for |V_0| <= 26 (Webster's family up to l=255).
-
-    Compared with boost_gadget_distance (BP+OSD-verified): this method
-    provides a deterministic mathematical guarantee at the cost of possibly
-    over-adding edges (since h >= 1 is sufficient but not necessary). For
-    Webster's BB-code seeds, |V_0| = wt(X̄) is small (6, 10, 16, 26).
+    target_h = 1.0 GUARANTEES distance preservation. Tractable for
+    |V_0| <= 26 (Webster's family up to l=255).
 
     Args:
-        merged: merged CSSCode from build_layered_surgery_code.
-        layout: associated SurgeryLayout (used to read F).
+        g: input gadget produced by build_gadget.
         target_h: Cheeger target. Default 1.0 (Cross Thm 6 threshold).
         max_extra_qubits: cap on additions. Default 50.
         seed: RNG seed for tie-breaking in edge selection.
 
     Returns:
-        (boosted_merged, boosted_layout, BoostResult). final_h_lower_bound
-        field holds the EXACT achieved h, not a lower bound.
+        A new GadgetLayout with F augmented to reach target_h, rebuilt via
+        build_gadget_augmented (basis=X/Z handled symmetrically).
 
     Raises:
         ValueError: |V_0| > 26 (enumeration infeasible) or target_h <= 0.
     """
+    from .gadget import build_gadget_augmented
+
     if target_h <= 0:
         raise ValueError(f"target_h must be positive, got {target_h}.")
     if max_extra_qubits < 0:
         raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
 
     rng = np.random.default_rng(seed)
-    field = layout.F.__class__
-    F = np.asarray(layout.F).astype(np.int_).copy()
+    field = galois.GF(2)
+    F = np.asarray(g.F).astype(np.int_).copy()
+    n_orig_rows = F.shape[0]
     n_V = F.shape[1]
     if n_V > 26:
         raise ValueError(
@@ -363,14 +217,12 @@ def boost_gadget_cheeger_combinatorial(
             f"Use boost_gadget_distance (BP+OSD) instead."
         )
     if n_V < 2:
-        return merged, layout, BoostResult(
-            extra_qubits_added=0, final_h_lower_bound=float("inf"),
-            iterations=0, terminated_by="target_reached",
+        # Nothing to boost; return identity GadgetLayout (no F_extra rows).
+        return build_gadget_augmented(
+            g.code, g.x, np.zeros((0, n_V), dtype=np.uint8), basis=g.basis,
         )
 
     half = n_V // 2
-    # Phase 1: Gray-code enumerate all 1 <= |v| <= half subsets, recording
-    # (mask, |v|, |∂v|) into flat arrays for vectorized incremental updates.
     F_col_ints = [
         int.from_bytes(
             np.packbits(F[:, i][::-1]).tobytes()[::-1], "little"
@@ -406,25 +258,16 @@ def boost_gadget_cheeger_combinatorial(
         return pairs
 
     extra = 0
-    iterations = 0
-    terminated_by = "no_progress"
-
     while True:
-        iterations += 1
-        # Find min h = cuts/sizes via vectorized search.
-        # Use cuts * sizes_max comparison to avoid float division.
         h_num = cuts.astype(np.int64)
         h_den = sizes.astype(np.int64)
-        # ratio = h_num / h_den; pick argmin
         idx = int(np.argmin(h_num / h_den))
         h = float(h_num[idx] / h_den[idx])
         worst_mask = int(masks[idx])
 
         if h >= target_h:
-            terminated_by = "target_reached"
             break
         if extra >= max_extra_qubits:
-            terminated_by = "max_qubits_exhausted"
             break
 
         v_star_arr = np.array(
@@ -433,7 +276,6 @@ def boost_gadget_cheeger_combinatorial(
         inside = np.flatnonzero(v_star_arr).tolist()
         outside = np.flatnonzero(1 - v_star_arr).tolist()
         if not inside or not outside:
-            terminated_by = "no_progress"
             break
 
         rng.shuffle(inside)
@@ -449,7 +291,6 @@ def boost_gadget_cheeger_combinatorial(
             if chosen is not None:
                 break
         if chosen is None:
-            terminated_by = "no_progress"
             break
 
         new_row = np.zeros(n_V, dtype=np.int_)
@@ -458,71 +299,53 @@ def boost_gadget_cheeger_combinatorial(
         F = np.vstack([F, new_row])
         extra += 1
 
-        # Vectorized cut update: for each subset, cut += parity of
-        # |v ∩ {i, j}| = bit_i XOR bit_j of the subset mask.
         bit_i = ((masks >> chosen[0]) & np.uint64(1)).astype(np.int32)
         bit_j = ((masks >> chosen[1]) & np.uint64(1)).astype(np.int32)
         cuts += (bit_i ^ bit_j)
 
-    augmented_F = field(F)
-    boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
-        merged, layout, augmented_F, extra
-    )
-    return boosted_merged, boosted_layout, BoostResult(
-        extra_qubits_added=extra,
-        final_h_lower_bound=float(h),
-        iterations=iterations,
-        terminated_by=terminated_by,
-    )
+    F_extra = F[n_orig_rows:].astype(np.uint8)
+    return build_gadget_augmented(g.code, g.x, F_extra, basis=g.basis)
 
 
 def boost_gadget_distance(
-    merged: CSSCode,
-    layout: SurgeryLayout,
+    g: GadgetLayout,
     *,
     target_distance: int,
     max_extra_qubits: int = 30,
     num_trials_per_step: int = 20,
     decoder_trials: int = 10,
     seed: int | None = None,
-) -> tuple[CSSCode, SurgeryLayout, DistanceBoostResult]:
+) -> GadgetLayout:
     """Williamson-Yoder / Webster distance-verifying gadget boost.
 
-    Per the procedure described in Cain et al. arXiv:2503.10390 and adopted
-    by Webster: iteratively add small random batches of degree-2 edges to F,
-    use BP+OSD upper-bound on merged code distance to fast-reject any
-    augmentation whose deformed code falls below the target distance.
-
-    Starts from n_extra = 0 (verify bare gadget already meets target). For
-    each n_extra, samples ``num_trials_per_step`` random degree-2 augmentations
-    and returns the first one that passes the BP+OSD test for BOTH X and Z
-    distances (each tested with ``decoder_trials`` random trials).
+    Per Cain et al. arXiv:2503.10390 / Webster: iteratively add small random
+    batches of degree-2 edges to F, use BP+OSD upper bound on merged code
+    distance to fast-reject any augmentation whose deformed code falls below
+    target. Starts from n_extra = 0 (verify bare gadget already meets target).
 
     Args:
-        merged: merged CSSCode returned by build_layered_surgery_code.
-        layout: associated SurgeryLayout.
+        g: input gadget produced by build_gadget.
         target_distance: minimum X- and Z-distance required for acceptance
-            (usually the data code's distance d_data).
+            (usually d_data, the data code's distance).
         max_extra_qubits: cap on number of new κ' qubits to consider.
-        num_trials_per_step: how many random augmentations to try per
-            n_extra value before incrementing.
+        num_trials_per_step: random augmentations per n_extra value.
         decoder_trials: trials for each get_distance_bound_with_decoder call.
         seed: RNG seed for reproducibility.
 
     Returns:
-        (boosted_merged, boosted_layout, DistanceBoostResult).
+        A new GadgetLayout whose merged code passes BP+OSD at target_distance,
+        or the bare input gadget if max_extra_qubits is exhausted.
 
     Raises:
         ValueError: target_distance <= 0 or max_extra_qubits < 0.
 
     Notes:
         BP+OSD gives an UPPER bound on distance. ``d_bound >= target_distance``
-        means the decoder could not find a logical operator of weight below
-        target; with enough trials this is a strong heuristic that
-        d_merged >= target_distance, but not a proof. For exact verification,
+        is a strong heuristic but not a proof. For exact verification,
         post-process accepted candidates with ``merged.get_distance_exact()``.
     """
     from qldpc.objects import Pauli as _Pauli
+    from .gadget import build_gadget_augmented
 
     if target_distance <= 0:
         raise ValueError(f"target_distance must be positive, got {target_distance}.")
@@ -530,140 +353,47 @@ def boost_gadget_distance(
         raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
 
     rng = np.random.default_rng(seed)
-    field = layout.F.__class__
-    F_base = np.asarray(layout.F).astype(np.int_)
+    F_base = np.asarray(g.F).astype(np.int_)
+    n_V = F_base.shape[1]
 
-    trials_attempted = 0
-
-    def _passes_decoder(code: CSSCode) -> tuple[bool, int | float, int | float]:
-        bx = code.get_distance_bound_with_decoder(_Pauli.X, num_trials=decoder_trials)
-        if bx < target_distance:
-            return False, bx, -1
-        bz = code.get_distance_bound_with_decoder(_Pauli.Z, num_trials=decoder_trials)
-        return (bz >= target_distance), bx, bz
-
-    # n_extra = 0: test bare gadget first.
-    ok, bx0, bz0 = _passes_decoder(merged)
-    trials_attempted += 1
-    if ok:
-        return merged, layout, DistanceBoostResult(
-            extra_qubits_added=0,
-            target_distance=target_distance,
-            final_d_x_bound=bx0,
-            final_d_z_bound=bz0,
-            trials_attempted=trials_attempted,
-            terminated_by="target_reached",
+    def _passes_decoder(layout: GadgetLayout) -> bool:
+        # Reconstruct the merged CSSCode from layout.HX_merged / HZ_merged
+        # to feed the existing decoder.
+        merged = CSSCode(
+            galois.GF(2)(np.asarray(layout.HX_merged).astype(np.int_).tolist()),
+            galois.GF(2)(np.asarray(layout.HZ_merged).astype(np.int_).tolist()),
+            is_subsystem_code=False,
         )
+        bx = merged.get_distance_bound_with_decoder(_Pauli.X, num_trials=decoder_trials)
+        if bx < target_distance:
+            return False
+        bz = merged.get_distance_bound_with_decoder(_Pauli.Z, num_trials=decoder_trials)
+        return bz >= target_distance
+
+    # n_extra = 0: bare gadget first.
+    bare = build_gadget_augmented(g.code, g.x, np.zeros((0, n_V), dtype=np.uint8), basis=g.basis)
+    if _passes_decoder(bare):
+        return bare
 
     for n_extra in range(1, max_extra_qubits + 1):
-        best_bx: int | float = -1
-        best_bz: int | float = -1
         for _trial in range(num_trials_per_step):
-            trials_attempted += 1
-            F_aug = _augment_F_with_random_edges(F_base, n_extra, rng)
-            if F_aug is None:
+            F_extra = _augment_F_with_random_edges(F_base, n_extra, rng)
+            if F_extra is None:
                 continue
+            # _augment_F_with_random_edges returns F_aug = F_base + extra rows;
+            # extract just the new rows for build_gadget_augmented.
+            F_extra_rows = np.asarray(F_extra[F_base.shape[0]:]).astype(np.uint8)
             try:
-                boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
-                    merged, layout, field(F_aug), n_extra
+                candidate = build_gadget_augmented(
+                    g.code, g.x, F_extra_rows, basis=g.basis,
                 )
             except Exception:
                 continue
-            ok, bx, bz = _passes_decoder(boosted_merged)
-            best_bx = max(best_bx, bx)
-            best_bz = max(best_bz, bz) if bz != -1 else best_bz
-            if ok:
-                return boosted_merged, boosted_layout, DistanceBoostResult(
-                    extra_qubits_added=n_extra,
-                    target_distance=target_distance,
-                    final_d_x_bound=bx,
-                    final_d_z_bound=bz,
-                    trials_attempted=trials_attempted,
-                    terminated_by="target_reached",
-                )
+            if _passes_decoder(candidate):
+                return candidate
 
-    return merged, layout, DistanceBoostResult(
-        extra_qubits_added=0,
-        target_distance=target_distance,
-        final_d_x_bound=bx0,
-        final_d_z_bound=bz0,
-        trials_attempted=trials_attempted,
-        terminated_by="max_qubits_exhausted",
-    )
-
-
-def _gadget_to_legacy_layout(g):
-    """Convert a GadgetLayout into the legacy (CSSCode, SurgeryLayout) pair
-    consumed by boost_gadget_cheeger_combinatorial / boost_gadget_distance.
-
-    For basis=Pauli.Z, we SWAP HX/HZ so the legacy boost code (designed for
-    X-basis chi rows in HX_merged) sees the chi rows where it expects them.
-    The boost result is dual-swapped back in _legacy_to_gadget.
-    """
-    from qldpc.objects import Pauli
-    F2 = galois.GF(2)
-    n = g.code.num_qudits
-    n_anc = len(g.C0)
-    mX_data = int(g.code.matrix_x.shape[0])
-    mZ_data = int(g.code.matrix_z.shape[0])
-
-    if g.basis is Pauli.X:
-        HX_for_legacy = g.HX_merged
-        HZ_for_legacy = g.HZ_merged
-        # After (no) swap: HX_for_legacy data rows = mX_data; HZ data rows = mZ_data.
-        num_data_x_checks = mX_data
-        num_data_z_checks = mZ_data
-    else:  # Pauli.Z: swap so chi rows are in HX_for_legacy
-        HX_for_legacy = g.HZ_merged
-        HZ_for_legacy = g.HX_merged
-        # After swap: HX_for_legacy data rows = mZ_data (the original HZ data part);
-        #             HZ_for_legacy data rows = mX_data.
-        num_data_x_checks = mZ_data
-        num_data_z_checks = mX_data
-
-    merged = CSSCode(
-        F2(np.asarray(HX_for_legacy).astype(np.int_).tolist()),
-        F2(np.asarray(HZ_for_legacy).astype(np.int_).tolist()),
-        is_subsystem_code=False,
-    )
-    layout = SurgeryLayout(
-        num_data_qubits=n,
-        num_ancilla_qubits=n_anc,
-        num_data_x_checks=num_data_x_checks,
-        num_data_z_checks=num_data_z_checks,
-        v0_indices=np.array(g.V0, dtype=np.int_),
-        c0_indices=np.array(g.C0, dtype=np.int_),
-        F=F2(np.asarray(g.F).astype(np.int_).tolist()),
-        G=F2(np.asarray(g.G).astype(np.int_).tolist()),
-    )
-    return merged, layout
-
-
-def _legacy_to_gadget(merged: CSSCode, layout: SurgeryLayout, original_g):
-    """Reconstruct a GadgetLayout from a boost result (merged + legacy SurgeryLayout).
-
-    For basis=Pauli.Z, we undo the HX/HZ swap applied in _gadget_to_legacy_layout.
-    """
-    from qldpc.objects import Pauli
-    HX_m_legacy = np.asarray(merged.matrix_x).astype(np.uint8)
-    HZ_m_legacy = np.asarray(merged.matrix_z).astype(np.uint8)
-    if original_g.basis is Pauli.X:
-        HX_m = HX_m_legacy
-        HZ_m = HZ_m_legacy
-    else:  # undo the basis-Z swap
-        HX_m = HZ_m_legacy
-        HZ_m = HX_m_legacy
-    F_new = np.asarray(layout.F).astype(np.uint8)
-    G_new = np.asarray(layout.G).astype(np.uint8)
-    n = original_g.code.num_qudits
-    n_anc_new = HX_m.shape[1] - n
-    kappa_qubits = tuple(range(n, n + n_anc_new))
-    return dataclasses.replace(
-        original_g,
-        F=F_new, G=G_new,
-        HX_merged=HX_m, HZ_merged=HZ_m,
-        kappa_qubits=kappa_qubits,
-    )
+    # Exhausted: return bare gadget unchanged.
+    return bare
 
 
 def boost_gadget(
@@ -688,17 +418,14 @@ def boost_gadget(
         A NEW GadgetLayout with boosted F, G, HX_merged, HZ_merged,
         kappa_qubits.
     """
-    merged0, layout0 = _gadget_to_legacy_layout(gadget)
     if method == "combinatorial":
-        boosted_merged, boosted_layout, _ = boost_gadget_cheeger_combinatorial(
-            merged0, layout0, target_h=target, seed=seed, **kwargs,
+        return boost_gadget_cheeger_combinatorial(
+            gadget, target_h=target, seed=seed, **kwargs,
         )
-    elif method == "distance":
-        boosted_merged, boosted_layout, _ = boost_gadget_distance(
-            merged0, layout0, target_distance=int(target), seed=seed, **kwargs,
+    if method == "distance":
+        return boost_gadget_distance(
+            gadget, target_distance=int(target), seed=seed, **kwargs,
         )
-    else:
-        raise ValueError(
-            f"unknown method: {method!r}. Allowed: 'combinatorial', 'distance'."
-        )
-    return _legacy_to_gadget(boosted_merged, boosted_layout, gadget)
+    raise ValueError(
+        f"unknown method: {method!r}. Allowed: 'combinatorial', 'distance'."
+    )

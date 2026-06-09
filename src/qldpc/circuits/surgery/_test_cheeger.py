@@ -104,3 +104,35 @@ def test_boost_gadget_preserves_css_commutation_both_bases(basis):
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
     assert boosted.basis is basis  # boost preserves basis
+
+
+def test_boost_gadget_combinatorial_basis_z_preserves_chi_carrier():
+    """After basis=Z combinatorial boost, χ rows must live in HZ_merged.
+
+    The legacy adapter handled basis=Z by swapping HX↔HZ on entry and back on
+    exit; the GadgetLayout-native path delegates basis routing to
+    build_gadget_augmented. This test catches a regression where χ rows end
+    up in HX_merged instead of HZ_merged.
+
+    Distance-strategy basis=Z is not tested here because the Webster JSON
+    fixture only ships X̄ operators; the basis=X path of distance boost is
+    covered by test_boost_gadget_preserves_css_commutation[distance].
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.cheeger import boost_gadget
+
+    code = codes.SteaneCode()
+    z_op = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z_op, basis=Pauli.Z)
+
+    boosted = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
+
+    assert boosted.basis is Pauli.Z, (
+        f"basis dropped through boost: got {boosted.basis!r}, expected Pauli.Z"
+    )
+    n_chi = len(boosted.V0)
+    n_z_data = code.matrix_z.shape[0]
+    chi_block = boosted.HZ_merged[n_z_data : n_z_data + n_chi, :]
+    assert chi_block.any(), (
+        "χ rows missing from HZ_merged; basis=Z boost path likely swapped HX/HZ."
+    )

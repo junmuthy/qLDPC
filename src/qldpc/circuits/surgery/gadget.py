@@ -80,8 +80,8 @@ def _assemble_HX_L1(
 ) -> np.ndarray:
     """L=1 HX-side block assembly: [[HX_data, 0], [E_V0, F^T]] over GF(2).
 
-    Shared by _step3_assemble (initial gadget assembly) and
-    cheeger._reassemble_gadget_with_new_F (post-boost rebuild). The Z-side
+    Used by _step3_assemble (initial gadget assembly) and
+    build_gadget_augmented (post-boost rebuild). The Z-side
     assembly is NOT shared — the boost rebuild treats new κ' qubits as
     pure-gauge (no data-Z extension), unlike the initial assembly.
 
