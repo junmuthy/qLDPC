@@ -1225,3 +1225,55 @@ def test_stitch_intercode_basis_x_singletons_excluded():
             single[n_l : 2 * n_l] = x
         augmented = np.vstack([HX, single.reshape(1, -1)])
         assert np.linalg.matrix_rank(GF2(augmented.tolist())) == base + 1, which
+
+
+def test_stitch_intracode_basis_x_css_commutation():
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    code = codes.SteaneCode()
+    x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    # Use Pauli.X logical 0 for both (same V_0); intra-code test
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x1, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    HZ = np.asarray(merged.matrix_z).astype(np.int_)
+    product = (HX @ HZ.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_stitch_intracode_basis_x_k_reduces_by_one():
+    # Use Webster code 0 (k>=2) so the k_joint = k_data - 1 invariant is not
+    # masked by the spurious bridge X-logical: Steane (k=1) with x_l = x_r is
+    # the degenerate joint X̄ · X̄ = I case where the spurious bridge logical
+    # leaves the dimension at k_data instead of k_data - 1.
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+
+    def _x_bar_k2p1(d: dict) -> np.ndarray:
+        l = d["l"]
+        for seed in d["seeds"]:
+            if seed["name"] == "X_bar_k2p1" and seed["pauli_type"] == "X":
+                L = np.zeros(l, dtype=np.uint8)
+                R = np.zeros(l, dtype=np.uint8)
+                for i in seed["L_support"]:
+                    L[i] = 1
+                for i in seed["R_support"]:
+                    R[i] = 1
+                return np.concatenate([L, R])
+        raise ValueError("X_bar_k2p1 not found")
+
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_1_operator(data)
+    x2 = _x_bar_k2p1(data)
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    assert merged.dimension == code.dimension - 1

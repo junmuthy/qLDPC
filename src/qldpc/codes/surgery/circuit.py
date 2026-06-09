@@ -150,7 +150,62 @@ def _stitch_to_joint_csscode(
 
 
 def _stitch_intracode_joint_csscode(g_l, g_r, bridge):
-    raise NotImplementedError("intra-code stitching — Task 9")
+    """Spec §3 intra-code: shared data column block, χ^(l/r) extend onto same data cols."""
+    assert g_l.code is g_r.code
+    assert bridge.basis is Pauli.X  # basis=Z handled separately
+    field = g_l.code.field
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+    n = g_l.code.num_qudits
+    k_l = g_l_aug.F.shape[0]
+    k_r = g_r_aug.F.shape[0]
+    w = bridge.width
+    n_merged = n + k_l + k_r + w
+    mX = g_l.code.matrix_x.shape[0]
+    mZ = g_l.code.matrix_z.shape[0]
+    r_l = g_l_aug.G.shape[0]
+    r_r = g_r_aug.G.shape[0]
+
+    c_data = slice(0, n)
+    cl_kappa = slice(n, n + k_l)
+    cr_kappa = slice(n + k_l, n + k_l + k_r)
+    c_adapter = slice(n + k_l + k_r, n_merged)
+
+    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
+    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
+    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
+    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
+
+    HX = np.zeros((mX + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
+    HZ = np.zeros((mZ + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
+
+    # H_X: shared data H_X (from g_l_aug or g_r_aug, same)
+    HX[: mX, c_data] = HX_l[: mX, : n]
+    # χ^(l), χ^(r) onto shared data
+    chi_l = HX_l[mX :, :]
+    chi_r = HX_r[mX :, :]
+    HX[mX : mX + len(g_l.V0), c_data] = chi_l[:, : n]
+    HX[mX : mX + len(g_l.V0), cl_kappa] = chi_l[:, n :]
+    HX[mX + len(g_l.V0) :, c_data] = chi_r[:, : n]
+    HX[mX + len(g_l.V0) :, cr_kappa] = chi_r[:, n :]
+    for v_idx, lab in enumerate(bridge.label_l):
+        if lab >= 0:
+            HX[mX + v_idx, c_adapter.start + lab] = 1
+    for v_idx, lab in enumerate(bridge.label_r):
+        if lab >= 0:
+            HX[mX + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
+
+    # H_Z: shared data H_Z with κ extension on BOTH sides
+    HZ[: mZ, c_data] = HZ_l[: mZ, : n]
+    HZ[: mZ, cl_kappa] = HZ_l[: mZ, n :]
+    HZ[: mZ, cr_kappa] = HZ_r[: mZ, n :]
+    HZ[mZ : mZ + r_l, cl_kappa] = HZ_l[mZ :, n :]
+    HZ[mZ + r_l : mZ + r_l + r_r, cr_kappa] = HZ_r[mZ :, n :]
+    new_z_start = mZ + r_l + r_r
+    HZ[new_z_start :, cl_kappa] = bridge.T_l
+    HZ[new_z_start :, cr_kappa] = bridge.T_r
+    HZ[new_z_start :, c_adapter] = bridge.H_R
+
+    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
 
 
 def _stitch_intercode_joint_csscode_basis_z(g_l, g_r, bridge):
