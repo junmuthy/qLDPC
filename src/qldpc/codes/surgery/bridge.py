@@ -189,7 +189,7 @@ def _cellulate_port_subgraph(
         if not chord_found:
             raise RuntimeError(
                 f"No chord found to cellulate port-subgraph cycle of length {n}; "
-                f"cycle={cycle!r}"
+                f"ports={ports!r}, cycle={cycle!r}"
             )
 
 

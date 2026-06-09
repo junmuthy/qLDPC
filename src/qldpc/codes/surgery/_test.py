@@ -1097,14 +1097,24 @@ def test_cellulate_raises_when_port_cycle_has_no_available_chord():
 
 
 def test_cellulate_port_subgraph_breaks_long_port_cycle():
-    """A cycle > max_len in the port subgraph gets broken by adding a chord."""
+    """Ports are a strict subset of vertices, with a long cycle on the port
+    subgraph. Cellulation breaks the port cycle without inspecting non-port
+    edges elsewhere in G_aux."""
     import networkx as nx
     from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
-    # 10-cycle on port vertices only
-    G = nx.cycle_graph(10)
-    ports = tuple(range(10))
+    G = nx.Graph()
+    # 8-cycle on port vertices 0..7
+    G.add_edges_from([(i, (i + 1) % 8) for i in range(8)])
+    # Non-port "decoration": dangling vertex 100 attached to port 0
+    G.add_edge(0, 100)
+    ports = tuple(range(8))
     added = _cellulate_port_subgraph(G, ports, max_len=6)
     assert len(added) >= 1
+    # All chord endpoints must be ports (cycle vertices are port vertices)
+    for u, v in added:
+        assert u in ports and v in ports
+    # The non-port vertex 100 was not touched
+    assert G.has_edge(0, 100)
     # All port-subgraph basis cycles now bounded
     sub = G.subgraph(ports)
     for c in nx.cycle_basis(sub):
