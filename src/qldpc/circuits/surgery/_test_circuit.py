@@ -13,7 +13,6 @@ from ._test_helpers import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
     _webster_x_bar_operator,
-    _webster_x_bar_1_operator,
 )
 
 

@@ -11,7 +11,7 @@ from qldpc.objects import Pauli
 from ._test_helpers import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
-    _webster_x_bar_1_operator,
+    _webster_z_bar_operator,
 )
 
 
@@ -325,7 +325,6 @@ def test_adapter_cycle_check_weight_bounded():
     )
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from ._test_helpers import _webster_z_bar_operator
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     # Use Z̄_1 for both sides (intra-code, same logical) — bridge.width =
@@ -349,7 +348,6 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
         build_gadget,
     )
     from qldpc.circuits.surgery.bridge import build_bridge, _build_aux_graph_strict
-    from ._test_helpers import _webster_z_bar_operator
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_z_bar_operator(data, "Z_bar_1")
