@@ -77,6 +77,36 @@ def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
     return np.asarray(G).astype(np.uint8)
 
 
+def _assemble_HX_L1(
+    HX_data: np.ndarray,
+    v0_indices: np.ndarray,
+    F: np.ndarray,
+) -> np.ndarray:
+    """L=1 HX-side block assembly: [[HX_data, 0], [E_V0, F^T]] over GF(2).
+
+    Shared by _step3_assemble (initial gadget assembly) and
+    cheeger._reassemble_gadget_with_new_F (post-boost rebuild). The Z-side
+    assembly is NOT shared — the boost rebuild treats new κ' qubits as
+    pure-gauge (no data-Z extension), unlike the initial assembly.
+
+    Args:
+        HX_data: original code's X-check matrix, shape (mX, n), uint8.
+        v0_indices: indices of V_0 within the n data qubits, shape (|V_0|,).
+        F: restriction matrix, shape (|C_0|, |V_0|), uint8.
+
+    Returns:
+        HX_merged: shape (mX + |V_0|, n + |C_0|), uint8.
+    """
+    mX, n = HX_data.shape
+    n_v0, n_c0 = int(F.shape[1]), int(F.shape[0])
+    n_merged = n + n_c0
+    top = np.hstack([HX_data, np.zeros((mX, n_c0), dtype=np.uint8)]).astype(np.uint8)
+    bot = np.zeros((n_v0, n_merged), dtype=np.uint8)
+    bot[np.arange(n_v0), np.asarray(v0_indices)] = 1
+    bot[:, n:] = F.T
+    return np.vstack([top, bot]).astype(np.uint8)
+
+
 def _step3_assemble(
     code: CSSCode,
     V0: tuple[int, ...],
@@ -98,11 +128,6 @@ def _step3_assemble(
     nV, nC = len(V0), len(C0)
     r = G.shape[0]
 
-    E_V0_T = np.zeros((nV, n), dtype=np.uint8)
-    for i, v in enumerate(V0):
-        E_V0_T[i, v] = 1
-    F_T = F.T.astype(np.uint8)
-
     # F_tilde : (mZ_or_mX × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
     if basis is Pauli.X:
         F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
@@ -113,22 +138,18 @@ def _step3_assemble(
             continue        # sentinel for extra-κ rows from build_gadget_augmented
         F_tilde[j, k] = 1
 
+    v0_arr = np.asarray(V0, dtype=np.int_)
+
     if basis is Pauli.X:
         # χ rows extend HX_merged; G rows extend HZ_merged
-        HX_merged = np.block([
-            [HX, np.zeros((mX, nC), dtype=np.uint8)],
-            [E_V0_T, F_T],
-        ]).astype(np.uint8)
+        HX_merged = _assemble_HX_L1(HX, v0_arr, F)
         HZ_merged = np.block([
             [HZ, F_tilde],
             [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
         ]).astype(np.uint8)
     else:
-        # basis=Z: χ rows extend HZ_merged; G rows extend HX_merged (symmetric)
-        HZ_merged = np.block([
-            [HZ, np.zeros((mZ, nC), dtype=np.uint8)],
-            [E_V0_T, F_T],
-        ]).astype(np.uint8)
+        # basis=Z (symmetric dual): χ rows extend HZ_merged; G rows extend HX_merged
+        HZ_merged = _assemble_HX_L1(HZ, v0_arr, F)
         HX_merged = np.block([
             [HX, F_tilde],
             [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],

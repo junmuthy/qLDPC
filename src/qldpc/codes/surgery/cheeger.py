@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from qldpc.codes.common import CSSCode
+from .gadget import _assemble_HX_L1
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -46,30 +47,6 @@ class SurgeryLayout:
 def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
     """Compute G whose rows form a basis of the left null space of F."""
     return F.left_null_space()
-
-
-def _assemble_merged_HX(
-    data_code: CSSCode,
-    F: galois.FieldArray,
-    v0_indices: np.ndarray,
-) -> galois.FieldArray:
-    """Assemble the merged H_X for L=1 surgery: [[HX_data, 0], [E_V0, F^T]]."""
-    field = data_code.field
-    n_data = data_code.num_qubits
-    n_v0 = int(F.shape[1])
-    n_c0 = int(F.shape[0])
-    n_merged = n_data + n_c0
-
-    hx = data_code.matrix_x
-    n_x_data = int(hx.shape[0])
-    top_block = field.Zeros((n_x_data, n_merged))
-    top_block[:, :n_data] = hx
-
-    chi_block = field.Zeros((n_v0, n_merged))
-    chi_block[np.arange(n_v0), v0_indices] = 1
-    chi_block[:, n_data:] = F.T
-
-    return field(np.vstack([top_block, chi_block]))
 
 
 def _build_layout(
@@ -341,7 +318,10 @@ def _reassemble_gadget_with_new_F(
 
     data_code_proxy = CSSCode(data_x_gf, data_z_gf, is_subsystem_code=False)
 
-    HX_new = _assemble_merged_HX(data_code_proxy, augmented_F, layout.v0_indices)
+    HX_data_uint8 = np.asarray(data_x_gf).astype(np.uint8)
+    F_uint8 = np.asarray(augmented_F).astype(np.uint8)
+    HX_new_uint8 = _assemble_HX_L1(HX_data_uint8, layout.v0_indices, F_uint8)
+    HX_new = field(HX_new_uint8.astype(np.int_).tolist())
 
     # Manually build HZ_new: new κ' qubits get NO data-Z extension — only G_aug
     # rows mention them.
