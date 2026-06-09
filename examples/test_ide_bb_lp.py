@@ -73,7 +73,7 @@ def test_intercode_joint_bb_lp_exact():
     Root cause of n discrepancy: Ide's paper builds an adapter sized
     exactly to its cellulation of G_1, G_2 (`κ + w` qubits per side).
     Our `build_bridge` invokes a generic universal adapter
-    (`_connect_induced_subgraph` + `_cellulate_strict`) which is allowed
+    (`_connect_induced_subgraph` + `_cellulate_port_subgraph`) which is allowed
     to add extra weight-2 F rows whenever the induced port subgraph is
     disconnected or has long basis cycles. For BB↔LP with default
     options that adds 4 connectivity/cellulation edges on the BB side
