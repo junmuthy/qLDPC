@@ -196,6 +196,38 @@ def _build_auxiliary_graph_from_F(
     return G, edge_qubit_to_vertices
 
 
+def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, int], int]]:
+    """Build auxiliary graph from F; raise on hyperedges.
+
+    Vertices: range(|V_0|) = range(F.shape[1]).
+    Edges: one per weight-2 row of F, between the two columns where the row has 1s.
+
+    Raises:
+        NotImplementedError: if any row of F has weight >= 3 (hyperedge), pointing to
+        paper §II.C decomposition.
+    """
+    F_arr = np.asarray(F).astype(int)
+    n_V = F_arr.shape[1]
+    G = nx.Graph()
+    G.add_nodes_from(range(n_V))
+    edge_index: dict[tuple[int, int], int] = {}
+    for i, row in enumerate(F_arr):
+        eps = np.flatnonzero(row).tolist()
+        if len(eps) == 0:
+            continue
+        if len(eps) >= 3:
+            raise NotImplementedError(
+                f"F row {i} has weight {len(eps)} (hyperedge). "
+                f"Universal-adapter construction here requires weight-2 rows. "
+                f"To handle hyperedges, decompose them per arXiv:2410.03628 §II.C."
+            )
+        u, v = sorted(eps)
+        if (u, v) not in edge_index:
+            edge_index[(u, v)] = len(edge_index)
+            G.add_edge(u, v)
+    return G, edge_index
+
+
 def _label_inverse(P: np.ndarray) -> list[int]:
     """Return inv[l] = v such that P[v, l] = 1."""
     n = P.shape[0]

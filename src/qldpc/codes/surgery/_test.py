@@ -1355,3 +1355,23 @@ def test_single_ppm_ler_with_final_detectors_below_threshold():
         f"LER at p=0.001 = {ler:.4f} (errors={results[0].errors}/{results[0].shots} shots). "
         f"Expected ≤ 0.01 with final detectors wired. Was ~0.024 without them."
     )
+
+
+def test_build_aux_graph_weight2_rows_become_edges():
+    """F rows of weight 2 → graph edges; vertex set = {0, ..., |V_0|-1}."""
+    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    F = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
+    G_nx, edge_idx = _build_aux_graph_strict(F)
+    assert set(G_nx.nodes) == {0, 1, 2, 3}
+    assert set(tuple(sorted(e)) for e in G_nx.edges) == {(0, 1), (1, 2), (2, 3)}
+    assert edge_idx[(0, 1)] == 0
+    assert edge_idx[(1, 2)] == 1
+    assert edge_idx[(2, 3)] == 2
+
+
+def test_build_aux_graph_rejects_hyperedge():
+    """F rows of weight >= 3 raise NotImplementedError with §II.C reference."""
+    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    F = np.array([[1, 1, 1, 0], [0, 1, 1, 0]], dtype=np.uint8)
+    with pytest.raises(NotImplementedError, match=r"hyperedge.*§II\.C"):
+        _build_aux_graph_strict(F)
