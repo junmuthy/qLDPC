@@ -242,23 +242,20 @@ def _connect_induced_subgraph(
     Mutates G_aux. Each added edge has both endpoints in ``ports`` so it
     contributes a weight-2 row to the augmented F matrix downstream.
 
+    Loop invariant: u and v are drawn from different components of
+    G_aux.subgraph(ports), so G_aux cannot already have a (u, v) edge —
+    such an edge would put them in the same component.
+
     Returns the list of added edges in insertion order.
     """
-    ports_set = set(ports)
     added: list[tuple[int, int]] = []
     while True:
-        sub = G_aux.subgraph(ports)
-        comps = list(nx.connected_components(sub))
+        comps = list(nx.connected_components(G_aux.subgraph(ports)))
         if len(comps) <= 1:
             return added
-        # Pick lowest-indexed vertex of first component and lowest of second
-        c0 = sorted(comps[0])
-        c1 = sorted(comps[1])
-        u, v = sorted((c0[0], c1[0]))
-        assert u in ports_set and v in ports_set
-        if not G_aux.has_edge(u, v):
-            G_aux.add_edge(u, v)
-            added.append((u, v))
+        u, v = sorted((min(comps[0]), min(comps[1])))
+        G_aux.add_edge(u, v)
+        added.append((u, v))
 
 
 def _label_inverse(P: np.ndarray) -> list[int]:
