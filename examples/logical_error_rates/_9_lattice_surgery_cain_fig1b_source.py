@@ -88,11 +88,11 @@ print(f"Cain Table III ref  : (189, 104, 86) — qualitative comparison only")
 #
 # The circuit differs from a standard X-memory experiment in only one place:
 # the logical observable. Per Webster Eq. (1), the observable is the product
-# across all R = d rounds of the χ_i outcomes — these are the rows of the
-# merged H_X tagged ``"ancilla_L1"`` in ``layout.hx_row_kind``. Because the
-# gadget qubits κ_j (columns where ``layout.qubit_layer == 1``) are
-# initialized to |0⟩, the χ_i are reliable from round 1 — no Cross §3.2
-# unreliable/D_0 bookkeeping is needed.
+# across all R = d rounds of the χ_i outcomes — these are the last len(g.V0)
+# rows of the merged H_X (rows mX_data+0 .. mX_data+|V_0|-1). Because the
+# gadget qubits κ_j (columns at index ≥ g.code.num_qudits) are initialized
+# to |0⟩, the χ_i are reliable from round 1 — no Cross §3.2 unreliable/D_0
+# bookkeeping is needed.
 
 # %%
 from qldpc.circuits import memory
