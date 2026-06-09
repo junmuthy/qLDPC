@@ -95,266 +95,181 @@ def build_single_ppm_circuit(
     return circuit
 
 
+def _stitch_intercode(g_l, g_r, bridge):
+    """Inter-code joint stitch (g_l.code is not g_r.code). Handles both bases."""
+    assert g_l.code is not g_r.code
+    field = g_l.code.field
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+
+    # χ-carrier abstraction: M_chi holds χ rows; M_co holds the dual cycle rows.
+    if bridge.basis is Pauli.X:
+        M_chi_l_src, M_co_l_src = g_l_aug.HX_merged, g_l_aug.HZ_merged
+        M_chi_r_src, M_co_r_src = g_r_aug.HX_merged, g_r_aug.HZ_merged
+        m_chi_l_data = g_l.code.matrix_x.shape[0]
+        m_chi_r_data = g_r.code.matrix_x.shape[0]
+        m_co_l_data  = g_l.code.matrix_z.shape[0]
+        m_co_r_data  = g_r.code.matrix_z.shape[0]
+    else:
+        M_chi_l_src, M_co_l_src = g_l_aug.HZ_merged, g_l_aug.HX_merged
+        M_chi_r_src, M_co_r_src = g_r_aug.HZ_merged, g_r_aug.HX_merged
+        m_chi_l_data = g_l.code.matrix_z.shape[0]
+        m_chi_r_data = g_r.code.matrix_z.shape[0]
+        m_co_l_data  = g_l.code.matrix_x.shape[0]
+        m_co_r_data  = g_r.code.matrix_x.shape[0]
+
+    M_chi_l = np.asarray(M_chi_l_src).astype(np.int_)
+    M_chi_r = np.asarray(M_chi_r_src).astype(np.int_)
+    M_co_l  = np.asarray(M_co_l_src).astype(np.int_)
+    M_co_r  = np.asarray(M_co_r_src).astype(np.int_)
+
+    n_l, n_r = g_l.code.num_qudits, g_r.code.num_qudits
+    k_l, k_r = g_l_aug.F.shape[0], g_r_aug.F.shape[0]
+    w = bridge.width
+    n_merged = n_l + n_r + k_l + k_r + w
+    r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
+
+    cl_data   = slice(0, n_l)
+    cr_data   = slice(n_l, n_l + n_r)
+    cl_kappa  = slice(n_l + n_r, n_l + n_r + k_l)
+    cr_kappa  = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
+    c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
+
+    # Build M_chi: data χ-carrier rows (left & right) + χ rows + adapter Π labels.
+    M_chi = np.zeros(
+        (m_chi_l_data + m_chi_r_data + len(g_l.V0) + len(g_r.V0), n_merged),
+        dtype=np.int_,
+    )
+    M_chi[: m_chi_l_data, cl_data] = M_chi_l[: m_chi_l_data, : n_l]
+    M_chi[m_chi_l_data : m_chi_l_data + m_chi_r_data, cr_data] = M_chi_r[: m_chi_r_data, : n_r]
+    chi_l_rows = M_chi_l[m_chi_l_data :, :]
+    chi_r_rows = M_chi_r[m_chi_r_data :, :]
+    chi_start = m_chi_l_data + m_chi_r_data
+    M_chi[chi_start : chi_start + len(g_l.V0), cl_data] = chi_l_rows[:, : n_l]
+    M_chi[chi_start : chi_start + len(g_l.V0), cl_kappa] = chi_l_rows[:, n_l :]
+    M_chi[chi_start + len(g_l.V0) :, cr_data] = chi_r_rows[:, : n_r]
+    M_chi[chi_start + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n_r :]
+    for v_idx, lab in enumerate(bridge.label_l):
+        if lab >= 0:
+            M_chi[chi_start + v_idx, c_adapter.start + lab] = 1
+    for v_idx, lab in enumerate(bridge.label_r):
+        if lab >= 0:
+            M_chi[chi_start + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
+
+    # Build M_co: co-carrier data rows (with κ extension) + G_aug + new cycle.
+    M_co = np.zeros(
+        (m_co_l_data + m_co_r_data + r_l + r_r + (w - 1), n_merged),
+        dtype=np.int_,
+    )
+    M_co[: m_co_l_data, cl_data]  = M_co_l[: m_co_l_data, : n_l]
+    M_co[: m_co_l_data, cl_kappa] = M_co_l[: m_co_l_data, n_l :]
+    M_co[m_co_l_data : m_co_l_data + m_co_r_data, cr_data]  = M_co_r[: m_co_r_data, : n_r]
+    M_co[m_co_l_data : m_co_l_data + m_co_r_data, cr_kappa] = M_co_r[: m_co_r_data, n_r :]
+    g_start = m_co_l_data + m_co_r_data
+    M_co[g_start : g_start + r_l, cl_kappa] = M_co_l[m_co_l_data :, n_l :]
+    M_co[g_start + r_l : g_start + r_l + r_r, cr_kappa] = M_co_r[m_co_r_data :, n_r :]
+    cyc_start = g_start + r_l + r_r
+    M_co[cyc_start :, cl_kappa]  = bridge.T_l
+    M_co[cyc_start :, cr_kappa]  = bridge.T_r
+    M_co[cyc_start :, c_adapter] = bridge.H_R
+
+    if bridge.basis is Pauli.X:
+        return CSSCode(field(M_chi), field(M_co), is_subsystem_code=False)
+    return CSSCode(field(M_co), field(M_chi), is_subsystem_code=False)
+
+
+def _stitch_intracode(g_l, g_r, bridge):
+    """Intra-code joint stitch (g_l.code is g_r.code). Handles both bases.
+
+    Differences from _stitch_intercode:
+      - Shared data check rows (count = m_chi/co_data once, not l+r).
+      - Shared data column block (n columns, not n_l + n_r).
+      - χ rows from both sides write into the SAME data-column slice.
+    """
+    assert g_l.code is g_r.code
+    field = g_l.code.field
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+
+    if bridge.basis is Pauli.X:
+        M_chi_l_src, M_co_l_src = g_l_aug.HX_merged, g_l_aug.HZ_merged
+        M_chi_r_src, M_co_r_src = g_r_aug.HX_merged, g_r_aug.HZ_merged
+        m_chi_data = g_l.code.matrix_x.shape[0]
+        m_co_data  = g_l.code.matrix_z.shape[0]
+    else:
+        M_chi_l_src, M_co_l_src = g_l_aug.HZ_merged, g_l_aug.HX_merged
+        M_chi_r_src, M_co_r_src = g_r_aug.HZ_merged, g_r_aug.HX_merged
+        m_chi_data = g_l.code.matrix_z.shape[0]
+        m_co_data  = g_l.code.matrix_x.shape[0]
+
+    M_chi_l = np.asarray(M_chi_l_src).astype(np.int_)
+    M_chi_r = np.asarray(M_chi_r_src).astype(np.int_)
+    M_co_l  = np.asarray(M_co_l_src).astype(np.int_)
+    M_co_r  = np.asarray(M_co_r_src).astype(np.int_)
+
+    n = g_l.code.num_qudits
+    k_l, k_r = g_l_aug.F.shape[0], g_r_aug.F.shape[0]
+    w = bridge.width
+    n_merged = n + k_l + k_r + w
+    r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
+
+    c_data    = slice(0, n)
+    cl_kappa  = slice(n, n + k_l)
+    cr_kappa  = slice(n + k_l, n + k_l + k_r)
+    c_adapter = slice(n + k_l + k_r, n_merged)
+
+    # Build M_chi: shared data check rows + χ rows (both sides into shared data).
+    M_chi = np.zeros(
+        (m_chi_data + len(g_l.V0) + len(g_r.V0), n_merged),
+        dtype=np.int_,
+    )
+    M_chi[: m_chi_data, c_data] = M_chi_l[: m_chi_data, : n]  # shared
+    chi_l_rows = M_chi_l[m_chi_data :, :]
+    chi_r_rows = M_chi_r[m_chi_data :, :]
+    M_chi[m_chi_data : m_chi_data + len(g_l.V0), c_data]  = chi_l_rows[:, : n]
+    M_chi[m_chi_data : m_chi_data + len(g_l.V0), cl_kappa] = chi_l_rows[:, n :]
+    M_chi[m_chi_data + len(g_l.V0) :, c_data]  = chi_r_rows[:, : n]
+    M_chi[m_chi_data + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n :]
+    for v_idx, lab in enumerate(bridge.label_l):
+        if lab >= 0:
+            M_chi[m_chi_data + v_idx, c_adapter.start + lab] = 1
+    for v_idx, lab in enumerate(bridge.label_r):
+        if lab >= 0:
+            M_chi[m_chi_data + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
+
+    # Build M_co: shared data co-carrier rows with κ extension on BOTH sides,
+    # then G_l, G_r, then new cycle.
+    M_co = np.zeros(
+        (m_co_data + r_l + r_r + (w - 1), n_merged),
+        dtype=np.int_,
+    )
+    M_co[: m_co_data, c_data]    = M_co_l[: m_co_data, : n]
+    M_co[: m_co_data, cl_kappa]  = M_co_l[: m_co_data, n :]
+    M_co[: m_co_data, cr_kappa]  = M_co_r[: m_co_data, n :]
+    M_co[m_co_data : m_co_data + r_l, cl_kappa] = M_co_l[m_co_data :, n :]
+    M_co[m_co_data + r_l : m_co_data + r_l + r_r, cr_kappa] = M_co_r[m_co_data :, n :]
+    cyc_start = m_co_data + r_l + r_r
+    M_co[cyc_start :, cl_kappa]  = bridge.T_l
+    M_co[cyc_start :, cr_kappa]  = bridge.T_r
+    M_co[cyc_start :, c_adapter] = bridge.H_R
+
+    if bridge.basis is Pauli.X:
+        return CSSCode(field(M_chi), field(M_co), is_subsystem_code=False)
+    return CSSCode(field(M_co), field(M_chi), is_subsystem_code=False)
+
+
 def _stitch_to_joint_csscode(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> CSSCode:
-    """Assemble merged CSSCode for two-PPM surgery (spec §3 block tables)."""
-    intercode = g_l.code is not g_r.code
-    if not intercode and bridge.basis is Pauli.X:
-        return _stitch_intracode_joint_csscode(g_l, g_r, bridge)  # added in Task 9
-    if not intercode and bridge.basis is Pauli.Z:
-        return _stitch_intracode_joint_csscode_basis_z(g_l, g_r, bridge)  # Task 10
-    if intercode and bridge.basis is Pauli.Z:
-        return _stitch_intercode_joint_csscode_basis_z(g_l, g_r, bridge)  # Task 10
+    """Assemble merged CSSCode for two-PPM surgery (spec §3 block tables).
 
-    field = g_l.code.field
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n_l = g_l.code.num_qudits
-    n_r = g_r.code.num_qudits
-    k_l = g_l_aug.F.shape[0]      # |C_0^(l)| + e_l
-    k_r = g_r_aug.F.shape[0]
-    w = bridge.width
-    n_merged = n_l + n_r + k_l + k_r + w
-    mX_l = g_l.code.matrix_x.shape[0]
-    mX_r = g_r.code.matrix_x.shape[0]
-    mZ_l = g_l.code.matrix_z.shape[0]
-    mZ_r = g_r.code.matrix_z.shape[0]
-    r_l = g_l_aug.G.shape[0]      # r_l_aug
-    r_r = g_r_aug.G.shape[0]
-
-    # Column ranges
-    cl_data = slice(0, n_l)
-    cr_data = slice(n_l, n_l + n_r)
-    cl_kappa = slice(n_l + n_r, n_l + n_r + k_l)
-    cr_kappa = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
-    c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
-
-    HX = np.zeros((mX_l + mX_r + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
-    HZ = np.zeros((mZ_l + mZ_r + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
-
-    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
-    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
-    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
-    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
-
-    # H_X rows: data H_X^(l), data H_X^(r), χ^(l), χ^(r)
-    HX[: mX_l, cl_data] = HX_l[: mX_l, : n_l]
-    HX[mX_l : mX_l + mX_r, cr_data] = HX_r[: mX_r, : n_r]
-    # χ^(l) = HX_l[mX_l:, :]: cols [: n_l] -> cl_data, cols [n_l:] -> cl_kappa
-    chi_l_rows = HX_l[mX_l :, :]
-    HX[mX_l + mX_r : mX_l + mX_r + len(g_l.V0), cl_data] = chi_l_rows[:, : n_l]
-    HX[mX_l + mX_r : mX_l + mX_r + len(g_l.V0), cl_kappa] = chi_l_rows[:, n_l :]
-    chi_r_rows = HX_r[mX_r :, :]
-    HX[mX_l + mX_r + len(g_l.V0) :, cr_data] = chi_r_rows[:, : n_r]
-    HX[mX_l + mX_r + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n_r :]
-    # Π_l, Π_r adapter extensions on χ rows
-    for v_idx, lab in enumerate(bridge.label_l):
-        if lab >= 0:
-            HX[mX_l + mX_r + v_idx, c_adapter.start + lab] = 1
-    for v_idx, lab in enumerate(bridge.label_r):
-        if lab >= 0:
-            HX[mX_l + mX_r + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
-
-    # H_Z rows: data H_Z^(l) extended, data H_Z^(r) extended, G^(l)_aug, G^(r)_aug, new cycle-Z
-    HZ[: mZ_l, cl_data] = HZ_l[: mZ_l, : n_l]
-    HZ[: mZ_l, cl_kappa] = HZ_l[: mZ_l, n_l :]
-    HZ[mZ_l : mZ_l + mZ_r, cr_data] = HZ_r[: mZ_r, : n_r]
-    HZ[mZ_l : mZ_l + mZ_r, cr_kappa] = HZ_r[: mZ_r, n_r :]
-    HZ[mZ_l + mZ_r : mZ_l + mZ_r + r_l, cl_kappa] = HZ_l[mZ_l :, n_l :]
-    HZ[mZ_l + mZ_r + r_l : mZ_l + mZ_r + r_l + r_r, cr_kappa] = HZ_r[mZ_r :, n_r :]
-    # New cycle Z-checks: [T_l | T_r | H_R]
-    new_z_start = mZ_l + mZ_r + r_l + r_r
-    HZ[new_z_start :, cl_kappa] = bridge.T_l
-    HZ[new_z_start :, cr_kappa] = bridge.T_r
-    HZ[new_z_start :, c_adapter] = bridge.H_R
-
-    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
-
-
-def _stitch_intracode_joint_csscode(g_l, g_r, bridge):
-    """Spec §3 intra-code: shared data column block, χ^(l/r) extend onto same data cols."""
-    assert g_l.code is g_r.code
-    assert bridge.basis is Pauli.X  # basis=Z handled separately
-    field = g_l.code.field
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n = g_l.code.num_qudits
-    k_l = g_l_aug.F.shape[0]
-    k_r = g_r_aug.F.shape[0]
-    w = bridge.width
-    n_merged = n + k_l + k_r + w
-    mX = g_l.code.matrix_x.shape[0]
-    mZ = g_l.code.matrix_z.shape[0]
-    r_l = g_l_aug.G.shape[0]
-    r_r = g_r_aug.G.shape[0]
-
-    c_data = slice(0, n)
-    cl_kappa = slice(n, n + k_l)
-    cr_kappa = slice(n + k_l, n + k_l + k_r)
-    c_adapter = slice(n + k_l + k_r, n_merged)
-
-    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
-    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
-    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
-    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
-
-    HX = np.zeros((mX + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
-    HZ = np.zeros((mZ + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
-
-    # H_X: shared data H_X (from g_l_aug or g_r_aug, same)
-    HX[: mX, c_data] = HX_l[: mX, : n]
-    # χ^(l), χ^(r) onto shared data
-    chi_l = HX_l[mX :, :]
-    chi_r = HX_r[mX :, :]
-    HX[mX : mX + len(g_l.V0), c_data] = chi_l[:, : n]
-    HX[mX : mX + len(g_l.V0), cl_kappa] = chi_l[:, n :]
-    HX[mX + len(g_l.V0) :, c_data] = chi_r[:, : n]
-    HX[mX + len(g_l.V0) :, cr_kappa] = chi_r[:, n :]
-    for v_idx, lab in enumerate(bridge.label_l):
-        if lab >= 0:
-            HX[mX + v_idx, c_adapter.start + lab] = 1
-    for v_idx, lab in enumerate(bridge.label_r):
-        if lab >= 0:
-            HX[mX + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
-
-    # H_Z: shared data H_Z with κ extension on BOTH sides
-    HZ[: mZ, c_data] = HZ_l[: mZ, : n]
-    HZ[: mZ, cl_kappa] = HZ_l[: mZ, n :]
-    HZ[: mZ, cr_kappa] = HZ_r[: mZ, n :]
-    HZ[mZ : mZ + r_l, cl_kappa] = HZ_l[mZ :, n :]
-    HZ[mZ + r_l : mZ + r_l + r_r, cr_kappa] = HZ_r[mZ :, n :]
-    new_z_start = mZ + r_l + r_r
-    HZ[new_z_start :, cl_kappa] = bridge.T_l
-    HZ[new_z_start :, cr_kappa] = bridge.T_r
-    HZ[new_z_start :, c_adapter] = bridge.H_R
-
-    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
-
-
-def _stitch_intercode_joint_csscode_basis_z(g_l, g_r, bridge):
-    """Symmetric dual of inter-code basis=X: χ rows live in HZ; new cycle in HX."""
-    assert g_l.code is not g_r.code
-    assert bridge.basis is Pauli.Z
-    field = g_l.code.field
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n_l = g_l.code.num_qudits
-    n_r = g_r.code.num_qudits
-    k_l = g_l_aug.F.shape[0]
-    k_r = g_r_aug.F.shape[0]
-    w = bridge.width
-    n_merged = n_l + n_r + k_l + k_r + w
-    mX_l = g_l.code.matrix_x.shape[0]
-    mX_r = g_r.code.matrix_x.shape[0]
-    mZ_l = g_l.code.matrix_z.shape[0]
-    mZ_r = g_r.code.matrix_z.shape[0]
-    r_l = g_l_aug.G.shape[0]
-    r_r = g_r_aug.G.shape[0]
-
-    cl_data = slice(0, n_l)
-    cr_data = slice(n_l, n_l + n_r)
-    cl_kappa = slice(n_l + n_r, n_l + n_r + k_l)
-    cr_kappa = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
-    c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
-
-    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
-    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
-    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
-    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
-
-    # Roles swapped vs basis=X: χ rows live in H_Z; G rows + new cycle live in H_X.
-    HZ = np.zeros((mZ_l + mZ_r + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
-    HX = np.zeros((mX_l + mX_r + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
-
-    # H_Z rows: data H_Z^(l), data H_Z^(r), χ^(l), χ^(r)
-    HZ[: mZ_l, cl_data] = HZ_l[: mZ_l, : n_l]
-    HZ[mZ_l : mZ_l + mZ_r, cr_data] = HZ_r[: mZ_r, : n_r]
-    chi_l = HZ_l[mZ_l :, :]
-    chi_r = HZ_r[mZ_r :, :]
-    HZ[mZ_l + mZ_r : mZ_l + mZ_r + len(g_l.V0), cl_data] = chi_l[:, : n_l]
-    HZ[mZ_l + mZ_r : mZ_l + mZ_r + len(g_l.V0), cl_kappa] = chi_l[:, n_l :]
-    HZ[mZ_l + mZ_r + len(g_l.V0) :, cr_data] = chi_r[:, : n_r]
-    HZ[mZ_l + mZ_r + len(g_l.V0) :, cr_kappa] = chi_r[:, n_r :]
-    # Π_l, Π_r adapter extensions on χ rows
-    for v_idx, lab in enumerate(bridge.label_l):
-        if lab >= 0:
-            HZ[mZ_l + mZ_r + v_idx, c_adapter.start + lab] = 1
-    for v_idx, lab in enumerate(bridge.label_r):
-        if lab >= 0:
-            HZ[mZ_l + mZ_r + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
-
-    # H_X rows: data H_X^(l) extended, data H_X^(r) extended, G^(l)_aug, G^(r)_aug, new cycle
-    HX[: mX_l, cl_data] = HX_l[: mX_l, : n_l]
-    HX[: mX_l, cl_kappa] = HX_l[: mX_l, n_l :]
-    HX[mX_l : mX_l + mX_r, cr_data] = HX_r[: mX_r, : n_r]
-    HX[mX_l : mX_l + mX_r, cr_kappa] = HX_r[: mX_r, n_r :]
-    HX[mX_l + mX_r : mX_l + mX_r + r_l, cl_kappa] = HX_l[mX_l :, n_l :]
-    HX[mX_l + mX_r + r_l : mX_l + mX_r + r_l + r_r, cr_kappa] = HX_r[mX_r :, n_r :]
-    # New cycle X-checks: [T_l | T_r | H_R]
-    new_x_start = mX_l + mX_r + r_l + r_r
-    HX[new_x_start :, cl_kappa] = bridge.T_l
-    HX[new_x_start :, cr_kappa] = bridge.T_r
-    HX[new_x_start :, c_adapter] = bridge.H_R
-
-    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
-
-
-def _stitch_intracode_joint_csscode_basis_z(g_l, g_r, bridge):
-    """Symmetric dual of intra-code basis=X: χ rows in HZ; new cycle in HX."""
-    assert g_l.code is g_r.code
-    assert bridge.basis is Pauli.Z
-    field = g_l.code.field
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n = g_l.code.num_qudits
-    k_l = g_l_aug.F.shape[0]
-    k_r = g_r_aug.F.shape[0]
-    w = bridge.width
-    n_merged = n + k_l + k_r + w
-    mX = g_l.code.matrix_x.shape[0]
-    mZ = g_l.code.matrix_z.shape[0]
-    r_l = g_l_aug.G.shape[0]
-    r_r = g_r_aug.G.shape[0]
-
-    c_data = slice(0, n)
-    cl_kappa = slice(n, n + k_l)
-    cr_kappa = slice(n + k_l, n + k_l + k_r)
-    c_adapter = slice(n + k_l + k_r, n_merged)
-
-    HX_l = np.asarray(g_l_aug.HX_merged).astype(np.int_)
-    HX_r = np.asarray(g_r_aug.HX_merged).astype(np.int_)
-    HZ_l = np.asarray(g_l_aug.HZ_merged).astype(np.int_)
-    HZ_r = np.asarray(g_r_aug.HZ_merged).astype(np.int_)
-
-    HZ = np.zeros((mZ + len(g_l.V0) + len(g_r.V0), n_merged), dtype=np.int_)
-    HX = np.zeros((mX + r_l + r_r + (w - 1), n_merged), dtype=np.int_)
-
-    # H_Z: shared data H_Z, then χ^(l), χ^(r) onto shared data
-    HZ[: mZ, c_data] = HZ_l[: mZ, : n]
-    chi_l = HZ_l[mZ :, :]
-    chi_r = HZ_r[mZ :, :]
-    HZ[mZ : mZ + len(g_l.V0), c_data] = chi_l[:, : n]
-    HZ[mZ : mZ + len(g_l.V0), cl_kappa] = chi_l[:, n :]
-    HZ[mZ + len(g_l.V0) :, c_data] = chi_r[:, : n]
-    HZ[mZ + len(g_l.V0) :, cr_kappa] = chi_r[:, n :]
-    for v_idx, lab in enumerate(bridge.label_l):
-        if lab >= 0:
-            HZ[mZ + v_idx, c_adapter.start + lab] = 1
-    for v_idx, lab in enumerate(bridge.label_r):
-        if lab >= 0:
-            HZ[mZ + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
-
-    # H_X: shared data H_X with κ extension on BOTH sides, G_aug rows, new cycle
-    HX[: mX, c_data] = HX_l[: mX, : n]
-    HX[: mX, cl_kappa] = HX_l[: mX, n :]
-    HX[: mX, cr_kappa] = HX_r[: mX, n :]
-    HX[mX : mX + r_l, cl_kappa] = HX_l[mX :, n :]
-    HX[mX + r_l : mX + r_l + r_r, cr_kappa] = HX_r[mX :, n :]
-    new_x_start = mX + r_l + r_r
-    HX[new_x_start :, cl_kappa] = bridge.T_l
-    HX[new_x_start :, cr_kappa] = bridge.T_r
-    HX[new_x_start :, c_adapter] = bridge.H_R
-
-    return CSSCode(field(HX), field(HZ), is_subsystem_code=False)
+    Dispatches on the structural axis (g_l.code is g_r.code → intra-code
+    shares data; otherwise inter-code).  Each branch handles both
+    bridge.basis values internally via the χ-carrier abstraction.
+    """
+    if g_l.code is g_r.code:
+        return _stitch_intracode(g_l, g_r, bridge)
+    return _stitch_intercode(g_l, g_r, bridge)
 
 
 def build_joint_ppm_circuit(
