@@ -1383,3 +1383,29 @@ def test_build_aux_graph_rejects_weight1_row():
     F = np.array([[1, 1, 0, 0], [0, 0, 1, 0]], dtype=np.uint8)
     with pytest.raises(ValueError, match=r"weight 1"):
         _build_aux_graph_strict(F)
+
+
+def test_connect_induced_subgraph_no_op_when_connected():
+    """If induced subgraph is already connected, no edges are added."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _connect_induced_subgraph
+    G_aux = nx.path_graph(4)  # 0-1-2-3
+    extra = _connect_induced_subgraph(G_aux, ports=(0, 1, 2, 3))
+    assert extra == []
+    assert set(tuple(sorted(e)) for e in G_aux.edges) == {(0, 1), (1, 2), (2, 3)}
+
+
+def test_connect_induced_subgraph_adds_edges_to_disconnected_components():
+    """Disconnected induced subgraph gets one bridging edge per missing connection."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _connect_induced_subgraph
+    # G_aux: 0-1   2-3 (two separate components)
+    G_aux = nx.Graph()
+    G_aux.add_edges_from([(0, 1), (2, 3)])
+    extra = _connect_induced_subgraph(G_aux, ports=(0, 1, 2, 3))
+    assert len(extra) == 1  # exactly one bridge needed
+    (u, v) = extra[0]
+    # Endpoints must come from different original components
+    assert {u, v} & {0, 1} and {u, v} & {2, 3}
+    # G_aux mutated: induced subgraph now connected
+    assert nx.is_connected(G_aux.subgraph((0, 1, 2, 3)))

@@ -233,6 +233,34 @@ def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, in
     return G, edge_index
 
 
+def _connect_induced_subgraph(
+    G_aux: nx.Graph,
+    ports: tuple[int, ...],
+) -> list[tuple[int, int]]:
+    """Add edges to G_aux so that G_aux.subgraph(ports) is connected.
+
+    Mutates G_aux. Each added edge has both endpoints in ``ports`` so it
+    contributes a weight-2 row to the augmented F matrix downstream.
+
+    Returns the list of added edges in insertion order.
+    """
+    ports_set = set(ports)
+    added: list[tuple[int, int]] = []
+    while True:
+        sub = G_aux.subgraph(ports)
+        comps = list(nx.connected_components(sub))
+        if len(comps) <= 1:
+            return added
+        # Pick lowest-indexed vertex of first component and lowest of second
+        c0 = sorted(comps[0])
+        c1 = sorted(comps[1])
+        u, v = sorted((c0[0], c1[0]))
+        assert u in ports_set and v in ports_set
+        if not G_aux.has_edge(u, v):
+            G_aux.add_edge(u, v)
+            added.append((u, v))
+
+
 def _label_inverse(P: np.ndarray) -> list[int]:
     """Return inv[l] = v such that P[v, l] = 1."""
     n = P.shape[0]
