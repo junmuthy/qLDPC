@@ -1,4 +1,4 @@
-"""Standalone bridge adapter for two-PPM joint surgery (math.md §2).
+"""Standalone bridge adapter for two-PPM joint surgery (arXiv:2410.03628 §IV / §VII).
 
 Handles both intra-code (g1.code is g2.code) and inter-code joints.
 """
@@ -7,38 +7,33 @@ from __future__ import annotations
 
 import dataclasses
 
-import galois
 import networkx as nx
 import numpy as np
 
-from qldpc.objects import Pauli, PauliXZ
+from qldpc.objects import PauliXZ
 
 from .gadget import GadgetLayout
-
-GF2 = galois.GF(2)
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Bridge:
-    width: int
-    qubits: tuple[int, ...]
-    U_B: np.ndarray
-    chi_endpoint_extensions: dict[int, np.ndarray]
-    intercode: bool
-    aux_graph_edges: tuple[tuple[int, int], ...] | None
-    z_extensions: dict[int, np.ndarray] | None
-    basis: PauliXZ = dataclasses.field(default=Pauli.X)
+    """Universal adapter between two GadgetLayouts (arXiv:2410.03628 §IV / §VII).
 
-
-def _build_path_graph_U_B(w: int) -> np.ndarray:
-    """math.md §2.2 — path-graph X-stabilizers on w bridge qubits."""
-    if w < 2:
-        raise ValueError(f"bridge width must be >= 2, got {w}")
-    U_B = np.zeros((w - 1, w), dtype=np.uint8)
-    for i in range(w - 1):
-        U_B[i, i] = 1
-        U_B[i, i + 1] = 1
-    return U_B
+    Attributes match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
+    """
+    width: int                                  # w = |𝒜| (adapter qubits)
+    basis: PauliXZ                              # X or Z (symmetric dual)
+    port_l: tuple[int, ...]                     # 𝒫_l* ⊆ V_0^(l), length w
+    port_r: tuple[int, ...]                     # 𝒫_r* ⊆ V_0^(r), length w
+    label_l: tuple[int, ...]                    # label_l[i] = SkipTree label of V_0^(l)[i]; -1 if i ∉ 𝒫_l*
+    label_r: tuple[int, ...]
+    extra_kappa_l: np.ndarray                   # (e_l, |V_0^(l)|) F_2; weight-2 rows added
+    extra_kappa_r: np.ndarray
+    T_l: np.ndarray                             # (w-1, |C_0^(l)| + e_l) F_2 (3,2)-sparse
+    T_r: np.ndarray
+    H_R: np.ndarray                             # (w-1, w) canonical rep code parity
+    g_l_aug: GadgetLayout                       # gadget rebuilt over F_aug^(l)
+    g_r_aug: GadgetLayout
 
 
 def _skip_tree(
@@ -107,6 +102,18 @@ def _canonical_H_R(w: int) -> np.ndarray:
     return H
 
 
+def _label_inverse(P: np.ndarray) -> list[int]:
+    """Return inv[l] = v such that P[v, l] = 1."""
+    n = P.shape[0]
+    inv = [-1] * n
+    for v in range(n):
+        for l in range(n):
+            if P[v, l] == 1:
+                inv[l] = v
+                break
+    return inv
+
+
 def _skip_tree_fullrank(
     S: nx.Graph,
     root: int = 0,
@@ -138,43 +145,6 @@ def _skip_tree_fullrank(
             e = tuple(sorted((u, v)))
             T[l_idx, edge_index_verts[e]] ^= 1   # XOR cancels back-and-forth
     return T.astype(np.int_), P.astype(np.int_)
-
-
-def _cellulate_long_cycles(
-    G: nx.Graph,
-    edge_qubit_to_vertices: dict[int, tuple[int, int]],
-    vert_to_edge: dict[tuple[int, int], int],
-    G_mat: np.ndarray,
-    max_len: int = 6,
-) -> tuple[list[tuple[int, int]], dict[int, tuple[int, int]], dict[tuple[int, int], int], np.ndarray]:
-    """Cellulation: break cycles longer than max_len. math.md §2 / arXiv:2410.03628 Lemma 14."""
-    new_edges = []
-    next_edge_index = (max(edge_qubit_to_vertices.keys()) + 1) if edge_qubit_to_vertices else 0
-
-    while True:
-        cycles = nx.cycle_basis(G)
-        long_cycles = [c for c in cycles if len(c) > max_len]
-        if not long_cycles:
-            break
-        cycle = long_cycles[0]
-        n = len(cycle)
-        u = cycle[0]
-        v = cycle[(n // 2) % n]
-        u, v = sorted((u, v))
-
-        if not G.has_edge(u, v):
-            G.add_edge(u, v)
-            new_edges.append((u, v))
-            edge_qubit_to_vertices[next_edge_index] = (u, v)
-            vert_to_edge[(u, v)] = next_edge_index
-            n_vertices = G_mat.shape[1]
-            new_row = np.zeros((1, n_vertices), dtype=np.int_)
-            new_row[0, u] = 1
-            new_row[0, v] = 1
-            G_mat = np.vstack([G_mat, new_row])
-            next_edge_index += 1
-
-    return new_edges, edge_qubit_to_vertices, vert_to_edge, G_mat
 
 
 def _cellulate_strict(
@@ -215,25 +185,6 @@ def _cellulate_strict(
                 f"No port-port chord found to cellulate cycle of length {n}; "
                 f"ports={ports!r}, cycle={cycle!r}"
             )
-
-
-def _build_auxiliary_graph_from_F(
-    F: np.ndarray,
-) -> tuple[nx.Graph, dict[int, tuple[int, int]]]:
-    """Build aux graph G_s from F matrix. Vertices = cols(F); edges = weight-2 rows."""
-    F_arr = np.asarray(F).astype(int)
-    n_V = F_arr.shape[1]
-    G = nx.Graph()
-    G.add_nodes_from(range(n_V))
-    edge_qubit_to_vertices: dict[int, tuple[int, int]] = {}
-    for i, row in enumerate(F_arr):
-        eps = sorted(np.flatnonzero(row).tolist())
-        if len(eps) == 2:
-            u, v = eps[0], eps[1]
-            edge_qubit_to_vertices[i] = (u, v)
-            if not G.has_edge(u, v):
-                G.add_edge(u, v)
-    return G, edge_qubit_to_vertices
 
 
 def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, int], int]]:
@@ -298,140 +249,6 @@ def _connect_induced_subgraph(
         added.append((u, v))
 
 
-def _label_inverse(P: np.ndarray) -> list[int]:
-    """Return inv[l] = v such that P[v, l] = 1."""
-    n = P.shape[0]
-    inv = [-1] * n
-    for v in range(n):
-        for l in range(n):
-            if P[v, l] == 1:
-                inv[l] = v
-                break
-    return inv
-
-
-def _running_xor_b_c(T_col: np.ndarray) -> np.ndarray:
-    """Solve H_R @ b = T_col with b[0]=0 via running XOR."""
-    w = T_col.shape[0] + 1
-    b = np.zeros(w, dtype=np.int_)
-    for l in range(1, w):
-        b[l] = (b[l - 1] + int(T_col[l - 1])) % 2
-    return b
-
-
-def _solve_chi_z_bridge_choices(
-    T_s: np.ndarray,
-    label_inv: list[int],
-) -> tuple[np.ndarray, np.ndarray]:
-    """Solve (gamma, delta) F_2-linear system for chi-Z bridge compatibility. math.md §2."""
-    w = T_s.shape[0] + 1
-    n_E = T_s.shape[1]
-    n_v0 = len(label_inv)
-
-    if w % 2 != 0:
-        raise ValueError(
-            f"Joint (gamma, delta) system requires w even (got w={w}); "
-            f"odd w introduces a gamma_v*delta_c cross-term that is not F_2-linear."
-        )
-
-    canonical_B = np.zeros((w, n_E), dtype=np.int_)
-    for c in range(n_E):
-        canonical_B[:, c] = _running_xor_b_c(T_s[:, c])
-
-    sigma = canonical_B.sum(axis=0) % 2
-
-    label = [0] * n_v0
-    for l, v in enumerate(label_inv):
-        label[v] = l
-
-    a = np.zeros((n_v0, n_E), dtype=np.int_)
-    for v in range(n_v0):
-        a[v, :] = canonical_B[label[v], :]
-
-    n_eq = n_v0 * n_E
-    n_var = n_v0 + n_E
-    A = np.zeros((n_eq, n_var), dtype=np.int_)
-    rhs = np.zeros(n_eq, dtype=np.int_)
-    for v in range(n_v0):
-        for c in range(n_E):
-            row = v * n_E + c
-            A[row, v] = sigma[c]
-            A[row, n_v0 + c] = 1
-            rhs[row] = a[v, c]
-
-    aug = GF2(np.hstack([A, rhs.reshape(-1, 1)]))
-    rref = np.asarray(aug.row_reduce())
-    x = np.zeros(n_var, dtype=np.int_)
-    for r in range(rref.shape[0]):
-        nz = np.flatnonzero(rref[r, :n_var])
-        if nz.size == 0:
-            if rref[r, n_var] == 1:
-                raise ValueError(
-                    "chi-Z joint bridge system infeasible: "
-                    "(gamma, delta) F_2 linear system has no solution."
-                )
-            continue
-        x[int(nz[0])] = int(rref[r, n_var])
-
-    gamma = x[:n_v0]
-    delta = x[n_v0:]
-    return gamma, delta
-
-
 def build_bridge(g1: GadgetLayout, g2: GadgetLayout) -> "Bridge":
-    """Two-PPM bridge between gadgets. math.md §2."""
-    if g1.basis is not g2.basis:
-        raise ValueError(
-            f"build_bridge requires g1.basis == g2.basis, got {g1.basis!r} vs {g2.basis!r}"
-        )
-    basis = g1.basis
-    intercode = g1.code is not g2.code
-    w = min(len(g1.V0), len(g2.V0))
-    if w < 2:
-        raise ValueError(f"bridge width must be >= 2, got {w}")
-
-    qubits = tuple(range(w))
-    U_B = _build_path_graph_U_B(w)
-    chi_endpoint_extensions: dict[int, np.ndarray] = {
-        0: np.array([0], dtype=np.uint8),
-    }
-
-    if not intercode:
-        return Bridge(
-            width=w, qubits=qubits, U_B=U_B,
-            chi_endpoint_extensions=chi_endpoint_extensions,
-            intercode=False, aux_graph_edges=None, z_extensions=None,
-            basis=basis,
-        )
-
-    # Inter-code path (Ide §VII C)
-    G1_aux, edge_q_to_v_1 = _build_auxiliary_graph_from_F(g1.F)
-    vert_to_edge_1 = {uv: k for k, uv in edge_q_to_v_1.items()}
-    F1_mat = np.asarray(g1.F).astype(np.int_)
-    _, edge_q_to_v_1, vert_to_edge_1, _ = _cellulate_long_cycles(
-        G1_aux, dict(edge_q_to_v_1), dict(vert_to_edge_1), F1_mat,
-    )
-    aux_graph_edges = tuple(tuple(sorted(e)) for e in G1_aux.edges())
-
-    z_extensions: dict[int, np.ndarray] | None = None
-    if G1_aux.number_of_nodes() >= 2 and nx.is_connected(G1_aux):
-        edge_index_verts = {tuple(sorted(uv)): k for k, uv in edge_q_to_v_1.items()}
-        try:
-            T_s, P = _skip_tree(G1_aux, root=0, edge_index_verts=edge_index_verts)
-            label_inv = _label_inverse(P)
-            gamma, delta = _solve_chi_z_bridge_choices(T_s, label_inv)
-            z_extensions = {
-                int(c): np.asarray(delta, dtype=np.uint8).copy()
-                for c in edge_q_to_v_1
-            }
-        except (ValueError, IndexError, RecursionError):
-            z_extensions = None
-
-    return Bridge(
-        width=w, qubits=qubits, U_B=U_B,
-        chi_endpoint_extensions=chi_endpoint_extensions,
-        intercode=True,
-        aux_graph_edges=aux_graph_edges,
-        z_extensions=z_extensions,
-        basis=basis,
-    )
+    """Two-PPM bridge between gadgets. arXiv:2410.03628 §IV / §VII."""
+    raise NotImplementedError("rewritten in Task 7")

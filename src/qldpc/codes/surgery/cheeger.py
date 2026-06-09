@@ -30,7 +30,7 @@ class SurgeryLayout:
         c0_indices: Row indices (within H_Z of data code) of Z-checks adjacent
             to V_0 = C_0.
         F: Step-1 restriction matrix; shape (|C_0|, |V_0|).
-        G: Step-2 gauge-fix basis; rows span the left null space of F^T.
+        G: Step-2 gauge-fix basis; rows span the left null space of F.
     """
 
     num_data_qubits: int
@@ -328,7 +328,7 @@ def _reassemble_gadget_with_new_F(
     Boost-added κ' qubits (rows of F_aug beyond original C_0) are GAUGE qubits:
     they have no data-Z extension (no S_j in C_0 to extend). Their Z-stab
     contribution comes purely through the augmented gauge-fix matrix
-    G_aug = basis of left null space of F_aug^T.
+    G_aug = basis of left null space of F_aug.
     """
     field = augmented_F.__class__
     G_aug = _compute_gauge_fix(augmented_F)

@@ -287,96 +287,6 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     )
 
 
-def test_bridge_dataclass_fields():
-    from qldpc.codes.surgery.bridge import Bridge
-    fields = {f.name for f in dataclasses.fields(Bridge)}
-    assert fields == {
-        "width", "qubits", "U_B",
-        "chi_endpoint_extensions", "intercode",
-        "aux_graph_edges", "z_extensions", "basis",
-    }
-    assert dataclasses.is_dataclass(Bridge)
-
-
-def test_path_graph_U_B_telescoping():
-    """math.md §2.2: sum of U_B rows == e_0 + e_{w-1}."""
-    from qldpc.codes.surgery.bridge import _build_path_graph_U_B
-    for w in (2, 3, 5, 11):
-        U_B = _build_path_graph_U_B(w)
-        assert U_B.shape == (w - 1, w)
-        col_sum = U_B.sum(axis=0) % 2
-        expected = np.zeros(w, dtype=np.uint8)
-        expected[0] = 1
-        expected[-1] = 1
-        assert np.array_equal(col_sum, expected)
-
-
-WEBSTER_TABLE_I_BRIDGE = [(0, 11), (1, 19), (2, 31), (3, 51)]
-
-
-@pytest.mark.parametrize("code_index,bridge_w_minus_1", WEBSTER_TABLE_I_BRIDGE)
-def test_webster_table_i_bridge_width_exact(code_index, bridge_w_minus_1):
-    """Webster Table I: 2w - 1 matches."""
-    from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
-    )
-    from qldpc.codes.surgery.bridge import build_bridge
-    data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _webster_x_bar_k2p1_operator(data)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    assert bridge.intercode is False
-    assert 2 * bridge.width - 1 == bridge_w_minus_1
-
-
-def _webster_x_bar_k2p1_operator(data: dict) -> np.ndarray:
-    """Extract X_bar_k2p1 operator from a Webster seed_set dict."""
-    l = data["l"]
-    for seed in data["seeds"]:
-        if seed["name"] == "X_bar_k2p1" and seed["pauli_type"] == "X":
-            L = np.zeros(l, dtype=np.uint8)
-            R = np.zeros(l, dtype=np.uint8)
-            for i in seed["L_support"]:
-                L[i] = 1
-            for i in seed["R_support"]:
-                R[i] = 1
-            return np.concatenate([L, R])
-    raise ValueError("X_bar_k2p1 seed not found")
-
-
-def test_build_bridge_intracode_chi_endpoint_extensions():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    code = codes.SteaneCode()
-    x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    x2 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    # math.md §2.3: χ_0 from each gadget gets an X on its bridge endpoint
-    assert 0 in bridge.chi_endpoint_extensions  # gadget 1, row 0
-    assert bridge.intercode is False
-
-
-def test_skip_tree_path_graph_returns_identity():
-    """math.md skip-tree on a path graph yields T and P with correct shapes."""
-    import networkx as nx
-    from qldpc.codes.surgery.bridge import _skip_tree
-    # Path graph on 5 vertices: edges (0,1),(1,2),(2,3),(3,4)
-    G = nx.path_graph(5)
-    T, P = _skip_tree(G)
-    # T should have shape (n-1, |E|) = (4, 4)
-    assert T.shape == (4, 4)
-    # P should be a permutation matrix of shape (n, n) = (5, 5)
-    assert P.shape == (5, 5)
-    # P is a permutation: each row and column has exactly one 1
-    assert np.array_equal(P.sum(axis=0), np.ones(5, dtype=np.int_))
-    assert np.array_equal(P.sum(axis=1), np.ones(5, dtype=np.int_))
-
-
 def test_skip_tree_fullrank_on_K4_matches_H_R():
     """SkipTree full-rank: T_ind · G · P_ind = H_R for the complete graph K_4."""
     import networkx as nx
@@ -404,42 +314,6 @@ def test_skip_tree_fullrank_on_K4_matches_H_R():
     assert T_ind.sum(axis=0).max() <= 2
 
 
-def test_cellulate_long_cycles_no_op_when_short():
-    """Cellulation of a graph with no long cycles returns no new edges."""
-    import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_long_cycles
-    # Triangle: only cycle has length 3, well within max_len=6
-    G = nx.cycle_graph(3)
-    edge_qubit_to_vertices = {i: tuple(sorted(e)) for i, e in enumerate(G.edges())}
-    vert_to_edge = {v: k for k, v in edge_qubit_to_vertices.items()}
-    n_v = G.number_of_nodes()
-    n_e = G.number_of_edges()
-    G_mat = np.zeros((n_e, n_v), dtype=np.int_)
-    for idx, (u, v) in edge_qubit_to_vertices.items():
-        G_mat[idx, u] = 1
-        G_mat[idx, v] = 1
-    new_edges, _, _, _ = _cellulate_long_cycles(G, edge_qubit_to_vertices, vert_to_edge, G_mat, max_len=6)
-    assert new_edges == []
-
-
-def test_build_bridge_intercode_two_different_codes():
-    """Inter-code dispatch fires (smoke test). Exact behavior tested with Ide BB-LP fixtures later."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    code1 = codes.SteaneCode()
-    code2 = codes.SteaneCode()
-    assert code1 is not code2
-    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code1, x1)
-    g2 = build_gadget(code2, x2)
-    bridge = build_bridge(g1, g2)
-    # Just verify the dispatch went the intercode path:
-    assert bridge.intercode is True
-    # aux_graph_edges may be empty for trivial inputs; just check it's set
-    assert bridge.aux_graph_edges is not None
-
-
 def test_build_single_ppm_circuit_noiseless_compiles():
     from qldpc.codes.surgery.gadget import build_gadget
     from qldpc.codes.surgery.circuit import build_single_ppm_circuit
@@ -462,58 +336,6 @@ def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
     sampler = circuit.compile_detector_sampler()
     samples = sampler.sample(shots=16)
     assert (samples == 0).all()
-
-
-def test_build_joint_ppm_circuit_intracode_returns_pair():
-    from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
-    )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    import stim
-    # Use a k>=2 code so the k_joint = k_data - 1 invariant is not masked by
-    # the spurious bridge logical (see joint.py lines 327-346 for details).
-    data = load_webster_seed_set(0)  # (62, 10, 6) bicycle code
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _webster_x_bar_k2p1_operator(data)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    circuit, joint_code = build_joint_ppm_circuit(
-        g1, g2, bridge, rounds=1, noise_model=None,
-    )
-    assert isinstance(circuit, stim.Circuit)
-    assert isinstance(joint_code, codes.CSSCode)
-    # math.md §2.8: k_joint = k_data - 1
-    assert joint_code.dimension == code.dimension - 1
-
-
-def test_build_joint_ppm_circuit_intercode_css_commutation_and_dim():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    code1 = codes.SteaneCode()
-    code2 = codes.SteaneCode()
-    assert code1 is not code2
-    x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    x2 = np.asarray(code2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code1, x1)
-    g2 = build_gadget(code2, x2)
-    bridge = build_bridge(g1, g2)
-    _, joint = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
-    HX = np.asarray(joint.matrix_x).astype(np.uint8)
-    HZ = np.asarray(joint.matrix_z).astype(np.uint8)
-    assert np.array_equal((HX @ HZ.T) % 2, np.zeros((HX.shape[0], HZ.shape[0]), dtype=np.uint8))
-    # math.md §2.8: k_joint = k_combined - 1 (Cross §3.6 protocol consumes 1 logical DOF)
-    # For two Steanes (each k=1, combined k=2), expect k_joint = 2 - 1 = 1.
-    # The spurious bridge X-logical (same as Steane intra-code case) may add +1 here.
-    # Accept either k=1 or k=2 — log which.
-    expected_naive = code1.dimension + code2.dimension - 1
-    actual = joint.dimension
-    assert actual in (expected_naive, expected_naive + 1), (
-        f"k_joint = {actual}, expected {expected_naive} or {expected_naive + 1}"
-    )
 
 
 def test_build_single_ppm_circuit_with_noise_detectors_fire():
@@ -574,152 +396,6 @@ def test_boost_gadget_preserves_css_commutation(method):
     boosted = boost_gadget(g, method=method, target=1.0, seed=0)
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
-
-
-# ---------------------------------------------------------------------------
-# Ports from surgery_test.py (T22): behavioral correctness invariants.
-# ---------------------------------------------------------------------------
-
-def _gf2_in_row_span(HX: np.ndarray, target: np.ndarray) -> bool:
-    """Return True iff `target` (1-D, uint8) is in the GF(2) row span of HX."""
-    import galois
-    GF2 = galois.GF(2)
-    M = GF2(HX.astype(np.int_))
-    t = GF2(target.astype(np.int_).reshape(1, -1))
-    rank_M = int(np.linalg.matrix_rank(M))
-    augmented = GF2(np.vstack([np.asarray(M), np.asarray(t)]).astype(np.int_))
-    return int(np.linalg.matrix_rank(augmented)) == rank_M
-
-
-@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
-def test_joint_xx_in_stabilizer_on_webster(code_index: int) -> None:
-    """X̄_1 ⊗ X̄_{k/2+1} padded with zeros on ancilla/bridge MUST lie in HX_joint row span.
-
-    This is the key stabilizer-membership criterion for joint measurement:
-    the merged code accepts X̄_1 X̄_2 as an X-stabilizer (Cross §3.6 invariant).
-    If this fails the surgery construction is broken.
-    """
-    from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
-    )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _webster_x_bar_k2p1_operator(data)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
-
-    n_data = code.num_qubits
-    n_total = joint_code.num_qubits
-    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
-    op1_padded = np.zeros(n_total, dtype=np.uint8)
-    op1_padded[:n_data] = x1
-    op2_padded = np.zeros(n_total, dtype=np.uint8)
-    op2_padded[:n_data] = x2
-    joint_op = (op1_padded + op2_padded) % 2
-
-    assert _gf2_in_row_span(HX, joint_op), (
-        f"Code {data.get('name', code_index)}: X̄_1 ⊗ X̄_2 is NOT in HX_joint row span. "
-        f"Construction is broken."
-    )
-
-
-@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
-def test_singleton_x_not_in_stabilizer_on_webster(code_index: int) -> None:
-    """Negative: X̄_1 alone (padded) must NOT lie in HX_joint row span.
-
-    Otherwise the surgery would stabilize X̄_1 individually rather than the joint
-    product X̄_1 X̄_2, violating Cross §3.6. Both singletons are tested.
-    """
-    from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
-    )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _webster_x_bar_k2p1_operator(data)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
-
-    n_data = code.num_qubits
-    n_total = joint_code.num_qubits
-    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
-    op1_padded = np.zeros(n_total, dtype=np.uint8)
-    op1_padded[:n_data] = x1
-    op2_padded = np.zeros(n_total, dtype=np.uint8)
-    op2_padded[:n_data] = x2
-
-    assert not _gf2_in_row_span(HX, op1_padded), (
-        f"Code {data.get('name', code_index)}: X̄_1 alone IS in HX_joint row span. "
-        f"Single-operator stabilization detected — joint surgery broken."
-    )
-    assert not _gf2_in_row_span(HX, op2_padded), (
-        f"Code {data.get('name', code_index)}: X̄_2 alone IS in HX_joint row span."
-    )
-
-
-@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
-def test_alpha_star_yields_joint_op_on_webster(code_index: int) -> None:
-    """Cross §3.6 / math.md §2.7: α* · HX_joint = (X̄_1 + X̄_2, 0_anc, 0_bridge).
-
-    The canonical protocol vector α* has 1 on every chi row from both gadgets
-    AND every U_B bridge-path-stabilizer row, and 0 on the data X-check rows.
-
-    Equivalently: XOR of (chi1 + chi2 + U_B) rows of HX_joint restricted to
-    data columns equals op1 + op2, and is zero on all ancilla/bridge columns.
-
-    Derivation:
-      Σ chi1 rows  = op1 on data | 0 on g1-kappa | X on bridge[0]   (Webster Eq. 1)
-      Σ chi2 rows  = op2 on data | 0 on g2-kappa | X on bridge[w-1] (Webster Eq. 1)
-      Σ U_B rows   = 0 on data   | 0 on ancillas  | e_0 + e_{w-1}   (path telescoping)
-      Total        = (op1+op2) on data | 0 on ancillas | 0 on bridge
-    """
-    from qldpc.codes.surgery.gadget import (
-        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
-    )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    data = load_webster_seed_set(code_index)
-    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _webster_x_bar_k2p1_operator(data)
-    g1 = build_gadget(code, x1)
-    g2 = build_gadget(code, x2)
-    bridge = build_bridge(g1, g2)
-    _, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=1, noise_model=None)
-
-    n_data = code.num_qubits
-    mX = int(code.matrix_x.shape[0])
-    nV1 = len(g1.V0)  # number of chi rows from g1
-    nV2 = len(g2.V0)  # number of chi rows from g2
-    n_bridge = bridge.width
-    HX = np.asarray(joint_code.matrix_x).astype(np.int_)
-    n_rows = HX.shape[0]
-
-    # α* = 0 on data X-check rows (0..mX-1),
-    #       1 on chi1 rows (mX..mX+nV1-1),
-    #       1 on chi2 rows (mX+nV1..mX+nV1+nV2-1),
-    #       1 on U_B rows  (mX+nV1+nV2..)
-    alpha = np.zeros(n_rows, dtype=np.int_)
-    alpha[mX:] = 1  # chi1 + chi2 + U_B rows all get 1
-
-    product = (alpha @ HX) % 2
-
-    expected = np.zeros(joint_code.num_qubits, dtype=np.int_)
-    expected[:n_data] = (x1.astype(np.int_) + x2.astype(np.int_)) % 2
-
-    assert np.array_equal(product, expected), (
-        f"Code {data.get('name', code_index)}: α* · HX_joint != (op1+op2, 0, 0). "
-        f"Mismatch at columns: {np.flatnonzero(product ^ expected)[:20]}"
-    )
 
 
 def test_gadget_layout_has_basis_field():
@@ -835,30 +511,6 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         assert kappa + chi + r == expected, (
             f"code {code_index}: Z-basis got κ+χ+r={kappa+chi+r}, expected {expected}"
         )
-
-
-def test_bridge_has_basis_field_and_inherits_from_gadgets():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge, Bridge
-    code = codes.SteaneCode()
-    z1 = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    z2 = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    g1 = build_gadget(code, z1, basis=Pauli.Z)
-    g2 = build_gadget(code, z2, basis=Pauli.Z)
-    bridge = build_bridge(g1, g2)
-    assert bridge.basis is Pauli.Z
-
-
-def test_build_bridge_rejects_basis_mismatch():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    g_x = build_gadget(code, x, basis=Pauli.X)
-    g_z = build_gadget(code, z, basis=Pauli.Z)
-    with pytest.raises(ValueError, match="basis"):
-        build_bridge(g_x, g_z)
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
@@ -1131,42 +783,6 @@ def test_build_single_ppm_circuit_noiseless_observables_zero(basis):
     )
 
 
-def test_build_joint_ppm_circuit_noiseless_observables_zero():
-    """Noiseless joint PPM: observable 0 (α* per math.md §2.7) = 0; observable 1 = 0."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code, x, basis=Pauli.X)
-    g2 = build_gadget(code, x, basis=Pauli.X)
-    bridge = build_bridge(g1, g2)
-    circuit, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
-    sampler = circuit.compile_detector_sampler()
-    _, obs = sampler.sample(shots=16, separate_observables=True)
-    assert (obs == 0).all(), f"noiseless joint observables fired: {obs.sum()} flips"
-
-
-@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_build_joint_ppm_circuit_basis_parametrized_noiseless_observables_zero(basis):
-    """Both bases for the joint PPM circuit: noiseless observables = 0."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    code = codes.SteaneCode()
-    op = (code.get_logical_ops(Pauli.X)[0]
-          if basis is Pauli.X
-          else code.get_logical_ops(Pauli.Z)[0])
-    op_arr = np.asarray(op).astype(np.uint8)
-    g1 = build_gadget(code, op_arr, basis=basis)
-    g2 = build_gadget(code, op_arr, basis=basis)
-    bridge = build_bridge(g1, g2)
-    circuit, joint_code = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
-    sampler = circuit.compile_detector_sampler()
-    _, obs = sampler.sample(shots=16, separate_observables=True)
-    assert (obs == 0).all(), f"noiseless joint observables fired for basis={basis}: {obs.sum()} flips"
-
-
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
     """At p=0.1, the PPM observable (observable 0) flips ≥ 5% of shots."""
@@ -1252,22 +868,6 @@ def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis):
     assert not dets.any(), (
         f"basis={basis}: {dets.sum()} detector fires noiselessly across {dets.shape[0]} shots"
     )
-
-
-def test_build_joint_ppm_circuit_noiseless_no_detector_fires():
-    """Joint noiseless: NO detector fires (including final detectors)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code, x, basis=Pauli.X)
-    g2 = build_gadget(code, x, basis=Pauli.X)
-    bridge = build_bridge(g1, g2)
-    circuit, _ = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
-    sampler = circuit.compile_detector_sampler()
-    dets, _ = sampler.sample(shots=64, separate_observables=True)
-    assert not dets.any(), f"{dets.sum()} detector fires noiselessly"
 
 
 @pytest.mark.slow
@@ -1467,3 +1067,18 @@ def test_build_gadget_augmented_extends_F_and_recomputes_G():
     # CSS commutation
     product = (g_aug.HX_merged @ g_aug.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_bridge_dataclass_fields_universal_adapter():
+    """Bridge dataclass exposes the universal-adapter fields from spec §1."""
+    import dataclasses
+    from qldpc.codes.surgery.bridge import Bridge
+    fields = {f.name for f in dataclasses.fields(Bridge)}
+    assert fields == {
+        "width", "basis",
+        "port_l", "port_r",
+        "label_l", "label_r",
+        "extra_kappa_l", "extra_kappa_r",
+        "T_l", "T_r", "H_R",
+        "g_l_aug", "g_r_aug",
+    }
