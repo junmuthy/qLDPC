@@ -109,6 +109,8 @@ def _step3_assemble(
     else:
         F_tilde = np.zeros((mX, nC), dtype=np.uint8)
     for k, j in enumerate(C0):
+        if j < 0:
+            continue        # sentinel for extra-κ rows from build_gadget_augmented
         F_tilde[j, k] = 1
 
     if basis is Pauli.X:
@@ -162,6 +164,58 @@ def build_gadget(
     return GadgetLayout(
         code=code, x=x, V0=V0, C0=C0, F=F, G=G,
         HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
+        basis=basis,
+    )
+
+
+def build_gadget_augmented(
+    code: CSSCode,
+    x: np.ndarray,
+    F_extra: np.ndarray,
+    *,
+    basis: PauliXZ = Pauli.X,
+) -> GadgetLayout:
+    """Rebuild a GadgetLayout with F augmented by extra weight-2 rows.
+
+    Each row of ``F_extra`` has weight 2 and corresponds to a new κ qubit not
+    backed by any original Z-check (basis=X) or X-check (basis=Z). The function:
+
+    1. Stacks F_aug = [F; F_extra].
+    2. Recomputes G_aug = ker(F_aug^T) via _step2_gauge_fix.
+    3. Calls _step3_assemble with the original V_0 / C_0 plus the new κ rows.
+       The extra columns of tilde_F are all zero (no original check sits on the
+       new κ qubits).
+
+    The returned ``GadgetLayout.C0`` and ``kappa_qubits`` are extended to cover
+    the new κ qubits; the new κ indices come after the original ones.
+    """
+    x = np.asarray(x).astype(np.uint8)
+    V0, C0, F = _step1_restriction(code, x, basis=basis)
+    F_extra = np.asarray(F_extra).astype(np.uint8)
+    if F_extra.shape[1] != len(V0):
+        raise ValueError(
+            f"F_extra has {F_extra.shape[1]} columns; expected {len(V0)} (= |V_0|)"
+        )
+    if F_extra.size and not np.all(F_extra.sum(axis=1) == 2):
+        bad = np.flatnonzero(F_extra.sum(axis=1) != 2).tolist()
+        raise ValueError(f"F_extra rows {bad} have weight != 2; required weight 2.")
+
+    F_aug = np.vstack([F, F_extra]).astype(np.uint8)
+    G_aug = _step2_gauge_fix(F_aug)
+
+    # _step3_assemble computes tilde_F by indexing into C_0; we need an extended
+    # C_0_aug that has the new rows as sentinels (their tilde_F columns must be 0).
+    # Trick: pass C_0_aug = C_0 + (-1, -1, ...) sentinels which fall outside [0, mZ),
+    # so the tilde_F loop sets nothing for those positions.
+    n_extra = F_extra.shape[0]
+    C0_aug = tuple(C0) + tuple([-1] * n_extra)
+    HX_aug, HZ_aug = _step3_assemble(
+        code, V0, C0_aug, F_aug, G_aug, basis=basis,
+    )
+    kappa_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(C0_aug)))
+    return GadgetLayout(
+        code=code, x=x, V0=V0, C0=C0_aug, F=F_aug, G=G_aug,
+        HX_merged=HX_aug, HZ_merged=HZ_aug, kappa_qubits=kappa_qubits_aug,
         basis=basis,
     )
 

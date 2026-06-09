@@ -1441,3 +1441,29 @@ def test_cellulate_raises_when_no_port_chord_available():
     # Only cycle[0] is a port → no port-port pair exists in the cycle
     with pytest.raises(RuntimeError, match=r"No port-port chord"):
         _cellulate_strict(G_aux, ports=(0,), max_len=6)
+
+
+def test_build_gadget_augmented_extends_F_and_recomputes_G():
+    """Augmenting with one weight-2 row adds a column to merged matrices and recomputes G."""
+    from qldpc.codes.surgery.gadget import build_gadget, build_gadget_augmented
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    # Pick two ports in V_0; create one extra weight-2 row connecting them
+    v0_a, v0_b = g.V0[0], g.V0[1]
+    extra_F = np.zeros((1, len(g.V0)), dtype=np.uint8)
+    idx_a = g.V0.index(v0_a)
+    idx_b = g.V0.index(v0_b)
+    extra_F[0, idx_a] = 1
+    extra_F[0, idx_b] = 1
+    g_aug = build_gadget_augmented(code, x, extra_F, basis=Pauli.X)
+
+    # F_aug = [F | extra_F] vertically stacked
+    assert g_aug.F.shape == (g.F.shape[0] + 1, g.F.shape[1])
+    assert np.array_equal(g_aug.F[: g.F.shape[0]], g.F)
+    assert np.array_equal(g_aug.F[g.F.shape[0]:], extra_F)
+    # HX_merged has one extra column (one extra κ qubit); same number of rows
+    assert g_aug.HX_merged.shape == (g.HX_merged.shape[0], g.HX_merged.shape[1] + 1)
+    # CSS commutation
+    product = (g_aug.HX_merged @ g_aug.HZ_merged.T) % 2
+    assert np.array_equal(product, np.zeros_like(product))
