@@ -251,21 +251,26 @@ def test_build_generalised_bicycle_code_constructs_css():
 WEBSTER_TABLE_I_KAPPA_CHI_R = [(0, 19), (1, 31), (2, 49), (3, 79)]
 
 
-def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
-    """Extract the X_bar_1 operator from a Webster seed_set dict as a 2l-vector.
+def _webster_x_bar_operator(data: dict, name: str = "X_bar_1") -> np.ndarray:
+    """Extract the named X-type logical operator from a Webster seed_set dict.
 
     L_support and R_support are sparse index lists (positions within each l-half
-    that are set to 1). This converts them to a dense binary vector of length 2l.
+    that are set to 1). Returns a dense binary vector of length 2l.
     """
     l = data["l"]
     for seed in data["seeds"]:
-        if seed["name"] == "X_bar_1" and seed["pauli_type"] == "X":
+        if seed["name"] == name and seed["pauli_type"] == "X":
             v_L = np.zeros(l, dtype=np.uint8)
             v_L[seed["L_support"]] = 1
             v_R = np.zeros(l, dtype=np.uint8)
             v_R[seed["R_support"]] = 1
             return np.concatenate([v_L, v_R])
-    raise ValueError("X_bar_1 seed not found")
+    raise ValueError(f"{name!r} seed not found")
+
+
+def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
+    """Back-compat: returns X_bar_1; prefer _webster_x_bar_operator."""
+    return _webster_x_bar_operator(data, "X_bar_1")
 
 
 @pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_KAPPA_CHI_R)
@@ -1255,23 +1260,10 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
 
-    def _x_bar_k2p1(d: dict) -> np.ndarray:
-        l = d["l"]
-        for seed in d["seeds"]:
-            if seed["name"] == "X_bar_k2p1" and seed["pauli_type"] == "X":
-                L = np.zeros(l, dtype=np.uint8)
-                R = np.zeros(l, dtype=np.uint8)
-                for i in seed["L_support"]:
-                    L[i] = 1
-                for i in seed["R_support"]:
-                    R[i] = 1
-                return np.concatenate([L, R])
-        raise ValueError("X_bar_k2p1 not found")
-
     data = load_webster_seed_set(0)
     code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
-    x2 = _x_bar_k2p1(data)
+    x1 = _webster_x_bar_operator(data, "X_bar_1")
+    x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
     g_l = build_gadget(code, x1, basis=Pauli.X)
     g_r = build_gadget(code, x2, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
