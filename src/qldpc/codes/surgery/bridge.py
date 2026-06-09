@@ -169,18 +169,28 @@ def _cellulate_strict(
             return added
         cycle = long_cycles[0]
         n = len(cycle)
-        # Scan linearly from cycle[0] for the first port-port chord we can add.
-        for offset in range(1, n):
-            u, v = cycle[0], cycle[offset]
-            if u not in ports_set or v not in ports_set:
+        # Scan all (i, j) cycle-vertex pairs for the first port-port chord we
+        # can add. Anchoring on cycle[0] alone would fail spuriously when
+        # cycle[0] ∉ ports_set, even though valid chords exist elsewhere.
+        chord_found = False
+        for i in range(n):
+            if chord_found:
+                break
+            u_raw = cycle[i]
+            if u_raw not in ports_set:
                 continue
-            u, v = sorted((u, v))
-            if G_aux.has_edge(u, v):
-                continue
-            G_aux.add_edge(u, v)
-            added.append((u, v))
-            break
-        else:
+            for j in range(i + 1, n):
+                v_raw = cycle[j]
+                if v_raw not in ports_set:
+                    continue
+                u, v = sorted((u_raw, v_raw))
+                if G_aux.has_edge(u, v):
+                    continue
+                G_aux.add_edge(u, v)
+                added.append((u, v))
+                chord_found = True
+                break
+        if not chord_found:
             raise RuntimeError(
                 f"No port-port chord found to cellulate cycle of length {n}; "
                 f"ports={ports!r}, cycle={cycle!r}"

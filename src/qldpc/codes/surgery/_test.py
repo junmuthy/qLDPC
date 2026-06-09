@@ -1473,3 +1473,59 @@ def test_joint_ppm_ler_monotone_steane_intercode():
     # LER should be non-increasing as p decreases (tolerance 1.3× to absorb sampling noise)
     assert lers[0] >= lers[1] / 1.3, f"LER not monotone: {lers}"
     assert lers[1] >= lers[2] / 1.3, f"LER not monotone: {lers}"
+
+
+@pytest.mark.parametrize("code_index", [0, 1, 2, 3])
+def test_joint_xx_in_stabilizer_on_webster_intracode(code_index):
+    """Webster BB codes 0..3 intra-code: (x_1, x_2 padded, 0...) is in rowspan(H_X^merged).
+
+    Replaces deleted path-graph tests; pins the SkipTree adapter construction across
+    the full Webster Table I code family rather than just code 0.
+    """
+    import galois
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    GF2 = galois.GF(2)
+    data = load_webster_seed_set(code_index)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_operator(data, "X_bar_1")
+    x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    joint = np.zeros(HX.shape[1], dtype=np.int_)
+    n = code.num_qudits
+    joint[:n] = (x1 + x2) % 2
+    augmented = np.vstack([HX, joint.reshape(1, -1)])
+    assert np.linalg.matrix_rank(GF2(HX.tolist())) == np.linalg.matrix_rank(
+        GF2(augmented.tolist())
+    )
+
+
+def test_build_joint_ppm_circuit_intracode_noiseless_observables_zero():
+    """Intra-code Webster joint X̄_1·X̄_{k/2+1}: noiseless detectors + observables = 0.
+
+    Replaces deleted path-graph noiseless intracode tests.
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_operator(data, "X_bar_1")
+    x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=2)
+    sampler = circuit.compile_detector_sampler()
+    dets, obs = sampler.sample(8, separate_observables=True)
+    assert dets.sum() == 0, "noiseless intra-code: detectors should not fire"
+    assert obs.sum() == 0, "noiseless intra-code: observables should be 0"

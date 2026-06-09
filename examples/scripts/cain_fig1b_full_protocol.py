@@ -124,12 +124,10 @@ def build_cain_x_basis_circuit(
     # These have deterministic +1 outcome under |+⟩^n_data init.
     x_pure_data_mask = ~np.any(HX[:, n_data:] != 0, axis=1)
 
-    # Target operator extraction: per Cross §3.6 formula α* = (0 on
-    # data X-stabs, 1 on chi rows + U_B). For our joint code, the chi
-    # rows are HX rows with X support on ancilla but NOT on bridge-only.
-    # Simplest: target = XOR of ALL non-pure-data X-stabs = XOR of HX
-    # rows that touch ancilla or bridge.
-    # By Cross §3.6 formula, this XOR equals X̄_1 X̄_2 eigenvalue of data.
+    # Target operator extraction: under the universal adapter (arXiv:2410.03628 §IV),
+    # α* = Σ χ^(l) + Σ χ^(r) — no separate U_B telescoping. Operationally, the chi
+    # rows are HX rows with support on ancilla qubits (not pure data). Their XOR
+    # over rounds yields the joint X̄_1 X̄_2 eigenvalue of the data block.
     x_target_mask = ~x_pure_data_mask
 
     data_qubits = list(range(n_data))
