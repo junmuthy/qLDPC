@@ -7,14 +7,14 @@ X-basis experiment:
   - k + t logical observables:
       * k observables = final M_X parities on supp(X̄_i) for each data X-logical
       * t observables = "target operators" = first-cycle parities of merged-code
-        X-checks (chi rows + U_B path stabs). For our t=1 surgery, this is
-        XOR of all first-round chi^(1) + chi^(2) + U_B X-stab outcomes,
-        which by Cross §3.6 formula equals the X̄_1 X̄_2 eigenvalue.
+        X-checks (chi rows + adapter H_R rows). For our t=1 surgery, this is
+        XOR of all first-round chi^(1) + chi^(2) + adapter H_R-stab outcomes,
+        which by Cross §3.6 / arXiv:2410.03628 §IV formula equals the X̄_1 X̄_2 eigenvalue.
 
 Detectors:
   - First round X-stabs that touch ONLY data qubits: +1 deterministic given
     |+⟩^n_data init → 1-rec detector.
-  - All other first-round X-stabs (chi, U_B): outcomes are random (ancilla |0⟩
+  - All other first-round X-stabs (chi, H_R adapter rows): outcomes are random (ancilla |0⟩
     is not X-eigenstate) → NO first-round detector.
   - Round 2..R X-stabs: 2-rec detector comparing to previous round.
   - First round Z-stabs: random outcomes (|+⟩^n_data is not Z-eigenstate),
