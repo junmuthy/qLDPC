@@ -376,6 +376,23 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
     assert samples.any()  # at least one detector fires under noise
 
 
+def test_cheeger_constant_matches_boost_target():
+    """cheeger_constant(g) reports the Webster boundary Cheeger; boost raises it."""
+    from qldpc.codes.surgery import build_gadget, boost_gadget, cheeger_constant
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    h0 = cheeger_constant(g)
+    assert h0 >= 0
+    # Boosting to a higher target raises h(F) to (at least) that target.
+    g_aug = boost_gadget(g, method="combinatorial", target=2.0, max_extra_qubits=30, seed=7)
+    h1 = cheeger_constant(g_aug)
+    assert h1 >= 2.0 - 1e-9, f"boost to 2.0 produced h={h1}"
+    # No-op contract: if h0 already meets target, boost adds no rows.
+    g_noop = boost_gadget(g, method="combinatorial", target=h0, max_extra_qubits=30, seed=7)
+    assert g_noop.F.shape[0] == g.F.shape[0], "boost to current h should be a no-op"
+
+
 def test_boost_gadget_dispatches_to_three_methods():
     from qldpc.codes.surgery.gadget import (
         build_gadget, GadgetLayout,

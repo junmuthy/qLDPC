@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from qldpc.codes.common import CSSCode
-from .gadget import _assemble_HX_L1
+from .gadget import GadgetLayout, _assemble_HX_L1
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -174,6 +174,25 @@ def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
     eigenvalues = np.linalg.eigvalsh(M)
     lambda_2 = float(eigenvalues[1])
     return max(0.0, lambda_2 / 2.0)
+
+
+def cheeger_constant(g: GadgetLayout) -> float:
+    """Boundary Cheeger constant of a gadget's F matrix (Webster §II.A Def 1).
+
+    Returns the exact h(F) when |V_0| ≤ 26 (Gray-code subset enumeration),
+    otherwise the spectral lower bound. Either way:
+
+        h(g) ≥ 1   ⇒   surgery on this gadget preserves code distance
+                       (Webster Lemma 9; structural argument, no decoder).
+        h(g) <  1   ⇒   distance may degrade; consider boost_gadget(g, target=1.0).
+
+    Use as a pre-flight check before deciding whether to call boost_gadget.
+    """
+    F = galois.GF(2)(np.asarray(g.F).astype(int))
+    if F.shape[1] <= 26:
+        h, _ = _exact_boundary_cheeger(F)
+        return h
+    return _spectral_cheeger_lower_bound(F)
 
 
 def boost_gadget_cheeger(
