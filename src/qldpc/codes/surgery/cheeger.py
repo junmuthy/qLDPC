@@ -11,44 +11,36 @@ import numpy.typing as npt
 from qldpc.codes.common import CSSCode
 
 
-# ---------------------------------------------------------------------------
-# SurgeryLayout and supporting helpers (inlined from the former layered.py so
-# that cheeger.py is self-contained after the legacy modules were removed).
-# ---------------------------------------------------------------------------
-
 @dataclasses.dataclass(frozen=True, eq=False)
 class SurgeryLayout:
-    """Provenance of qubits and checks in a merged surgery code.
+    """Provenance of qubits and checks in a merged L=1 surgery code.
 
     Internal type used by the boost dispatcher and the legacy-layout bridge
     (_gadget_to_legacy_layout / _legacy_to_gadget).
 
     Attributes:
         num_data_qubits: Number of qubits in the original data code.
-        num_ancilla_qubits: Total ancilla qubits across all L layers.
-        num_layers: L. Always odd, >= 1.
-        qubit_layer: Length (num_data + num_ancilla) array. Value 0 marks a
-            data qubit; values 1..L mark the layer index of an ancilla qubit.
+        num_ancilla_qubits: Number of κ ancilla qubits (= |C_0| + boost extras).
+        num_data_x_checks: Number of rows of HX_merged that are "data" rows
+            (i.e. the original X-checks). Boost code uses this to slice off
+            data rows from the merged check matrix when extracting the data
+            block.
+        num_data_z_checks: Number of rows of HZ_merged that are "data" rows.
         v0_indices: Indices (within data qubits) of supp(X̄_M) = V_0.
         c0_indices: Row indices (within H_Z of data code) of Z-checks adjacent
             to V_0 = C_0.
         F: Step-1 restriction matrix; shape (|C_0|, |V_0|).
-        G: Step-4 gauge-fix basis; rows span the left null space of F;
-            shape (rank(left_null(F)), |C_0|).
-        hx_row_kind: Length (num_x_checks_merged) string array.
-        hz_row_kind: Length (num_z_checks_merged) string array.
+        G: Step-2 gauge-fix basis; rows span the left null space of F^T.
     """
 
     num_data_qubits: int
     num_ancilla_qubits: int
-    num_layers: int
-    qubit_layer: npt.NDArray[np.int_]
+    num_data_x_checks: int
+    num_data_z_checks: int
     v0_indices: npt.NDArray[np.int_]
     c0_indices: npt.NDArray[np.int_]
     F: galois.FieldArray
     G: galois.FieldArray
-    hx_row_kind: npt.NDArray
-    hz_row_kind: npt.NDArray
 
 
 def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
@@ -56,150 +48,52 @@ def _compute_gauge_fix(F: galois.FieldArray) -> galois.FieldArray:
     return F.left_null_space()
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
-class _LayeredBlocks:
-    """Internal structural summary of an L-layer ancilla system."""
-
-    F: galois.FieldArray
-    F_T: galois.FieldArray
-    num_layers: int
-    n_v0: int
-    n_c0: int
-
-    @property
-    def ancilla_layer_sizes(self) -> list[int]:
-        return [
-            self.n_c0 if i % 2 == 1 else self.n_v0
-            for i in range(1, self.num_layers + 1)
-        ]
-
-    @property
-    def total_ancilla(self) -> int:
-        return sum(self.ancilla_layer_sizes)
-
-    def ancilla_col_slice(self, layer: int) -> slice:
-        if layer < 1 or layer > self.num_layers:
-            raise IndexError(f"layer must be in 1..{self.num_layers}, got {layer}")
-        offset = sum(self.ancilla_layer_sizes[: layer - 1])
-        size = self.ancilla_layer_sizes[layer - 1]
-        return slice(offset, offset + size)
-
-
-def _build_layered_blocks(F: galois.FieldArray, num_layers: int) -> _LayeredBlocks:
-    return _LayeredBlocks(F=F, F_T=F.T, num_layers=num_layers,
-                          n_v0=int(F.shape[1]), n_c0=int(F.shape[0]))
-
-
 def _assemble_merged_HX(
     data_code: CSSCode,
-    blocks: _LayeredBlocks,
+    F: galois.FieldArray,
     v0_indices: np.ndarray,
 ) -> galois.FieldArray:
-    """Assemble the merged H_X (X-checks) for the layered surgery code."""
+    """Assemble the merged H_X for L=1 surgery: [[HX_data, 0], [E_V0, F^T]]."""
     field = data_code.field
     n_data = data_code.num_qubits
-    n_merged = n_data + blocks.total_ancilla
+    n_v0 = int(F.shape[1])
+    n_c0 = int(F.shape[0])
+    n_merged = n_data + n_c0
+
     hx = data_code.matrix_x
     n_x_data = int(hx.shape[0])
-    old_x = field.Zeros((n_x_data, n_merged))
-    old_x[:, :n_data] = hx
-    I_v0 = field.Identity(blocks.n_v0)
-    rows_per_layer = []
-    for i in range(1, blocks.num_layers + 1, 2):
-        row_block = field.Zeros((blocks.n_v0, n_merged))
-        if i == 1:
-            row_block[np.arange(blocks.n_v0), v0_indices] = 1
-        else:
-            prev_slice = blocks.ancilla_col_slice(i - 1)
-            row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_v0
-        ci_slice = blocks.ancilla_col_slice(i)
-        row_block[:, n_data + ci_slice.start : n_data + ci_slice.stop] = blocks.F_T
-        if i + 1 <= blocks.num_layers:
-            next_slice = blocks.ancilla_col_slice(i + 1)
-            row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_v0
-        rows_per_layer.append(row_block)
-    return field(np.vstack([old_x, *rows_per_layer]))
+    top_block = field.Zeros((n_x_data, n_merged))
+    top_block[:, :n_data] = hx
 
+    chi_block = field.Zeros((n_v0, n_merged))
+    chi_block[np.arange(n_v0), v0_indices] = 1
+    chi_block[:, n_data:] = F.T
 
-def _assemble_merged_HZ(
-    data_code: CSSCode,
-    blocks: _LayeredBlocks,
-    G: galois.FieldArray,
-    c0_indices: np.ndarray,
-) -> galois.FieldArray:
-    """Assemble the merged H_Z (Z-checks) for the layered surgery code."""
-    field = data_code.field
-    n_data = data_code.num_qubits
-    n_merged = n_data + blocks.total_ancilla
-    hz = data_code.matrix_z
-    n_z_data = int(hz.shape[0])
-    old_z = field.Zeros((n_z_data, n_merged))
-    old_z[:, :n_data] = hz
-    c1_slice = blocks.ancilla_col_slice(1)
-    I_c0 = field.Identity(blocks.n_c0)
-    old_z[c0_indices, n_data + c1_slice.start : n_data + c1_slice.stop] = I_c0
-    even_rows = []
-    for i in range(2, blocks.num_layers, 2):
-        row_block = field.Zeros((blocks.n_c0, n_merged))
-        prev_slice = blocks.ancilla_col_slice(i - 1)
-        cur_slice = blocks.ancilla_col_slice(i)
-        next_slice = blocks.ancilla_col_slice(i + 1)
-        row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_c0
-        row_block[:, n_data + cur_slice.start : n_data + cur_slice.stop] = blocks.F
-        row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_c0
-        even_rows.append(row_block)
-    gauge_rows: list[galois.FieldArray] = []
-    if G.shape[0] > 0:
-        gf = field.Zeros((G.shape[0], n_merged))
-        cL_slice = blocks.ancilla_col_slice(blocks.num_layers)
-        gf[:, n_data + cL_slice.start : n_data + cL_slice.stop] = G
-        gauge_rows.append(gf)
-    return field(np.vstack([old_z, *even_rows, *gauge_rows]))
+    return field(np.vstack([top_block, chi_block]))
 
 
 def _build_layout(
     data_code: CSSCode,
-    blocks: _LayeredBlocks,
+    F: galois.FieldArray,
     G: galois.FieldArray,
     v0_indices: np.ndarray,
     c0_indices: np.ndarray,
-    F: galois.FieldArray,
 ) -> SurgeryLayout:
-    """Assemble SurgeryLayout from the building blocks."""
+    """Assemble SurgeryLayout from the building blocks (L=1)."""
     n_data = data_code.num_qubits
-    n_ancilla = blocks.total_ancilla
-    qubit_layer = np.zeros(n_data + n_ancilla, dtype=np.int_)
-    for i in range(1, blocks.num_layers + 1):
-        slc = blocks.ancilla_col_slice(i)
-        qubit_layer[n_data + slc.start : n_data + slc.stop] = i
-    n_x_data = data_code.matrix_x.shape[0]
-    hx_labels: list[str] = ["data"] * n_x_data
-    for i in range(1, blocks.num_layers + 1, 2):
-        hx_labels.extend([f"ancilla_L{i}"] * blocks.n_v0)
-    hx_row_kind = np.array(hx_labels, dtype=object)
-    n_z_data = data_code.matrix_z.shape[0]
-    hz_labels: list[str] = ["data"] * n_z_data
-    for i in range(2, blocks.num_layers, 2):
-        hz_labels.extend([f"ancilla_L{i}"] * blocks.n_c0)
-    hz_labels.extend(["gauge_fix"] * int(G.shape[0]))
-    hz_row_kind = np.array(hz_labels, dtype=object)
+    n_ancilla = int(F.shape[0])
+    num_data_x_checks = int(data_code.matrix_x.shape[0])
+    num_data_z_checks = int(data_code.matrix_z.shape[0])
     return SurgeryLayout(
         num_data_qubits=n_data,
         num_ancilla_qubits=n_ancilla,
-        num_layers=blocks.num_layers,
-        qubit_layer=qubit_layer,
+        num_data_x_checks=num_data_x_checks,
+        num_data_z_checks=num_data_z_checks,
         v0_indices=v0_indices,
         c0_indices=c0_indices,
         F=F,
         G=G,
-        hx_row_kind=hx_row_kind,
-        hz_row_kind=hz_row_kind,
     )
-
-
-# ---------------------------------------------------------------------------
-# End of inlined helpers.
-# ---------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -429,71 +323,48 @@ def _reassemble_gadget_with_new_F(
     augmented_F: galois.FieldArray,
     n_extra: int,
 ) -> tuple[CSSCode, SurgeryLayout]:
-    """Rebuild merged code + layout from an augmented restriction matrix.
+    """Rebuild merged code + layout from an augmented restriction matrix (L=1).
 
-    Boost-added κ' qubits (rows beyond the original C_0) are GAUGE qubits:
+    Boost-added κ' qubits (rows of F_aug beyond original C_0) are GAUGE qubits:
     they have no data-Z extension (no S_j in C_0 to extend). Their Z-stab
     contribution comes purely through the augmented gauge-fix matrix
-    G_aug = basis of left null space of F_aug.
-
-    CSS commutation derivation:
-      - chi_i restricted to κ_aug = F_aug[:, i].
-      - data Z S_j (j in original C_0) restricted to κ_aug = e_j on κ_orig,
-        zero on κ'.
-      - overlap = [q_i in S_j] + F_aug[j, i] = 0 (mod 2, by F[j, i] def).
-      - chi_i ⋅ gauge_fix γ ∈ G_aug = γ ⋅ F_aug[:, i] = 0 (mod 2,
-        by γ in ker(F_aug^T)).
+    G_aug = basis of left null space of F_aug^T.
     """
     field = augmented_F.__class__
     G_aug = _compute_gauge_fix(augmented_F)
-    blocks = _build_layered_blocks(augmented_F, layout.num_layers)
     n_data = layout.num_data_qubits
 
-    data_x_arr = np.asarray(merged.matrix_x[layout.hx_row_kind == "data"]).astype(np.int_)
-    data_z_arr = np.asarray(merged.matrix_z[layout.hz_row_kind == "data"]).astype(np.int_)
+    data_x_arr = np.asarray(merged.matrix_x[:layout.num_data_x_checks]).astype(np.int_)
+    data_z_arr = np.asarray(merged.matrix_z[:layout.num_data_z_checks]).astype(np.int_)
     data_x_gf = field(data_x_arr[:, :n_data])
     data_z_gf = field(data_z_arr[:, :n_data])
 
     data_code_proxy = CSSCode(data_x_gf, data_z_gf, is_subsystem_code=False)
 
-    HX_new = _assemble_merged_HX(data_code_proxy, blocks, layout.v0_indices)
+    HX_new = _assemble_merged_HX(data_code_proxy, augmented_F, layout.v0_indices)
 
-    # Manually build HZ_new (instead of _assemble_merged_HZ) so that the new
-    # κ' qubits get NO data-Z extension — only G_aug rows mention them.
-    n_merged = n_data + blocks.total_ancilla
+    # Manually build HZ_new: new κ' qubits get NO data-Z extension — only G_aug
+    # rows mention them.
+    n_c0 = int(augmented_F.shape[0])
+    n_merged = n_data + n_c0
     n_kappa_orig = int(layout.F.shape[0])
 
     old_z = field.Zeros((data_z_gf.shape[0], n_merged))
     old_z[:, :n_data] = data_z_gf
-    c1_slice = blocks.ancilla_col_slice(1)
     I_partial = field.Identity(n_kappa_orig)
-    # Place identity at (original c0_indices) x (original κ columns) only.
-    old_z[layout.c0_indices, n_data + c1_slice.start : n_data + c1_slice.start + n_kappa_orig] = I_partial
-
-    even_rows = []
-    for i in range(2, blocks.num_layers, 2):
-        row_block = field.Zeros((blocks.n_c0, n_merged))
-        prev_slice = blocks.ancilla_col_slice(i - 1)
-        cur_slice = blocks.ancilla_col_slice(i)
-        next_slice = blocks.ancilla_col_slice(i + 1)
-        I_c0_full = field.Identity(blocks.n_c0)
-        row_block[:, n_data + prev_slice.start : n_data + prev_slice.stop] = I_c0_full
-        row_block[:, n_data + cur_slice.start : n_data + cur_slice.stop] = blocks.F
-        row_block[:, n_data + next_slice.start : n_data + next_slice.stop] = I_c0_full
-        even_rows.append(row_block)
+    old_z[layout.c0_indices, n_data:n_data + n_kappa_orig] = I_partial
 
     gauge_rows: list[galois.FieldArray] = []
     if G_aug.shape[0] > 0:
         gf = field.Zeros((G_aug.shape[0], n_merged))
-        cL_slice = blocks.ancilla_col_slice(blocks.num_layers)
-        gf[:, n_data + cL_slice.start : n_data + cL_slice.stop] = G_aug
+        gf[:, n_data:] = G_aug
         gauge_rows.append(gf)
 
-    HZ_new = field(np.vstack([old_z, *even_rows, *gauge_rows]))
+    HZ_new = field(np.vstack([old_z, *gauge_rows]))
 
     boosted_merged = CSSCode(HX_new, HZ_new, is_subsystem_code=False)
     boosted_layout = _build_layout(
-        data_code_proxy, blocks, G_aug, layout.v0_indices, layout.c0_indices, augmented_F
+        data_code_proxy, augmented_F, G_aug, layout.v0_indices, layout.c0_indices,
     )
     return boosted_merged, boosted_layout
 
@@ -839,49 +710,37 @@ def _gadget_to_legacy_layout(g):
     F2 = galois.GF(2)
     n = g.code.num_qudits
     n_anc = len(g.C0)
+    mX_data = int(g.code.matrix_x.shape[0])
+    mZ_data = int(g.code.matrix_z.shape[0])
 
     if g.basis is Pauli.X:
         HX_for_legacy = g.HX_merged
         HZ_for_legacy = g.HZ_merged
-        mX_data = g.code.matrix_x.shape[0]
-        mZ_data = g.code.matrix_z.shape[0]
-        hx_row_kind = np.array(
-            ["data"] * mX_data + ["ancilla_L1"] * len(g.V0), dtype=object
-        )
-        hz_row_kind = np.array(
-            ["data"] * mZ_data + ["gauge_fix"] * g.G.shape[0], dtype=object
-        )
+        # After (no) swap: HX_for_legacy data rows = mX_data; HZ data rows = mZ_data.
+        num_data_x_checks = mX_data
+        num_data_z_checks = mZ_data
     else:  # Pauli.Z: swap so chi rows are in HX_for_legacy
         HX_for_legacy = g.HZ_merged
         HZ_for_legacy = g.HX_merged
-        # After swap: HX_for_legacy rows = Z-data checks + chi (ancilla_L1)
-        #             HZ_for_legacy rows = X-data checks + gauge_fix
-        mZ_data = g.code.matrix_z.shape[0]
-        mX_data = g.code.matrix_x.shape[0]
-        hx_row_kind = np.array(
-            ["data"] * mZ_data + ["ancilla_L1"] * len(g.V0), dtype=object
-        )
-        hz_row_kind = np.array(
-            ["data"] * mX_data + ["gauge_fix"] * g.G.shape[0], dtype=object
-        )
+        # After swap: HX_for_legacy data rows = mZ_data (the original HZ data part);
+        #             HZ_for_legacy data rows = mX_data.
+        num_data_x_checks = mZ_data
+        num_data_z_checks = mX_data
 
     merged = CSSCode(
         F2(np.asarray(HX_for_legacy).astype(np.int_).tolist()),
         F2(np.asarray(HZ_for_legacy).astype(np.int_).tolist()),
         is_subsystem_code=False,
     )
-    qubit_layer = np.array([0] * n + [1] * n_anc, dtype=np.int_)
     layout = SurgeryLayout(
         num_data_qubits=n,
         num_ancilla_qubits=n_anc,
-        num_layers=1,
-        qubit_layer=qubit_layer,
+        num_data_x_checks=num_data_x_checks,
+        num_data_z_checks=num_data_z_checks,
         v0_indices=np.array(g.V0, dtype=np.int_),
         c0_indices=np.array(g.C0, dtype=np.int_),
         F=F2(np.asarray(g.F).astype(np.int_).tolist()),
         G=F2(np.asarray(g.G).astype(np.int_).tolist()),
-        hx_row_kind=hx_row_kind,
-        hz_row_kind=hz_row_kind,
     )
     return merged, layout
 
