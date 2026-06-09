@@ -1437,6 +1437,46 @@ def test_stitch_intracode_both_bases_commute(basis):
     assert merged.dimension == code.dimension - 1
 
 
+def test_build_bridge_bb18_hyperedge_and_long_cycle():
+    """End-to-end: Cain bb_18 BBCode triggers both Bug 1 (hyperedge) and
+    Bug 2 (long port-subgraph cycle). build_bridge must succeed and produce
+    a merged code with k_merged = k_orig - 1 (intra-code joint Z̄_1 ⊗ Z̄_2).
+
+    Two *distinct* Z-logicals are used so that the joint measurement reduces k
+    by exactly 1.  Z-logical 0 has a weight-4 F row (triggers Bug 1); the pair
+    together exercises the full _cellulate_port_subgraph path (Bug 2)."""
+    import sympy
+    from qldpc import codes
+    from qldpc.objects import Pauli
+    from qldpc.codes.surgery import build_gadget, build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+
+    x, y = sympy.symbols("x y")
+    code = codes.BBCode(
+        {x: 31, y: 4},
+        1 + x**6 * y + x**27,
+        y**2 + x**15 * y**3 + x**24,
+    )
+    z_ops = code.get_logical_ops(Pauli.Z)
+    z0 = np.asarray(z_ops[0]).astype(np.uint8)  # hyperedge logical (Bug 1)
+    z1 = np.asarray(z_ops[1]).astype(np.uint8)  # distinct second logical
+    g_l = build_gadget(code, z0, basis=Pauli.Z)
+    g_r = build_gadget(code, z1, basis=Pauli.Z)
+    # Confirm we are actually exercising Bug 1 (hyperedge in left gadget):
+    row_weights = np.asarray(g_l.F.sum(axis=1)).ravel().astype(int).tolist()
+    assert max(row_weights) >= 4, "Test no longer triggers Bug 1 (no hyperedge)"
+    # Build bridge (this used to raise NotImplementedError or RuntimeError)
+    bridge = build_bridge(g_l, g_r)
+    # Merged code construction must succeed
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    # Intra-code joint Z̄_1 ⊗ Z̄_2: k_merged == k_orig − 1
+    assert merged.dimension == code.dimension - 1
+    # CSS commutation on merged code
+    HX = np.asarray(merged.matrix_x).astype(np.uint8)
+    HZ = np.asarray(merged.matrix_z).astype(np.uint8)
+    assert not ((HX @ HZ.T) % 2).any(), "CSS commutation broken on merged code"
+
+
 def test_build_joint_ppm_circuit_chi_check_ids_no_UB():
     """build_joint_ppm_circuit's noiseless first sample has zero detectors firing."""
     from qldpc.codes.surgery.gadget import build_gadget
