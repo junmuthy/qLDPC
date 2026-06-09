@@ -207,7 +207,6 @@ def boost_gadget_cheeger_combinatorial(
         raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
 
     rng = np.random.default_rng(seed)
-    field = galois.GF(2)
     F = np.asarray(g.F).astype(np.int_).copy()
     n_orig_rows = F.shape[0]
     n_V = F.shape[1]
