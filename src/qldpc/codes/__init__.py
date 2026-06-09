@@ -48,16 +48,6 @@ from .quantum import (
     TetrahedralCode,
     ToricCode,
 )
-from .surgery import (
-    GadgetLayout,
-    Bridge,
-    build_gadget,
-    build_bridge,
-    build_single_ppm_circuit,
-    build_joint_ppm_circuit,
-    boost_gadget,
-)
-
 __all__ = [
     "BCHCode",
     "CyclicCode",
@@ -99,13 +89,6 @@ __all__ = [
     "TBCode",
     "TetrahedralCode",
     "ToricCode",
-    "GadgetLayout",
-    "Bridge",
-    "build_gadget",
-    "build_bridge",
-    "build_single_ppm_circuit",
-    "build_joint_ppm_circuit",
-    "boost_gadget",
     "get_distance_classical",
     "get_distance_quantum",
 ]

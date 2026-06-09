@@ -1,6 +1,6 @@
 """Source for 9_lattice_surgery_cain_fig1b.ipynb.
 
-Reproduces Cain et al. 2024 Fig 1b using qldpc.codes.surgery.build_gadget
+Reproduces Cain et al. 2024 Fig 1b using qldpc.circuits.surgery.build_gadget
 (Webster, Smith, Cohen 2025 §II.A 3-step gadget; equivalent to Cross 2024
 §III at L=1). The measurement circuit follows Webster Eq. (1): with gadget
 qubits initialized to |0⟩, the logical observable is the product of new
@@ -27,7 +27,7 @@ from __future__ import annotations
 import numpy as np
 
 from qldpc import codes
-from qldpc.codes.surgery import build_gadget
+from qldpc.circuits.surgery import build_gadget
 from qldpc.objects import Pauli
 
 NUM_WORKERS = 8  # adjust to your machine; matches conventions in this directory.

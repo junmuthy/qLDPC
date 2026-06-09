@@ -1,6 +1,6 @@
 """Source for 9_lattice_surgery.ipynb.
 
-Demonstrates the 5 public functions of qldpc.codes.surgery against
+Demonstrates the 5 public functions of qldpc.circuits.surgery against
 Webster, Smith & Cohen (arXiv:2511.15989) Table I codes and reproduces
 the published gadget sizes exactly.
 
@@ -13,7 +13,7 @@ Convert with:
 # %% [markdown]
 # # qLDPC Lattice Surgery — Public API Walkthrough
 #
-# This notebook demonstrates the 5 public functions of `qldpc.codes.surgery`
+# This notebook demonstrates the 5 public functions of `qldpc.circuits.surgery`
 # by running them against Webster, Smith & Cohen (arXiv:2511.15989) Table I
 # codes and reproducing the published gadget sizes exactly.
 
@@ -28,7 +28,7 @@ Convert with:
 # Pauli-Product Measurement (PPM) on a single logical operator X̄
 # using a small number of ancilla qubits while preserving the code distance.
 #
-# **The 5 public APIs** (from `qldpc.codes.surgery`):
+# **The 5 public APIs** (from `qldpc.circuits.surgery`):
 #
 # | Function | Returns | Purpose |
 # |---|---|---|
@@ -59,7 +59,7 @@ from pathlib import Path
 
 import numpy as np
 
-from qldpc.codes.surgery import (
+from qldpc.circuits.surgery import (
     GadgetLayout,
     Bridge,
     build_gadget,
@@ -526,7 +526,7 @@ if __name__ == "__main__":
 # %% [markdown]
 # ## 11. Summary
 #
-# The 5 public APIs of `qldpc.codes.surgery`, each in one sentence:
+# The 5 public APIs of `qldpc.circuits.surgery`, each in one sentence:
 #
 # - **`build_gadget(code, x)`**: runs the Webster 3-step gadget construction
 #   (restriction → gauge-fix → assembly) to produce a merged CSS code with

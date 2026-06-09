@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import stim
 
 from qldpc import codes, circuits, decoders
-from qldpc.codes.surgery import (
+from qldpc.circuits.surgery import (
     build_gadget, build_single_ppm_circuit, boost_gadget, cheeger_constant,
     keep_only_observable,
 )
@@ -145,7 +145,7 @@ def main() -> None:
     ps_sorted = sorted(p_values)
     ax.loglog(
         ps_sorted, [surgery_lers[p][0] for p in ps_sorted],
-        "o-", label=f"Surgery PPM (boost +{extra} κ)",
+        "o-", label="Surgery PPM (obs0 = Webster Eq.1)",
         markersize=8, linewidth=2,
     )
     ax.loglog(

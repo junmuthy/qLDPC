@@ -22,7 +22,7 @@ from _webster_seed_set import (  # noqa: E402
 
 
 def test_gadget_layout_is_frozen_dataclass():
-    from qldpc.codes.surgery.gadget import GadgetLayout
+    from qldpc.circuits.surgery.gadget import GadgetLayout
     assert dataclasses.is_dataclass(GadgetLayout)
     # frozen
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
@@ -41,7 +41,7 @@ def test_gadget_layout_is_frozen_dataclass():
 
 
 def test_step1_restriction_steane():
-    from qldpc.codes.surgery.gadget import _step1_restriction
+    from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     V0, C0, F = _step1_restriction(code, x)
@@ -63,7 +63,7 @@ def test_step1_restriction_steane():
 
 
 def test_step2_gauge_fix_basis_property():
-    from qldpc.codes.surgery.gadget import _step1_restriction, _step2_gauge_fix
+    from qldpc.circuits.surgery.gadget import _step1_restriction, _step2_gauge_fix
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     _, _, F = _step1_restriction(code, x)
@@ -80,7 +80,7 @@ def test_step2_gauge_fix_basis_property():
 
 def test_step2_gauge_fix_deterministic():
     """Same F twice → byte-identical G (non-trivial: rank-deficient F → non-empty G)."""
-    from qldpc.codes.surgery.gadget import _step2_gauge_fix
+    from qldpc.circuits.surgery.gadget import _step2_gauge_fix
     # 3x3 matrix with rank 2 (row 0 + row 1 = row 2 over GF(2)), so G has 1 row.
     F = np.array([[1, 0, 1], [0, 1, 1], [1, 1, 0]], dtype=np.uint8)
     G1 = _step2_gauge_fix(F)
@@ -93,7 +93,7 @@ def test_step2_gauge_fix_deterministic():
 
 def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
     """basis=Pauli.Z: χ rows added to HZ_merged (Z-type); G added to HX_merged (X-type)."""
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         _step1_restriction, _step2_gauge_fix, _step3_assemble,
     )
     code = codes.SteaneCode()
@@ -112,7 +112,7 @@ def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
 
 
 def test_step3_assemble_steane_css_commutes():
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         _step1_restriction, _step2_gauge_fix, _step3_assemble,
     )
     code = codes.SteaneCode()
@@ -143,7 +143,7 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
     2. Indicator form: each Z-check in C_0 attaches to EXACTLY ONE kappa
        ancilla (row-sum == 1 in the kappa block).
     """
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         _step1_restriction, _step2_gauge_fix, _step3_assemble,
     )
 
@@ -201,7 +201,7 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
 
 
 def test_build_gadget_steane_returns_valid_layout():
-    from qldpc.codes.surgery.gadget import build_gadget, GadgetLayout
+    from qldpc.circuits.surgery.gadget import build_gadget, GadgetLayout
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
@@ -213,7 +213,7 @@ def test_build_gadget_steane_returns_valid_layout():
 
 
 def test_build_gadget_deterministic():
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g1 = build_gadget(code, x)
@@ -228,7 +228,7 @@ def test_build_gadget_deterministic():
 
 
 def test_build_gadget_rejects_non_x_logical():
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     x = np.zeros(code.num_qudits, dtype=np.uint8)
     x[0] = 1  # not a logical X (HZ @ x ≠ 0 in general)
@@ -295,7 +295,7 @@ def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
 @pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_KAPPA_CHI_R)
 def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     """Webster Table I: κ + χ + r matches for each of the 4 codes."""
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
     data = load_webster_seed_set(code_index)
@@ -314,7 +314,7 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
 def test_skip_tree_fullrank_on_K4_matches_H_R():
     """SkipTree full-rank: T_ind · G · P_ind = H_R for the complete graph K_4."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _skip_tree_fullrank, _canonical_H_R
+    from qldpc.circuits.surgery.bridge import _skip_tree_fullrank, _canonical_H_R
 
     G_nx = nx.complete_graph(4)
     n = 4
@@ -339,8 +339,8 @@ def test_skip_tree_fullrank_on_K4_matches_H_R():
 
 
 def test_build_single_ppm_circuit_noiseless_compiles():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     import stim
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -351,8 +351,8 @@ def test_build_single_ppm_circuit_noiseless_compiles():
 
 
 def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
@@ -363,8 +363,8 @@ def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
 
 
 def test_build_single_ppm_circuit_with_noise_detectors_fire():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -378,7 +378,7 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
 
 def test_cheeger_constant_matches_boost_target():
     """cheeger_constant(g) reports the Webster boundary Cheeger; boost raises it."""
-    from qldpc.codes.surgery import build_gadget, boost_gadget, cheeger_constant
+    from qldpc.circuits.surgery import build_gadget, boost_gadget, cheeger_constant
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
@@ -394,10 +394,10 @@ def test_cheeger_constant_matches_boost_target():
 
 
 def test_boost_gadget_dispatches_to_three_methods():
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget, GadgetLayout,
     )
-    from qldpc.codes.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.cheeger import boost_gadget
     # Use Webster code 0 (l=31, k>=2): Steane gadget has dimension 0 (Steane
     # k=1 minus 1 gadget-consumed logical), which causes the BP+OSD decoder
     # used by boost_gadget_distance to hang searching for nonexistent logicals.
@@ -411,8 +411,8 @@ def test_boost_gadget_dispatches_to_three_methods():
 
 
 def test_boost_gadget_seed_reproducible():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.cheeger import boost_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
@@ -424,10 +424,10 @@ def test_boost_gadget_seed_reproducible():
 
 @pytest.mark.parametrize("method", ["spectral", "combinatorial", "distance"])
 def test_boost_gadget_preserves_css_commutation(method):
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.cheeger import boost_gadget
     # Webster code 0 — Steane causes distance-boost decoder to hang on k=0 merged.
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
@@ -439,14 +439,14 @@ def test_boost_gadget_preserves_css_commutation(method):
 
 
 def test_gadget_layout_has_basis_field():
-    from qldpc.codes.surgery.gadget import GadgetLayout
+    from qldpc.circuits.surgery.gadget import GadgetLayout
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert "basis" in fields, f"basis field missing; got {fields}"
 
 
 def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
     """Backward compatibility: build_gadget without explicit basis defaults to Pauli.X."""
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
@@ -455,7 +455,7 @@ def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
 
 def test_step1_restriction_basis_z_uses_HX():
     """For basis=Pauli.Z, F = H_X[C_0, V_0] (not H_Z)."""
-    from qldpc.codes.surgery.gadget import _step1_restriction
+    from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
     V0, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
@@ -474,7 +474,7 @@ def test_step1_restriction_basis_z_uses_HX():
 
 def test_build_gadget_z_basis_css_commutation():
     """build_gadget(code, z_logical, basis=Pauli.Z) yields a CSS-commuting merged code."""
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
     g = build_gadget(code, z, basis=Pauli.Z)
@@ -485,7 +485,7 @@ def test_build_gadget_z_basis_css_commutation():
 
 def test_build_gadget_z_basis_rejects_non_z_logical():
     """For basis=Pauli.Z, build_gadget checks HX @ x == 0 (z must be a Z-logical)."""
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     # An X-logical fails: HX @ x_logical_X is typically nonzero
     x_logical = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -500,7 +500,7 @@ def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code():
     merged matrices as build_gadget(dual_code, z, basis=X), where dual_code has
     HX/HZ swapped. The swap labels swap too, so we compare HX_z vs HZ_dx_x and
     HZ_z vs HX_dx_x."""
-    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.codes.common import CSSCode
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -524,7 +524,7 @@ def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code():
 
 def test_webster_table_i_z_basis_kappa_chi_r_exact():
     """Webster Z̄_1 seed produces the same κ+χ+r counts (basis-symmetric)."""
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
 
@@ -556,10 +556,10 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_boost_gadget_preserves_css_commutation_both_bases(basis):
     """boost_gadget on a basis=X or basis=Z gadget preserves CSS commutation."""
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.cheeger import boost_gadget
 
     def operator(d, name):
         l = d["l"]
@@ -585,8 +585,8 @@ def test_boost_gadget_preserves_css_commutation_both_bases(basis):
 def test_classify_reliable_round1_checks_basis_x():
     """For basis=X: reliable round-1 checks are data H_X (first m_X X-checks)
     plus gauge-fix G (last r Z-checks)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.codes.common import CSSCode
     import galois
@@ -617,8 +617,8 @@ def test_classify_reliable_round1_checks_basis_x():
 def test_classify_reliable_round1_checks_basis_z():
     """For basis=Z: reliable round-1 checks are data H_Z (first m_Z Z-checks)
     plus gauge-fix G (last r X-checks)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.codes.common import CSSCode
     import galois
@@ -645,8 +645,8 @@ def test_classify_reliable_round1_checks_basis_z():
 
 def test_surgery_state_prep_basis_x_resets():
     """basis=X: data RX (→|+⟩), kappa R (→|0⟩)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_state_prep
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_state_prep
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.codes.common import CSSCode
     import galois
@@ -671,8 +671,8 @@ def test_surgery_state_prep_basis_x_resets():
 
 def test_surgery_state_prep_basis_z_resets():
     """basis=Z: data R (→|0⟩), kappa RX (→|+⟩)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_state_prep
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_state_prep
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.codes.common import CSSCode
     import galois
@@ -697,8 +697,8 @@ def test_surgery_state_prep_basis_z_resets():
 
 def test_surgery_qec_cycle_round_1_detectors_classified():
     """Round-1 detectors are 1-arg only for RELIABLE checks; unreliable ones skipped."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_qec_cycle, _classify_reliable_round1_checks
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_qec_cycle, _classify_reliable_round1_checks
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.codes.common import CSSCode
     import galois
@@ -730,8 +730,8 @@ def test_surgery_qec_cycle_round_1_detectors_classified():
 
 def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
     """basis=X: detach with M (Z-basis) on κ, then MX on data."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_detach_and_readout
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_detach_and_readout
     from qldpc.circuits.bookkeeping import MeasurementRecord
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -755,8 +755,8 @@ def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
 
 def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z():
     """basis=Z: detach with MX on κ, then M on data."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_detach_and_readout
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_detach_and_readout
     from qldpc.circuits.bookkeeping import MeasurementRecord
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -778,8 +778,8 @@ def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z()
 
 def test_surgery_observable_emits_two_observable_include():
     """Observable 0 = XOR of χ-row records across all rounds; Observable 1 = data measurement on V_0."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import _surgery_observable
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import _surgery_observable
     from qldpc.circuits.bookkeeping import MeasurementRecord
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -806,8 +806,8 @@ def test_surgery_observable_emits_two_observable_include():
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_build_single_ppm_circuit_noiseless_observables_zero(basis):
     """Both OBSERVABLE_INCLUDEs evaluate to 0 (= +1) under no noise."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     op = (code.get_logical_ops(Pauli.X)[0]
           if basis is Pauli.X
@@ -826,8 +826,8 @@ def test_build_single_ppm_circuit_noiseless_observables_zero(basis):
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_single_ppm_circuit_noise_flips_observable_at_high_p(basis):
     """At p=0.1, the PPM observable (observable 0) flips ≥ 5% of shots."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
     code = codes.SteaneCode()
     op = (code.get_logical_ops(Pauli.X)[0]
@@ -854,8 +854,8 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis):
     Tests the helper in isolation: build a circuit through detach_and_readout,
     then call _surgery_final_detectors and count emitted DETECTOR instructions.
     """
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import (
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import (
         _surgery_state_prep, _surgery_qec_cycle, _surgery_detach_and_readout,
         _surgery_final_detectors, _classify_reliable_round1_checks,
         _gadget_merged_csscode,
@@ -895,8 +895,8 @@ def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis):
     The total detector count must equal: round-1 reliable + (rounds-1)*all_checks + final reliable.
     Under noiseless conditions all of them must remain silent.
     """
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     op = (code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X
           else code.get_logical_ops(Pauli.Z)[0])
@@ -917,8 +917,8 @@ def test_single_ppm_ler_monotone_in_p():
     Catches gross protocol errors (wrong observable basis, sign flips, etc.).
     """
     import sinter
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits import DepolarizingNoiseModel
     from qldpc import decoders
     code = codes.SteaneCode()
@@ -966,8 +966,8 @@ def test_single_ppm_ler_with_final_detectors_below_threshold():
     Adding the inferred detectors should drop it significantly.
     """
     import sinter
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits import DepolarizingNoiseModel
     from qldpc import decoders
 
@@ -999,7 +999,7 @@ def test_single_ppm_ler_with_final_detectors_below_threshold():
 
 def test_build_aux_graph_weight2_rows_become_edges():
     """F rows of weight 2 → graph edges; vertex set = {0, ..., |V_0|-1}."""
-    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
     F = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
     G_nx, edge_idx = _build_aux_graph_strict(F)
     assert set(G_nx.nodes) == {0, 1, 2, 3}
@@ -1011,7 +1011,7 @@ def test_build_aux_graph_weight2_rows_become_edges():
 
 def test_build_aux_graph_filters_hyperedges():
     """F rows of weight >= 3 (hyperedges) are silently skipped; weight-2 rows survive."""
-    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
     F = np.array([
         [1, 1, 0, 0, 0],  # weight-2 → edge (0,1)
         [1, 1, 1, 1, 0],  # weight-4 hyperedge → skipped
@@ -1034,7 +1034,7 @@ def test_build_aux_graph_filters_hyperedges():
 
 def test_build_aux_graph_rejects_weight1_row():
     """F rows of weight 1 raise ValueError (dangling edge / no-op stabilizer)."""
-    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
     F = np.array([[1, 1, 0, 0], [0, 0, 1, 0]], dtype=np.uint8)
     with pytest.raises(ValueError, match=r"weight 1"):
         _build_aux_graph_strict(F)
@@ -1043,7 +1043,7 @@ def test_build_aux_graph_rejects_weight1_row():
 def test_connect_induced_subgraph_no_op_when_connected():
     """If induced subgraph is already connected, no edges are added."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _connect_induced_subgraph
+    from qldpc.circuits.surgery.bridge import _connect_induced_subgraph
     G_aux = nx.path_graph(4)  # 0-1-2-3
     extra = _connect_induced_subgraph(G_aux, ports=(0, 1, 2, 3))
     assert extra == []
@@ -1053,7 +1053,7 @@ def test_connect_induced_subgraph_no_op_when_connected():
 def test_connect_induced_subgraph_adds_edges_to_disconnected_components():
     """Disconnected induced subgraph gets one bridging edge per missing connection."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _connect_induced_subgraph
+    from qldpc.circuits.surgery.bridge import _connect_induced_subgraph
     # G_aux: 0-1   2-3 (two separate components)
     G_aux = nx.Graph()
     G_aux.add_edges_from([(0, 1), (2, 3)])
@@ -1069,7 +1069,7 @@ def test_connect_induced_subgraph_adds_edges_to_disconnected_components():
 def test_cellulate_caps_cycle_length():
     """After cellulation, every basis cycle has length <= cap."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    from qldpc.circuits.surgery.bridge import _cellulate_port_subgraph
     # 10-cycle: 0-1-2-...-9-0 has one length-10 basis cycle
     G_aux = nx.cycle_graph(10)
     added = _cellulate_port_subgraph(G_aux, ports=tuple(range(10)), max_len=6)
@@ -1082,7 +1082,7 @@ def test_cellulate_caps_cycle_length():
 def test_cellulate_no_op_when_already_short():
     """If all basis cycles are short, no edges are added."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    from qldpc.circuits.surgery.bridge import _cellulate_port_subgraph
     G_aux = nx.cycle_graph(4)  # one 4-cycle
     added = _cellulate_port_subgraph(G_aux, ports=(0, 1, 2, 3), max_len=6)
     assert added == []
@@ -1092,7 +1092,7 @@ def test_cellulate_raises_when_port_cycle_has_no_available_chord():
     """RuntimeError when a port-subgraph cycle exists but every (i, j) pair
     is already an edge — i.e. the port subgraph is complete on those vertices."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    from qldpc.circuits.surgery.bridge import _cellulate_port_subgraph
     # 7-cycle 0-1-2-3-4-5-6-0 plus ALL chords among {0..6} → complete graph K_7.
     # cycle_basis still surfaces cycles of length > max_len in K_7 (basis cycles
     # are length-3 triangles), so no long cycle exists in this case.
@@ -1118,7 +1118,7 @@ def test_cellulate_port_subgraph_breaks_long_port_cycle():
     subgraph. Cellulation breaks the port cycle without inspecting non-port
     edges elsewhere in G_aux."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    from qldpc.circuits.surgery.bridge import _cellulate_port_subgraph
     G = nx.Graph()
     # 8-cycle on port vertices 0..7
     G.add_edges_from([(i, (i + 1) % 8) for i in range(8)])
@@ -1141,7 +1141,7 @@ def test_cellulate_port_subgraph_breaks_long_port_cycle():
 def test_cellulate_port_subgraph_skips_non_port_cycle():
     """Long cycle entirely on non-port vertices is ignored; no edges added."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    from qldpc.circuits.surgery.bridge import _cellulate_port_subgraph
     G = nx.Graph()
     # Long non-port cycle: 10-11-12-...-17-10 (length 8)
     G.add_edges_from([(10, 11), (11, 12), (12, 13), (13, 14),
@@ -1157,7 +1157,7 @@ def test_cellulate_port_subgraph_skips_non_port_cycle():
 
 def test_build_gadget_augmented_extends_F_and_recomputes_G():
     """Augmenting with one weight-2 row adds a column to merged matrices and recomputes G."""
-    from qldpc.codes.surgery.gadget import build_gadget, build_gadget_augmented
+    from qldpc.circuits.surgery.gadget import build_gadget, build_gadget_augmented
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
@@ -1184,7 +1184,7 @@ def test_build_gadget_augmented_extends_F_and_recomputes_G():
 def test_bridge_dataclass_fields_universal_adapter():
     """Bridge dataclass exposes the universal-adapter fields from spec §1."""
     import dataclasses
-    from qldpc.codes.surgery.bridge import Bridge
+    from qldpc.circuits.surgery.bridge import Bridge
     fields = {f.name for f in dataclasses.fields(Bridge)}
     assert fields == {
         "width", "basis",
@@ -1198,8 +1198,8 @@ def test_bridge_dataclass_fields_universal_adapter():
 
 def test_build_bridge_smoke_steane_intracode():
     """Steane × Steane intra-code joint X̄ X̄: build_bridge returns valid Bridge."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
     code = codes.SteaneCode()
     x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     x2 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)  # same logical
@@ -1217,8 +1217,8 @@ def test_build_bridge_smoke_steane_intracode():
 
 def test_build_bridge_skiptree_invariant_holds():
     """T_s · G_s_aug · P_s = H_R for both sides on Steane × Steane."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g_l = build_gadget(code, x, basis=Pauli.X)
@@ -1242,8 +1242,8 @@ def test_build_bridge_skiptree_invariant_holds():
 
 def test_build_bridge_rejects_basis_mismatch():
     """Bridge requires g_l.basis == g_r.basis."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -1255,9 +1255,9 @@ def test_build_bridge_rejects_basis_mismatch():
 
 def test_stitch_intercode_basis_x_css_commutation():
     """Inter-code Steane × Steane joint X̄X̄ merged code commutes."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     code1 = codes.SteaneCode()
     code2 = codes.SteaneCode()
     x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -1274,9 +1274,9 @@ def test_stitch_intercode_basis_x_css_commutation():
 
 def test_stitch_intercode_basis_x_k_reduces_by_one():
     """k_joint = k_l + k_r - 1 for inter-code Steane × Steane joint X̄X̄."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     code1 = codes.SteaneCode()
     code2 = codes.SteaneCode()
     x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -1290,9 +1290,9 @@ def test_stitch_intercode_basis_x_k_reduces_by_one():
 
 def test_stitch_intercode_basis_x_joint_logical_in_stabilizer():
     """(x_1, x_2, 0, 0, 0) lies in rowspan(H_X^merged) — joint X̄_l X̄_r is a stabilizer."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     code1 = codes.SteaneCode()
     code2 = codes.SteaneCode()
     x1 = np.asarray(code1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -1315,9 +1315,9 @@ def test_stitch_intercode_basis_x_joint_logical_in_stabilizer():
 
 def test_stitch_intercode_basis_x_singletons_excluded():
     """(x_1, 0, ...) and (0, x_2, ...) alone are NOT in rowspan(H_X^merged)."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g_l = build_gadget(code, x, basis=Pauli.X)
@@ -1340,9 +1340,9 @@ def test_stitch_intercode_basis_x_singletons_excluded():
 
 
 def test_stitch_intracode_basis_x_css_commutation():
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     code = codes.SteaneCode()
     x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     # Use Pauli.X logical 0 for both (same V_0); intra-code test
@@ -1361,11 +1361,11 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
     # masked by the spurious bridge X-logical: Steane (k=1) with x_l = x_r is
     # the degenerate joint X̄ · X̄ = I case where the spurious bridge logical
     # leaves the dimension at k_data instead of k_data - 1.
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
 
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
@@ -1381,9 +1381,9 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis):
     import galois
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     GF2 = galois.GF(2)
     code = codes.SteaneCode()
     if basis is Pauli.X:
@@ -1420,11 +1420,11 @@ def test_stitch_intracode_both_bases_commute(basis):
 
     Steane intra-code (k=1) yields the degenerate joint X̄·X̄ = I case.
     """
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     if basis is Pauli.X:
@@ -1463,8 +1463,8 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle():
     by exactly 1.  Z-logical 0 has a weight-4 F row (triggers Bug 1); the pair
     together exercises the full _cellulate_port_subgraph path (Bug 2)."""
     import sympy
-    from qldpc.codes.surgery import build_gadget, build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery import build_gadget, build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
 
     x, y = sympy.symbols("x y")
     code = codes.BBCode(
@@ -1494,9 +1494,9 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle():
 
 def test_build_joint_ppm_circuit_chi_check_ids_no_UB():
     """build_joint_ppm_circuit's noiseless first sample has zero detectors firing."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g_l = build_gadget(code, x, basis=Pauli.X)
@@ -1511,9 +1511,9 @@ def test_build_joint_ppm_circuit_chi_check_ids_no_UB():
 
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
     """basis=X init: data in |+⟩, κ in |0⟩, adapter in |0⟩. Joint observables are deterministic."""
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g_l = build_gadget(code, x, basis=Pauli.X)
@@ -1537,11 +1537,11 @@ def test_adapter_cycle_check_weight_bounded():
       - T_r row: at most 3 entries on cr_kappa (SkipTree (3,2)-sparsity)
     Total: weight <= 3 + 2 + 3 = 8.
     """
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     # Use Z̄_1 for both sides (intra-code, same logical) — bridge.width =
@@ -1561,10 +1561,10 @@ def test_adapter_cycle_check_weight_bounded():
 def test_cellulation_caps_aug_aux_cycle_length_on_webster():
     """After cellulation, every basis cycle in the augmented aux graph has length <= 6."""
     import networkx as nx
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge, _build_aux_graph_strict
+    from qldpc.circuits.surgery.bridge import build_bridge, _build_aux_graph_strict
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_z_bar_operator(data, "Z_bar_1")
@@ -1586,9 +1586,9 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
 def test_joint_ppm_ler_monotone_steane_intercode():
     """LER non-increasing in p across {1e-4, 3e-4, 1e-3} for Steane × Steane."""
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
-    from qldpc.codes.surgery.gadget import build_gadget
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g_l = build_gadget(code, x, basis=Pauli.X)
@@ -1617,11 +1617,11 @@ def test_joint_xx_in_stabilizer_on_webster_intracode(code_index):
     the full Webster Table I code family rather than just code 0.
     """
     import galois
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
     GF2 = galois.GF(2)
     data = load_webster_seed_set(code_index)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
@@ -1646,11 +1646,11 @@ def test_build_joint_ppm_circuit_intracode_noiseless_observables_zero():
 
     Replaces deleted path-graph noiseless intracode tests.
     """
-    from qldpc.codes.surgery.gadget import (
+    from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-    from qldpc.codes.surgery.bridge import build_bridge
-    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data, "X_bar_1")

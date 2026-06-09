@@ -24,7 +24,7 @@ import numpy as np
 import stim
 
 from qldpc import codes
-from qldpc.codes.surgery import build_gadget, build_bridge, build_joint_ppm_circuit
+from qldpc.circuits.surgery import build_gadget, build_bridge, build_joint_ppm_circuit
 from qldpc.objects import Pauli
 
 

@@ -2,7 +2,7 @@
 
 These tests verify our surgery construction against Ide et al. (arXiv:2410.03628)
 Zenodo supplementary matrices.  They are NOT part of the main package test suite
-(src/qldpc/codes/surgery/_test.py) because they depend on large fixture files that
+(src/qldpc/circuits/surgery/_test.py) because they depend on large fixture files that
 must be downloaded separately from Zenodo (data_qLDPC_surgery.zip,
 https://zenodo.org/records/17527545).
 
@@ -95,7 +95,7 @@ def test_intercode_joint_bb_lp_exact():
 
     Distance is not asserted (get_distance() is very slow at n>=355).
     """
-    from qldpc.codes.surgery import (
+    from qldpc.circuits.surgery import (
         build_gadget,
         build_bridge,
         build_joint_ppm_circuit,

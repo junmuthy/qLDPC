@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import numpy as np
 import stim
+import sympy
 
 from qldpc import codes
-from qldpc.codes.surgery import build_gadget, build_bridge, build_joint_ppm_circuit
+from qldpc.circuits.surgery import build_gadget, build_bridge, build_joint_ppm_circuit
 from qldpc.objects import Pauli
 
 
@@ -72,10 +73,11 @@ def main() -> None:
     print("Joint Z̄_1 ⊗ Z̄_2 PPM with code 2 in |+⟩_L")
     print("=" * 65)
 
-    code1 = codes.SteaneCode()
-    code2 = codes.SteaneCode()
+    x, y = sympy.symbols("x y")
+    code1 = codes.BBCode({x: 6, y: 12}, x**3 + y + y**2, y**3 + x + x**2)
+    code2 = codes.BBCode({x: 31, y: 4}, 1 + x**6 * y + x ** 27, y**2 + x**15*y**3 + x**24)
     z1 = np.asarray(code1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    z2 = np.asarray(code2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(code2.get_logical_ops(Pauli.Z)[4]).astype(np.uint8)
     g1 = build_gadget(code1, z1, basis=Pauli.Z)
     g2 = build_gadget(code2, z2, basis=Pauli.Z)
     bridge = build_bridge(g1, g2)
@@ -87,7 +89,8 @@ def main() -> None:
     data2_ids = list(range(n1, n1 + n2))   # code 2 data qubits
     circuit_mixed = _switch_init_basis(circuit_z, data2_ids)
 
-    print(f"  code1 = code2 = Steane [[7, 1, 3]]")
+    print(f"  code1 = {code1}")
+    print(f"  code2 = {code2}")
     print(f"  joint code: [[{joint.num_qudits}, {joint.dimension}]]")
     print(f"  basis = Pauli.Z (joint Z̄_1 ⊗ Z̄_2), rounds = {rounds}")
     print(f"  init: data 1 → |0⟩^⊗{n1} (R)   data 2 → |+⟩^⊗{n2} (R → RX mutation)")

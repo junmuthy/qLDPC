@@ -22,7 +22,7 @@ import sympy
 
 from qldpc import codes, decoders
 from qldpc.codes.common import get_random_array
-from qldpc.codes.surgery import build_gadget, boost_gadget
+from qldpc.circuits.surgery import build_gadget, boost_gadget
 from qldpc.objects import Pauli
 
 

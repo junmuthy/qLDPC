@@ -27,7 +27,7 @@ from qldpc import codes
 import sys
 from pathlib import Path
 
-from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit
+from qldpc.circuits.surgery import build_gadget, build_single_ppm_circuit
 from qldpc.objects import Pauli
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

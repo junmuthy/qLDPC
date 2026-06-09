@@ -37,7 +37,7 @@ import stim
 import sys
 
 from qldpc import circuits, decoders
-from qldpc.codes.surgery import build_gadget, build_single_ppm_circuit, keep_only_observable
+from qldpc.circuits.surgery import build_gadget, build_single_ppm_circuit, keep_only_observable
 from qldpc.circuits.noise_model import DepolarizingNoiseModel
 from qldpc.objects import Pauli
 
