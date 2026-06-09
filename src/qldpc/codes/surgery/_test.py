@@ -1446,3 +1446,30 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
         assert max(len(c) for c in cycles) <= 6, (
             f"max cycle length {max(len(c) for c in cycles)} > 6"
         )
+
+
+@pytest.mark.slow
+def test_joint_ppm_ler_monotone_steane_intercode():
+    """LER non-increasing in p across {1e-4, 3e-4, 1e-3} for Steane × Steane."""
+    from qldpc.circuits.noise_model import DepolarizingNoiseModel
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    lers = []
+    shots = 2000
+    for p in (1e-3, 3e-4, 1e-4):
+        nm = DepolarizingNoiseModel(p)
+        circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, noise_model=nm)
+        sampler = circuit.compile_detector_sampler()
+        _, obs = sampler.sample(shots, separate_observables=True)
+        # logical error rate of OBS 0 (joint χ XOR)
+        ler = (obs[:, 0] != 0).mean()
+        lers.append(ler)
+    # LER should be non-increasing as p decreases (tolerance 1.3× to absorb sampling noise)
+    assert lers[0] >= lers[1] / 1.3, f"LER not monotone: {lers}"
+    assert lers[1] >= lers[2] / 1.3, f"LER not monotone: {lers}"
