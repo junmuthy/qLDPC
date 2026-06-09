@@ -1273,9 +1273,11 @@ def test_stitch_intracode_basis_x_k_reduces_by_one():
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis):
+    import galois
     from qldpc.codes.surgery.gadget import build_gadget
     from qldpc.codes.surgery.bridge import build_bridge
     from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    GF2 = galois.GF(2)
     code = codes.SteaneCode()
     if basis is Pauli.X:
         x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -1290,6 +1292,19 @@ def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis):
     product = (HX @ HZ.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
     assert merged.dimension == 2 * code.dimension - 1
+    # Singletons excluded: (x_l, 0, ...) and (0, x_r, ...) NOT in rowspan of the
+    # check matrix that contains the joint stabilizer (HX for basis=X, HZ for Z).
+    H_joint = HX if basis is Pauli.X else HZ
+    n_l = code.num_qudits
+    base_rank = np.linalg.matrix_rank(GF2(H_joint.tolist()))
+    for which in ("left", "right"):
+        single = np.zeros(H_joint.shape[1], dtype=np.int_)
+        if which == "left":
+            single[:n_l] = x
+        else:
+            single[n_l : 2 * n_l] = x
+        augmented = np.vstack([H_joint, single.reshape(1, -1)])
+        assert np.linalg.matrix_rank(GF2(augmented.tolist())) == base_rank + 1, which
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
@@ -1329,3 +1344,4 @@ def test_stitch_intracode_both_bases_commute(basis):
     HZ = np.asarray(merged.matrix_z).astype(np.int_)
     product = (HX @ HZ.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
+    assert merged.dimension == code.dimension - 1
