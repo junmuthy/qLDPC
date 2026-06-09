@@ -32,7 +32,7 @@ def test_cheeger_constant_matches_boost_target():
     assert g_noop.F.shape[0] == g.F.shape[0], "boost to current h should be a no-op"
 
 
-def test_boost_gadget_dispatches_to_three_methods():
+def test_boost_gadget_dispatches_to_two_methods():
     from qldpc.circuits.surgery.gadget import (
         build_gadget, GadgetLayout,
     )
@@ -44,7 +44,7 @@ def test_boost_gadget_dispatches_to_three_methods():
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_x_bar_1_operator(data)
     g = build_gadget(code, x)
-    for method in ("spectral", "combinatorial", "distance"):
+    for method in ("combinatorial", "distance"):
         out = boost_gadget(g, method=method, target=1.0, seed=42)
         assert isinstance(out, GadgetLayout), f"method={method}"
 
@@ -55,13 +55,13 @@ def test_boost_gadget_seed_reproducible():
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x)
-    a = boost_gadget(g, method="spectral", target=1.0, seed=42)
-    b = boost_gadget(g, method="spectral", target=1.0, seed=42)
+    a = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
+    b = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
     assert np.array_equal(a.F, b.F)
     assert np.array_equal(a.HX_merged, b.HX_merged)
 
 
-@pytest.mark.parametrize("method", ["spectral", "combinatorial", "distance"])
+@pytest.mark.parametrize("method", ["combinatorial", "distance"])
 def test_boost_gadget_preserves_css_commutation(method):
     from qldpc.circuits.surgery.gadget import (
         build_gadget,

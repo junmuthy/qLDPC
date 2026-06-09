@@ -195,111 +195,6 @@ def cheeger_constant(g: GadgetLayout) -> float:
     return _spectral_cheeger_lower_bound(F)
 
 
-def boost_gadget_cheeger(
-    merged: CSSCode,
-    layout: SurgeryLayout,
-    *,
-    target_h: float = 1.0,
-    max_extra_qubits: int | None = None,
-    seed: int | None = None,
-) -> tuple[CSSCode, SurgeryLayout, BoostResult]:
-    """Heuristic Cheeger augmentation by random degree-2 edge addition.
-
-    Implements Webster (arXiv:2511.15989) §II.A end's "+n" trick:
-    iteratively add new κ' ancilla qubits to the gadget, each connecting
-    a random pair of X-checks (χ_i, χ_j) not already directly connected
-    via another κ, until the spectral lower bound on the boundary Cheeger
-    constant of F reaches target_h.
-
-    Args:
-        merged: merged CSSCode returned by build_layered_surgery_code.
-        layout: the associated SurgeryLayout (used to read F).
-        target_h: target Cheeger lower bound. Default 1.0.
-        max_extra_qubits: cap on additions. None = unbounded.
-        seed: RNG seed for reproducibility.
-
-    Returns:
-        (boosted_merged, boosted_layout, result).
-
-    Raises:
-        ValueError: target_h <= 0, max_extra_qubits < 0, or F too small.
-    """
-    if target_h <= 0:
-        raise ValueError(f"target_h must be positive, got {target_h}.")
-    if max_extra_qubits is not None and max_extra_qubits < 0:
-        raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
-    if layout.F.shape[1] < 2:
-        raise ValueError(
-            f"F has {layout.F.shape[1]} columns; need >= 2 X-checks to add an edge."
-        )
-
-    rng = np.random.default_rng(seed)
-    field = layout.F.__class__
-    F = np.asarray(layout.F).astype(np.int_).copy()
-    n_X = F.shape[1]
-
-    def _existing_pairs(F_arr: np.ndarray) -> set[tuple[int, int]]:
-        pairs: set[tuple[int, int]] = set()
-        for row in F_arr:
-            ones = np.flatnonzero(row)
-            for i in range(len(ones)):
-                for j in range(i + 1, len(ones)):
-                    pairs.add((int(ones[i]), int(ones[j])))
-        return pairs
-
-    extra = 0
-    iterations = 0
-    terminated_by = "no_progress"
-    h_lb = _spectral_cheeger_lower_bound(field(F))
-    max_iter_inner = 10 * n_X * n_X
-
-    while True:
-        iterations += 1
-        h_lb = _spectral_cheeger_lower_bound(field(F))
-        if h_lb >= target_h:
-            terminated_by = "target_reached"
-            break
-        if max_extra_qubits is not None and extra >= max_extra_qubits:
-            terminated_by = "max_qubits_exhausted"
-            break
-        if iterations > max_iter_inner:
-            terminated_by = "no_progress"
-            break
-
-        pairs = _existing_pairs(F)
-        candidate = None
-        for _attempt in range(n_X * 2):
-            i, j = sorted(int(x) for x in rng.choice(n_X, 2, replace=False))
-            if (i, j) not in pairs:
-                candidate = (i, j)
-                break
-        if candidate is None:
-            terminated_by = "no_progress"
-            break
-
-        new_row = np.zeros(n_X, dtype=np.int_)
-        new_row[candidate[0]] = 1
-        new_row[candidate[1]] = 1
-        F = np.vstack([F, new_row])
-        extra += 1
-
-    augmented_F = field(F)
-    # Use the same gauge-qubit reassembly as the combinatorial variant.
-    # The earlier synthetic-data-Z extension path was wrong: it injected
-    # identity Z rows on the new κ' qubits, breaking CSS commutation with
-    # the chi rows of HX. Routing through _reassemble_gadget_with_new_F
-    # (which treats boost-added qubits as pure gauge qubits with Z support
-    # only through G_aug = ker(F_aug^T)) preserves HX @ HZ^T = 0.
-    boosted_merged, boosted_layout = _reassemble_gadget_with_new_F(
-        merged, layout, augmented_F, extra,
-    )
-    return boosted_merged, boosted_layout, BoostResult(
-        extra_qubits_added=extra,
-        final_h_lower_bound=float(h_lb),
-        iterations=iterations,
-        terminated_by=terminated_by,
-    )
-
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class DistanceBoostResult:
@@ -783,8 +678,8 @@ def boost_gadget(
 
     Args:
         gadget: a GadgetLayout from build_gadget.
-        method: 'spectral' | 'combinatorial' | 'distance'.
-        target: target Cheeger constant (for spectral / combinatorial) or
+        method: 'combinatorial' | 'distance'.
+        target: target Cheeger constant (for combinatorial) or
             target distance (for distance method; cast via int(target)).
         seed: RNG seed.
         **kwargs: forwarded to the underlying boost function.
@@ -794,11 +689,7 @@ def boost_gadget(
         kappa_qubits.
     """
     merged0, layout0 = _gadget_to_legacy_layout(gadget)
-    if method == "spectral":
-        boosted_merged, boosted_layout, _ = boost_gadget_cheeger(
-            merged0, layout0, target_h=target, seed=seed, **kwargs,
-        )
-    elif method == "combinatorial":
+    if method == "combinatorial":
         boosted_merged, boosted_layout, _ = boost_gadget_cheeger_combinatorial(
             merged0, layout0, target_h=target, seed=seed, **kwargs,
         )
@@ -807,5 +698,7 @@ def boost_gadget(
             merged0, layout0, target_distance=int(target), seed=seed, **kwargs,
         )
     else:
-        raise ValueError(f"unknown method: {method!r}")
+        raise ValueError(
+            f"unknown method: {method!r}. Allowed: 'combinatorial', 'distance'."
+        )
     return _legacy_to_gadget(boosted_merged, boosted_layout, gadget)
