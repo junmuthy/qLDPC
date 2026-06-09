@@ -203,18 +203,23 @@ def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, in
     Edges: one per weight-2 row of F, between the two columns where the row has 1s.
 
     Raises:
+        ValueError: if any row of F has weight 1 (would-be self-loop / dangling edge).
         NotImplementedError: if any row of F has weight >= 3 (hyperedge), pointing to
         paper §II.C decomposition.
     """
     F_arr = np.asarray(F).astype(int)
-    n_V = F_arr.shape[1]
     G = nx.Graph()
-    G.add_nodes_from(range(n_V))
+    G.add_nodes_from(range(F_arr.shape[1]))
     edge_index: dict[tuple[int, int], int] = {}
     for i, row in enumerate(F_arr):
         eps = np.flatnonzero(row).tolist()
         if len(eps) == 0:
             continue
+        if len(eps) == 1:
+            raise ValueError(
+                f"F row {i} has weight 1 (column {eps[0]}). "
+                f"Auxiliary-graph edges require exactly 2 endpoints."
+            )
         if len(eps) >= 3:
             raise NotImplementedError(
                 f"F row {i} has weight {len(eps)} (hyperedge). "

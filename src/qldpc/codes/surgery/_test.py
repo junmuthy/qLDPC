@@ -1375,3 +1375,11 @@ def test_build_aux_graph_rejects_hyperedge():
     F = np.array([[1, 1, 1, 0], [0, 1, 1, 0]], dtype=np.uint8)
     with pytest.raises(NotImplementedError, match=r"hyperedge.*§II\.C"):
         _build_aux_graph_strict(F)
+
+
+def test_build_aux_graph_rejects_weight1_row():
+    """F rows of weight 1 raise ValueError (dangling edge / no-op stabilizer)."""
+    from qldpc.codes.surgery.bridge import _build_aux_graph_strict
+    F = np.array([[1, 1, 0, 0], [0, 0, 1, 0]], dtype=np.uint8)
+    with pytest.raises(ValueError, match=r"weight 1"):
+        _build_aux_graph_strict(F)
