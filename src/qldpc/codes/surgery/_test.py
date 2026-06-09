@@ -385,13 +385,13 @@ def test_skip_tree_fullrank_on_K4_matches_H_R():
     G_nx = nx.complete_graph(4)
     n = 4
     edges = sorted(tuple(sorted(e)) for e in G_nx.edges())
-    edge_index = {e: i for i, e in enumerate(edges)}
+    edge_index_verts = {e: i for i, e in enumerate(edges)}
     G_mat = np.zeros((len(edges), n), dtype=np.int_)
-    for (u, v), i in edge_index.items():
+    for (u, v), i in edge_index_verts.items():
         G_mat[i, u] = 1
         G_mat[i, v] = 1
 
-    T_ind, P_ind = _skip_tree_fullrank(G_nx, root=0, edge_index=edge_index)
+    T_ind, P_ind = _skip_tree_fullrank(G_nx, root=0, edge_index_verts=edge_index_verts)
     H_R = _canonical_H_R(n)
 
     assert T_ind.shape == (n - 1, len(edges))
@@ -399,7 +399,7 @@ def test_skip_tree_fullrank_on_K4_matches_H_R():
     # SkipTree key identity: T_ind · G · P_ind == H_R over GF(2)
     product = (T_ind @ G_mat @ P_ind) % 2
     assert np.array_equal(product, H_R), f"got\n{product}\nwant\n{H_R}"
-    # (3,2)-sparsity
+    # Paper Theorem 7: (3,2)-sparsity is a general invariant of SkipTree.
     assert T_ind.sum(axis=1).max() <= 3
     assert T_ind.sum(axis=0).max() <= 2
 

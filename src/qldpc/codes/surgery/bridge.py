@@ -110,35 +110,33 @@ def _canonical_H_R(w: int) -> np.ndarray:
 def _skip_tree_fullrank(
     S: nx.Graph,
     root: int = 0,
-    edge_index: dict[tuple[int, int], int] | None = None,
+    edge_index_verts: dict[tuple[int, int], int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute SkipTree (T, P) satisfying T · G · P == H_R (full-rank rep code).
 
-    Uses a spanning tree of S for the DFS vertex labeling (which gives P), then
-    computes shortest-path rows of T using the full graph S and the provided
-    edge_index.  This allows S to be an arbitrary connected graph (not just a tree).
+    Uses a spanning tree of S for the DFS vertex labeling (paper Algorithm 1
+    is defined on a tree), then expresses each T row as the XOR of shortest-
+    path edges in the full graph S. This lets S be any connected graph; the
+    direct _skip_tree call would IndexError on cyclic inputs.
 
-    Returns (T_ind, P_ind) of shapes (n-1, |E|) and (n, n).
+    Sparsity (paper Theorem 7): row weight ≤ 3, column weight ≤ 2.
+
+    Returns (T, P) of shapes (n-1, |E|) and (n, n).
     """
     n = S.number_of_nodes()
-    # Use the spanning tree for SkipTree DFS labeling only.
     span = nx.minimum_spanning_tree(S)
     _, P = _skip_tree(span, root=root, edge_index_verts=None)
-    # Recover the vertex-label ordering from P: label[l_idx] = v where P[v, l_idx]=1.
-    label = [int(np.where(P[:, l_idx])[0][0]) for l_idx in range(n)]
+    label = _label_inverse(P)
 
-    if edge_index is None:
-        edge_index = {tuple(sorted(e)): i for i, e in enumerate(S.edges())}
+    if edge_index_verts is None:
+        edge_index_verts = {tuple(sorted(e)): i for i, e in enumerate(S.edges())}
 
-    m = len(edge_index)
-    T = np.zeros((n - 1, m), dtype=np.int_)
+    T = np.zeros((n - 1, len(edge_index_verts)), dtype=np.int_)
     for l_idx in range(n - 1):
         path = nx.shortest_path(S, source=label[l_idx], target=label[l_idx + 1])
         for u, v in zip(path[:-1], path[1:]):
             e = tuple(sorted((u, v)))
-            T[l_idx, edge_index[e]] ^= 1  # XOR to handle back-and-forth paths
-
-    assert T.shape[0] == n - 1
+            T[l_idx, edge_index_verts[e]] ^= 1   # XOR cancels back-and-forth
     return T.astype(np.int_), P.astype(np.int_)
 
 
