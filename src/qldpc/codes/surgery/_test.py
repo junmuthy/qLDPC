@@ -251,21 +251,34 @@ def test_build_generalised_bicycle_code_constructs_css():
 WEBSTER_TABLE_I_KAPPA_CHI_R = [(0, 19), (1, 31), (2, 49), (3, 79)]
 
 
-def _webster_x_bar_operator(data: dict, name: str = "X_bar_1") -> np.ndarray:
-    """Extract the named X-type logical operator from a Webster seed_set dict.
+def _webster_x_bar_operator(data: dict, name: str = "X_bar_1", pauli_type: str = "X") -> np.ndarray:
+    """Extract the named logical operator from a Webster seed_set dict.
 
     L_support and R_support are sparse index lists (positions within each l-half
     that are set to 1). Returns a dense binary vector of length 2l.
+
+    Args:
+        data: Webster seed set dict (from load_webster_seed_set).
+        name: Seed name, e.g. "X_bar_1", "Z_bar_1".
+        pauli_type: "X" or "Z"; filters seeds by pauli_type field.
     """
     l = data["l"]
     for seed in data["seeds"]:
-        if seed["name"] == name and seed["pauli_type"] == "X":
+        if seed["name"] == name and seed["pauli_type"] == pauli_type:
             v_L = np.zeros(l, dtype=np.uint8)
             v_L[seed["L_support"]] = 1
             v_R = np.zeros(l, dtype=np.uint8)
             v_R[seed["R_support"]] = 1
             return np.concatenate([v_L, v_R])
-    raise ValueError(f"{name!r} seed not found")
+    raise ValueError(f"{name!r} (pauli_type={pauli_type!r}) seed not found")
+
+
+def _webster_z_bar_operator(data: dict, name: str = "Z_bar_1") -> np.ndarray:
+    """Extract the named Z-type logical operator from a Webster seed_set dict.
+
+    Convenience wrapper around _webster_x_bar_operator with pauli_type="Z".
+    """
+    return _webster_x_bar_operator(data, name, pauli_type="Z")
 
 
 def _webster_x_bar_1_operator(data: dict) -> np.ndarray:
@@ -1380,3 +1393,56 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
     # Joint observable 0 (chi XOR over rounds) deterministic = 0 in noiseless |+⟩^n init
     # Observable 1 (final M-X on V_0 ∪) deterministic = 0
     assert obs.sum() == 0
+
+
+def test_adapter_cycle_check_weight_bounded():
+    """Each new cycle-X row has weight <= 8 (SkipTree (3,2) + H_R weight 2). Basis=Z.
+
+    For basis=Z, the new adapter cycle checks are placed in HX (the last w-1 rows).
+    Each row has the form [T_l | H_R | T_r]:
+      - T_l row: at most 3 entries on cl_kappa (SkipTree (3,2)-sparsity)
+      - H_R row: exactly 2 entries on c_adapter (canonical rep code)
+      - T_r row: at most 3 entries on cr_kappa (SkipTree (3,2)-sparsity)
+    Total: weight <= 3 + 2 + 3 = 8.
+    """
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import _stitch_to_joint_csscode
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    # Use Z̄_1 for both sides (intra-code, same logical) — bridge.width =
+    # |V_0| = weight of Z̄_1, exercising the maximum-width cellulation path
+    x = _webster_z_bar_operator(data, "Z_bar_1")
+    g_l = build_gadget(code, x, basis=Pauli.Z)
+    g_r = build_gadget(code, x, basis=Pauli.Z)
+    bridge = build_bridge(g_l, g_r)
+    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    HX = np.asarray(merged.matrix_x).astype(np.int_)
+    # basis=Z: new cycle-X-checks are the last (w-1) rows of HX
+    new_x_rows = HX[-(bridge.width - 1):, :]
+    max_w = int(new_x_rows.sum(axis=1).max())
+    assert max_w <= 8, f"max new cycle-X weight {max_w} > 8"
+
+
+def test_cellulation_caps_aug_aux_cycle_length_on_webster():
+    """After cellulation, every basis cycle in the augmented aux graph has length <= 6."""
+    import networkx as nx
+    from qldpc.codes.surgery.gadget import (
+        build_gadget, load_webster_seed_set, _build_generalised_bicycle_code,
+    )
+    from qldpc.codes.surgery.bridge import build_bridge, _build_aux_graph_strict
+    data = load_webster_seed_set(0)
+    code = _build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x = _webster_z_bar_operator(data, "Z_bar_1")
+    g_l = build_gadget(code, x, basis=Pauli.Z)
+    g_r = build_gadget(code, x, basis=Pauli.Z)
+    bridge = build_bridge(g_l, g_r, cellulate_max_len=6)
+    # Build aux graph from g_l_aug.F and check cycle basis
+    G_aux, _ = _build_aux_graph_strict(bridge.g_l_aug.F)
+    cycles = nx.cycle_basis(G_aux)
+    if cycles:
+        assert max(len(c) for c in cycles) <= 6, (
+            f"max cycle length {max(len(c) for c in cycles)} > 6"
+        )
