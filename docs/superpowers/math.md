@@ -108,6 +108,17 @@ qLDPC Surgery 实现的数学总结
   disconnected, add weight-2 edges (= new κ qubits) until connected. Cellulate basis cycles
   to length ≤ max_len.
 
+  When F has rows of weight ≥ 4 (hyperedges, even-weight forced by F·1_{V_0}=0),
+  they are kept in F_aug so the gadget structure is unchanged but skipped in the
+  auxiliary graph 𝒢_s. SkipTree assigns T_s zero columns to hyperedge rows
+  (existing skip at _run_skiptree_on_port_subgraph), so the SkipTree key identity
+  T_s · F_aug · P_s = H_R reduces to its restriction onto the weight-2 sub-
+  incidence and holds automatically. CSS commutation, κ-cancellation, joint
+  observable, and dim−1 all hold by direct calculation. Paper Eq. 9's perfect-
+  matching decomposition (§II.C) is not applied; the structural distance
+  argument of Theorem 12 is replaced by empirical LER smoke tests, per the
+  paper's own remark at the end of §IV.
+
   2.3 SkipTree key identity
 
   Run SkipTree (paper §III Algorithm 1) on 𝒢_s_aug to obtain T_s ∈ F_2^{(w-1) × |E_aug|},

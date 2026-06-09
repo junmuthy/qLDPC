@@ -192,10 +192,12 @@ Replace `[data_l | data_r]` with a single `shared_data` block of width n. `χ^(s
 
 ### Hyperedge handling
 
-The build raises `NotImplementedError("hyperedge requires §II.C decomposition")` if any F row has
-weight ≥ 3. For the curated BB / LP code + logical pairs used in `examples/`, this never triggers
-(paper §VII.A confirms BB_1 [[98,6,12]] and LP_2 [[200,20,10]] both have only weight-2 F rows on
-the chosen logicals).
+The build silently skips F rows of weight ≥ 4; T_s gets zero columns there
+automatically (existing logic in `_run_skiptree_on_port_subgraph`). CSS
+commutation, κ-cancellation, joint observable, and dim−1 are preserved.
+See `docs/superpowers/specs/2026-06-09-bridge-hyperedge-and-cellulate-fix-design.md`
+for the proof and the rationale for choosing this over paper-faithful §II.C
+decomposition.
 
 ## §4. Joint observable + α* selection
 
