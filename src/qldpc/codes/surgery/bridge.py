@@ -156,12 +156,21 @@ def _cellulate_port_subgraph(
     """Break port-subgraph cycles longer than ``max_len`` by adding chords.
 
     SkipTree runs on G_aux.subgraph(ports); cycles entirely outside the
-    port subgraph never enter T_s, so we cellulate only there. The full-graph
-    version (the previous _cellulate_strict) failed spuriously on real BB
-    codes when the only long cycles threaded through non-port vertices.
+    port subgraph never enter T_s, so we cellulate only there.
+
+    Theorem 7 (arXiv:2410.03628) already bounds T_s row weight at ≤ 3
+    regardless of cycle length, so this step is not load-bearing for
+    correctness — it tightens the structural distance argument (Theorem 12)
+    by capping basis cycle lengths.
+
+    The full-graph version (the previous _cellulate_strict) failed spuriously
+    on real BB codes when |V_0| > w and a long cycle threaded through non-port
+    vertices: no available port-port chord existed despite the port subgraph
+    being fine on its own.
 
     Chords are added to ``G_aux`` (the full graph). For port-subgraph cycles,
-    chord endpoints are necessarily ports (cycle vertices = port vertices).
+    chord endpoints are necessarily ports (cycle vertices = port vertices),
+    so no port-membership filter is needed in the chord-search loop.
 
     Returns the list of added (u, v) edges in insertion order. Idempotent
     once all port-subgraph basis cycles fit under the cap.
@@ -199,19 +208,21 @@ def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, in
     Vertices: range(|V_0|) = range(F.shape[1]).
     Edges: one per weight-2 row of F, between the two columns where the row has 1s.
 
-    Weight-≥3 rows (hyperedges) are silently ignored — they remain in F_aug so
-    the gadget structure (G_aug = ker(F_aug^T), deformed check c → c · X(κ_r))
-    is unchanged, but T_s assigns them zero columns (existing skip at
-    _run_skiptree_on_port_subgraph). CSS commutation, κ-cancellation, joint
-    observable, and dimension counting all hold by direct calculation;
-    see docs/superpowers/specs/2026-06-09-bridge-hyperedge-and-cellulate-fix-design.md
-    §correctness-proof. Paper Eq. 9's perfect-matching decomposition (§II.C)
-    is not applied; structural Theorem 12 distance argument is substituted
-    by empirical LER smoke tests.
+    Why skipping hyperedges is safe — paired with the guard at
+    `_run_skiptree_on_port_subgraph` (search for `if len(cols) != 2: continue`),
+    which assigns T_s zero columns on those same rows. So
+        (T_s · F_aug)[c, v] = Σ_{k: weight-2 row} T_s[c,k] · F_aug[k, v]
+                            = H_R[c, label(v)] · [v ∈ port]      (SkipTree identity)
+    and the hyperedge rows contribute 0 regardless of F_aug[r, v]. χ_v · cycle_c
+    on the κ side cancels the adapter side, CSS commutation holds. The hyperedge
+    κ qubit itself stays in F_aug, so the gadget (G_aug = ker(F_aug^T), deformed
+    check c → c · X(κ_r), χ_v) is untouched. Paper Eq. 9's perfect-matching
+    decomposition (§II.C) is not applied; structural Theorem 12 distance
+    argument is replaced by empirical LER smoke tests.
 
     Raises:
-        ValueError: if any row of F has weight 1 (defensive — F · 1 = 0 mod 2
-        forbids odd weights for a valid logical).
+        ValueError: if any row of F has weight 1 (defensive — F · 1_{V_0} = 0
+        mod 2 forbids odd weights for any valid logical x with H · x = 0).
     """
     F_arr = np.asarray(F).astype(int)
     G = nx.Graph()
@@ -309,6 +320,12 @@ def _run_skiptree_on_port_subgraph(
     T_full = np.zeros((T_relab.shape[0], F_aug.shape[0]), dtype=np.int_)
     for r in range(F_aug.shape[0]):
         cols = np.flatnonzero(F_aug[r])
+        # Load-bearing skip: T_s gets zero columns on hyperedge rows (weight ≥ 3)
+        # and on rows whose endpoints are outside the port subgraph. Paired with
+        # _build_aux_graph_strict's matching skip; together they make hyperedge κ
+        # qubits invisible to (T_s · F_aug), so χ_v · cycle_c commutation reduces
+        # to the weight-2 sub-incidence SkipTree identity. See bridge.py docstring
+        # for _build_aux_graph_strict for the proof sketch.
         if len(cols) != 2:
             continue
         u_orig, v_orig = sorted(int(x) for x in cols)
