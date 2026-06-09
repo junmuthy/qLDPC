@@ -92,6 +92,56 @@ def _skip_tree(
     return T, P
 
 
+def _canonical_H_R(w: int) -> np.ndarray:
+    """Full-rank canonical rep-code parity check matrix, shape (w-1) × w.
+
+    Row i has 1s in columns i and i+1. rank == w-1; column 0 and column w-1 have
+    weight 1, other columns weight 2.
+    """
+    if w < 2:
+        raise ValueError(f"H_R requires w >= 2, got {w}")
+    H = np.zeros((w - 1, w), dtype=np.int_)
+    for i in range(w - 1):
+        H[i, i] = 1
+        H[i, i + 1] = 1
+    return H
+
+
+def _skip_tree_fullrank(
+    S: nx.Graph,
+    root: int = 0,
+    edge_index: dict[tuple[int, int], int] | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute SkipTree (T, P) satisfying T · G · P == H_R (full-rank rep code).
+
+    Uses a spanning tree of S for the DFS vertex labeling (which gives P), then
+    computes shortest-path rows of T using the full graph S and the provided
+    edge_index.  This allows S to be an arbitrary connected graph (not just a tree).
+
+    Returns (T_ind, P_ind) of shapes (n-1, |E|) and (n, n).
+    """
+    n = S.number_of_nodes()
+    # Use the spanning tree for SkipTree DFS labeling only.
+    span = nx.minimum_spanning_tree(S)
+    _, P = _skip_tree(span, root=root, edge_index_verts=None)
+    # Recover the vertex-label ordering from P: label[l_idx] = v where P[v, l_idx]=1.
+    label = [int(np.where(P[:, l_idx])[0][0]) for l_idx in range(n)]
+
+    if edge_index is None:
+        edge_index = {tuple(sorted(e)): i for i, e in enumerate(S.edges())}
+
+    m = len(edge_index)
+    T = np.zeros((n - 1, m), dtype=np.int_)
+    for l_idx in range(n - 1):
+        path = nx.shortest_path(S, source=label[l_idx], target=label[l_idx + 1])
+        for u, v in zip(path[:-1], path[1:]):
+            e = tuple(sorted((u, v)))
+            T[l_idx, edge_index[e]] ^= 1  # XOR to handle back-and-forth paths
+
+    assert T.shape[0] == n - 1
+    return T.astype(np.int_), P.astype(np.int_)
+
+
 def _cellulate_long_cycles(
     G: nx.Graph,
     edge_qubit_to_vertices: dict[int, tuple[int, int]],

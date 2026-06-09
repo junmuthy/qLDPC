@@ -377,6 +377,33 @@ def test_skip_tree_path_graph_returns_identity():
     assert np.array_equal(P.sum(axis=1), np.ones(5, dtype=np.int_))
 
 
+def test_skip_tree_fullrank_on_K4_matches_H_R():
+    """SkipTree full-rank: T_ind · G · P_ind = H_R for the complete graph K_4."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _skip_tree_fullrank, _canonical_H_R
+
+    G_nx = nx.complete_graph(4)
+    n = 4
+    edges = sorted(tuple(sorted(e)) for e in G_nx.edges())
+    edge_index = {e: i for i, e in enumerate(edges)}
+    G_mat = np.zeros((len(edges), n), dtype=np.int_)
+    for (u, v), i in edge_index.items():
+        G_mat[i, u] = 1
+        G_mat[i, v] = 1
+
+    T_ind, P_ind = _skip_tree_fullrank(G_nx, root=0, edge_index=edge_index)
+    H_R = _canonical_H_R(n)
+
+    assert T_ind.shape == (n - 1, len(edges))
+    assert P_ind.shape == (n, n)
+    # SkipTree key identity: T_ind · G · P_ind == H_R over GF(2)
+    product = (T_ind @ G_mat @ P_ind) % 2
+    assert np.array_equal(product, H_R), f"got\n{product}\nwant\n{H_R}"
+    # (3,2)-sparsity
+    assert T_ind.sum(axis=1).max() <= 3
+    assert T_ind.sum(axis=0).max() <= 2
+
+
 def test_cellulate_long_cycles_no_op_when_short():
     """Cellulation of a graph with no long cycles returns no new edges."""
     import networkx as nx
