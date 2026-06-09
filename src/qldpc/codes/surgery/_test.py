@@ -1345,3 +1345,38 @@ def test_stitch_intracode_both_bases_commute(basis):
     product = (HX @ HZ.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
     assert merged.dimension == code.dimension - 1
+
+
+def test_build_joint_ppm_circuit_chi_check_ids_no_UB():
+    """build_joint_ppm_circuit's noiseless first sample has zero detectors firing."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    circuit, merged = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=2)
+    # noiseless: all detectors must NOT fire on first sample
+    sampler = circuit.compile_detector_sampler()
+    dets, _ = sampler.sample(8, separate_observables=True)
+    assert dets.sum() == 0
+
+
+def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
+    """basis=X init: data in |+⟩, κ in |0⟩, adapter in |0⟩. Joint observables are deterministic."""
+    from qldpc.codes.surgery.gadget import build_gadget
+    from qldpc.codes.surgery.bridge import build_bridge
+    from qldpc.codes.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=2)
+    sampler = circuit.compile_detector_sampler()
+    _, obs = sampler.sample(8, separate_observables=True)
+    # Joint observable 0 (chi XOR over rounds) deterministic = 0 in noiseless |+⟩^n init
+    # Observable 1 (final M-X on V_0 ∪) deterministic = 0
+    assert obs.sum() == 0

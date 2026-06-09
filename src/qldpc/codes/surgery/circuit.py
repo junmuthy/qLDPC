@@ -336,15 +336,211 @@ def _stitch_intracode_joint_csscode_basis_z(g_l, g_r, bridge):
 
 
 def build_joint_ppm_circuit(
-    g1: GadgetLayout,
-    g2: GadgetLayout,
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
     bridge: Bridge,
     *,
     rounds: int,
     noise_model=None,
 ) -> tuple[stim.Circuit, CSSCode]:
-    """Cain §III.A joint-PPM circuit; chi = χ^(1) ∪ χ^(2) ∪ U_B (math.md §2.7)."""
-    raise NotImplementedError("build_joint_ppm_circuit rewritten in Task 11")
+    """Joint-PPM circuit per spec §4 (universal adapter, no U_B in α*)."""
+    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    qubit_ids = QubitIDs.from_code(joint_code)
+    intercode = g_l.code is not g_r.code
+
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits if intercode else 0
+    k_l = g_l_aug.F.shape[0]
+    k_r = g_r_aug.F.shape[0]
+    w = bridge.width
+
+    if intercode:
+        data_ids = qubit_ids.data[: n_l + n_r]
+        v0_combined = tuple(g_l.V0) + tuple(n_l + i for i in g_r.V0)
+    else:
+        data_ids = qubit_ids.data[: n_l]
+        v0_combined = tuple(g_l.V0) + tuple(g_r.V0)
+    kappa_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
+    bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
+    assert len(bridge_ids) == w
+
+    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
+    circuit += _surgery_state_prep(g_l, data_ids, kappa_ids, bridge_ids)
+    qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
+        g_l, g_r, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
+        intercode=intercode,
+    )
+    circuit += qec_cycle
+    circuit += _surgery_detach_and_readout(
+        g_l, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
+    circuit += _surgery_final_detectors_joint(
+        g_l, g_r, joint_code, qubit_ids,
+        measurement_record=measurement_record,
+        intercode=intercode,
+    )
+
+    # χ check IDs per spec §4: data H_X^(l) rows occupy first mX_l indices in
+    # qubit_ids.checks_x, then m_X_r (inter-code), then χ^(l), then χ^(r).
+    if bridge.basis is Pauli.X:
+        check_ids = qubit_ids.checks_x
+        m_l = g_l.code.matrix_x.shape[0]
+        m_r = g_r.code.matrix_x.shape[0] if intercode else 0
+    else:
+        check_ids = qubit_ids.checks_z
+        m_l = g_l.code.matrix_z.shape[0]
+        m_r = g_r.code.matrix_z.shape[0] if intercode else 0
+    n_V_l = len(g_l.V0)
+    n_V_r = len(g_r.V0)
+    chi_l_offset = m_l + m_r
+    chi_r_offset = chi_l_offset + n_V_l
+    chi_l_ids = tuple(check_ids[chi_l_offset : chi_l_offset + n_V_l])
+    chi_r_ids = tuple(check_ids[chi_r_offset : chi_r_offset + n_V_r])
+    chi_check_ids = chi_l_ids + chi_r_ids   # NO U_B / no adapter cycle-check ids
+
+    circuit += _surgery_observable(
+        g_l,
+        chi_check_ids=chi_check_ids,
+        data_ids=data_ids,
+        v0_indices=v0_combined,
+        num_rounds=rounds,
+        measurement_record=measurement_record,
+    )
+
+    if noise_model is not None:
+        circuit = noise_model.noisy_circuit(circuit)
+    return circuit, joint_code
+
+
+def _classify_reliable_round1_checks_joint(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    qubit_ids: QubitIDs,
+    *,
+    intercode: bool,
+) -> tuple[int, ...]:
+    """Joint-code variant: reliable checks across both gadgets + new cycle rows.
+
+    basis=X (data |+⟩, κ + bridge |0⟩):
+        H_X rows = [data H_X^(l), data H_X^(r), χ^(l), χ^(r)]
+        H_Z rows = [data H_Z^(l) ext, data H_Z^(r) ext, G^(l)_aug, G^(r)_aug, new cycle-Z]
+
+      Reliable X: data H_X rows of both gadgets.
+      Reliable Z: G_aug rows + new cycle-Z rows (all act on κ ∪ bridge, all |0⟩).
+
+    basis=Z is the X↔Z dual.
+    """
+    m_X_l = g_l.code.matrix_x.shape[0]
+    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
+    m_Z_l = g_l.code.matrix_z.shape[0]
+    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
+    if g_l.basis is Pauli.X:
+        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]   # data H_X^(l/r)
+        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]   # G_aug + new cycle-Z
+    else:
+        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]   # G_aug + new cycle-X
+        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]   # data H_Z^(l/r)
+    return tuple(reliable_x) + tuple(reliable_z)
+
+
+def _surgery_qec_cycle_joint(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    joint_code: CSSCode,
+    num_rounds: int,
+    qubit_ids: QubitIDs,
+    *,
+    intercode: bool,
+) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
+    """Joint-code variant of _surgery_qec_cycle that classifies reliable checks
+    across both gadgets + the bridge's new cycle-checks."""
+    strategy = EdgeColoring()
+    one_round, round_measurement_record = strategy.get_circuit(joint_code, qubit_ids)
+    reliable = set(_classify_reliable_round1_checks_joint(
+        g_l, g_r, qubit_ids, intercode=intercode,
+    ))
+    all_check_ids = qubit_ids.check
+
+    circuit = stim.Circuit()
+    measurement_record = MeasurementRecord()
+    detector_record = DetectorRecord()
+
+    circuit += one_round
+    measurement_record.append(round_measurement_record)
+    for kk, check_id in enumerate(all_check_ids):
+        if check_id in reliable:
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, 0, kk))
+    reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
+    detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
+
+    if num_rounds > 1:
+        repeat_circuit = one_round.copy()
+        measurement_record.append(round_measurement_record)
+        repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+        for kk, check_id in enumerate(all_check_ids):
+            repeat_circuit.append("DETECTOR", [
+                measurement_record.get_target_rec(check_id, -1),
+                measurement_record.get_target_rec(check_id, -2),
+            ], (0, 0, kk))
+        circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
+        measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
+        detector_record.append(
+            {cid: dd for dd, cid in enumerate(all_check_ids)},
+            repeat=num_rounds - 1,
+        )
+
+    return circuit, measurement_record, detector_record
+
+
+def _surgery_final_detectors_joint(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    joint_code: CSSCode,
+    qubit_ids: QubitIDs,
+    *,
+    measurement_record: MeasurementRecord,
+    intercode: bool,
+) -> stim.Circuit:
+    """Joint-code variant of _surgery_final_detectors.
+
+    Emits detectors for the same reliable stabilizers as the round-1 classifier:
+    basis=X: data H_X rows from both gadgets + G_aug + new cycle-Z rows.
+    basis=Z: data H_Z rows from both gadgets + G_aug + new cycle-X rows.
+    """
+    m_X_l = g_l.code.matrix_x.shape[0]
+    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
+    m_Z_l = g_l.code.matrix_z.shape[0]
+    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
+    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
+    HZ = np.asarray(joint_code.matrix_z).astype(np.uint8)
+
+    circuit = stim.Circuit()
+
+    def _emit_detector(stab_row: np.ndarray, check_id: int, det_idx: int) -> None:
+        supp = np.where(stab_row)[0]
+        targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
+        targets.append(measurement_record.get_target_rec(check_id, -1))
+        circuit.append("DETECTOR", targets, (0, 0, det_idx))
+
+    if g_l.basis is Pauli.X:
+        # data H_X rows from both gadgets
+        for kk in range(m_X_l + m_X_r):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk], kk)
+        # G_aug rows + new cycle-Z rows: indices [m_Z_l + m_Z_r : HZ.shape[0])
+        det_offset = m_X_l + m_X_r
+        for offset, kk in enumerate(range(m_Z_l + m_Z_r, HZ.shape[0])):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], det_offset + offset)
+    else:
+        # data H_Z rows from both gadgets
+        for kk in range(m_Z_l + m_Z_r):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], kk)
+        det_offset = m_Z_l + m_Z_r
+        for offset, kk in enumerate(range(m_X_l + m_X_r, HX.shape[0])):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk], det_offset + offset)
+
+    return circuit
 
 
 def _classify_reliable_round1_checks(
