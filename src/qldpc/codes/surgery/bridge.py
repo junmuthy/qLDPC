@@ -177,6 +177,47 @@ def _cellulate_long_cycles(
     return new_edges, edge_qubit_to_vertices, vert_to_edge, G_mat
 
 
+def _cellulate_strict(
+    G_aux: nx.Graph,
+    ports: tuple[int, ...],
+    *,
+    max_len: int = 6,
+) -> list[tuple[int, int]]:
+    """Break cycles longer than ``max_len`` by adding chord edges.
+
+    Mutates G_aux. Only adds chords whose endpoints lie in ``ports`` so the
+    added edges remain valid weight-2 rows of the augmented F matrix.
+
+    Returns the list of added edges in insertion order. Idempotent once all
+    basis cycles fit under the cap.
+    """
+    ports_set = set(ports)
+    added: list[tuple[int, int]] = []
+    while True:
+        long_cycles = [c for c in nx.cycle_basis(G_aux) if len(c) > max_len]
+        if not long_cycles:
+            return added
+        cycle = long_cycles[0]
+        n = len(cycle)
+        # Try chord at antipodal position; otherwise scan for any port-port chord
+        for offset in range(1, n):
+            u = cycle[0]
+            v = cycle[offset % n]
+            if u not in ports_set or v not in ports_set:
+                continue
+            u, v = sorted((u, v))
+            if G_aux.has_edge(u, v):
+                continue
+            G_aux.add_edge(u, v)
+            added.append((u, v))
+            break
+        else:
+            raise RuntimeError(
+                f"No port-port chord found to cellulate cycle of length {n}; "
+                f"ports={ports!r}, cycle={cycle!r}"
+            )
+
+
 def _build_auxiliary_graph_from_F(
     F: np.ndarray,
 ) -> tuple[nx.Graph, dict[int, tuple[int, int]]]:

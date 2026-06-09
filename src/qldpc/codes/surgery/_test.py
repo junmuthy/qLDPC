@@ -1409,3 +1409,25 @@ def test_connect_induced_subgraph_adds_edges_to_disconnected_components():
     assert {u, v} & {0, 1} and {u, v} & {2, 3}
     # G_aux mutated: induced subgraph now connected
     assert nx.is_connected(G_aux.subgraph((0, 1, 2, 3)))
+
+
+def test_cellulate_caps_cycle_length():
+    """After cellulation, every basis cycle has length <= cap."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_strict
+    # 10-cycle: 0-1-2-...-9-0 has one length-10 basis cycle
+    G_aux = nx.cycle_graph(10)
+    added = _cellulate_strict(G_aux, ports=tuple(range(10)), max_len=6)
+    assert len(added) >= 1
+    # All basis cycles now bounded
+    cycles = nx.cycle_basis(G_aux)
+    assert max(len(c) for c in cycles) <= 6
+
+
+def test_cellulate_no_op_when_already_short():
+    """If all basis cycles are short, no edges are added."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_strict
+    G_aux = nx.cycle_graph(4)  # one 4-cycle
+    added = _cellulate_strict(G_aux, ports=(0, 1, 2, 3), max_len=6)
+    assert added == []
