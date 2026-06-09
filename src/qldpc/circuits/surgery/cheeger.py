@@ -86,9 +86,9 @@ class BoostResult:
 def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     """Exact boundary Cheeger constant of F per Webster §II.A Definition 1.
 
-    Helper / sanity-check tool. NOT used by ``boost_gadget_cheeger`` (which
-    follows Williamson-Yoder / Webster: random edge addition + distance
-    verification). Kept for diagnostic use to debug the cut structure
+    Helper / sanity-check tool. Used by ``boost_gadget_cheeger_combinatorial``
+    (which follows Williamson-Yoder / Webster: random edge addition + distance
+    verification). Also kept for diagnostic use to debug the cut structure
     when a boost run is unexpectedly long.
 
     For bipartite incidence F: V -> C (V = X-check χ_i indices, C = κ_j
@@ -158,8 +158,8 @@ def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
 
     Returns ``lambda_2(F_float @ F_float.T) / 2.0``, where F_float =
     F.astype(np.float64). This is a tractable lower bound based on the
-    discrete Cheeger inequality and is what boost_gadget_cheeger uses to
-    decide when to stop adding augmentation qubits.
+    discrete Cheeger inequality, used by ``cheeger_constant`` when
+    ``|V_0| > 26`` makes the exact subset enumeration infeasible.
 
     Args:
         F: GF(2) restriction matrix of shape (|C_0|, |V_0|).
@@ -594,7 +594,7 @@ def boost_gadget_distance(
 
 def _gadget_to_legacy_layout(g):
     """Convert a GadgetLayout into the legacy (CSSCode, SurgeryLayout) pair
-    consumed by boost_gadget_cheeger* / boost_gadget_distance.
+    consumed by boost_gadget_cheeger_combinatorial / boost_gadget_distance.
 
     For basis=Pauli.Z, we SWAP HX/HZ so the legacy boost code (designed for
     X-basis chi rows in HX_merged) sees the chi rows where it expects them.
