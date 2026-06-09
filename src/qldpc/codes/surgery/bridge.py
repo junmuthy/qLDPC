@@ -147,43 +147,39 @@ def _skip_tree_fullrank(
     return T.astype(np.int_), P.astype(np.int_)
 
 
-def _cellulate_strict(
+def _cellulate_port_subgraph(
     G_aux: nx.Graph,
     ports: tuple[int, ...],
     *,
     max_len: int = 6,
 ) -> list[tuple[int, int]]:
-    """Break cycles longer than ``max_len`` by adding chord edges.
+    """Break port-subgraph cycles longer than ``max_len`` by adding chords.
 
-    Mutates G_aux. Only adds chords whose endpoints lie in ``ports`` so the
-    added edges remain valid weight-2 rows of the augmented F matrix.
+    SkipTree runs on G_aux.subgraph(ports); cycles entirely outside the
+    port subgraph never enter T_s, so we cellulate only there. The full-graph
+    version (the previous _cellulate_strict) failed spuriously on real BB
+    codes when the only long cycles threaded through non-port vertices.
 
-    Returns the list of added edges in insertion order. Idempotent once all
-    basis cycles fit under the cap.
+    Chords are added to ``G_aux`` (the full graph). For port-subgraph cycles,
+    chord endpoints are necessarily ports (cycle vertices = port vertices).
+
+    Returns the list of added (u, v) edges in insertion order. Idempotent
+    once all port-subgraph basis cycles fit under the cap.
     """
-    ports_set = set(ports)
     added: list[tuple[int, int]] = []
     while True:
-        long_cycles = [c for c in nx.cycle_basis(G_aux) if len(c) > max_len]
+        sub = G_aux.subgraph(ports)
+        long_cycles = [c for c in nx.cycle_basis(sub) if len(c) > max_len]
         if not long_cycles:
             return added
         cycle = long_cycles[0]
         n = len(cycle)
-        # Scan all (i, j) cycle-vertex pairs for the first port-port chord we
-        # can add. Anchoring on cycle[0] alone would fail spuriously when
-        # cycle[0] ∉ ports_set, even though valid chords exist elsewhere.
         chord_found = False
         for i in range(n):
             if chord_found:
                 break
-            u_raw = cycle[i]
-            if u_raw not in ports_set:
-                continue
-            for j in range(i + 1, n):
-                v_raw = cycle[j]
-                if v_raw not in ports_set:
-                    continue
-                u, v = sorted((u_raw, v_raw))
+            for j in range(i + 2, n):
+                u, v = sorted((cycle[i], cycle[j]))
                 if G_aux.has_edge(u, v):
                     continue
                 G_aux.add_edge(u, v)
@@ -192,8 +188,8 @@ def _cellulate_strict(
                 break
         if not chord_found:
             raise RuntimeError(
-                f"No port-port chord found to cellulate cycle of length {n}; "
-                f"ports={ports!r}, cycle={cycle!r}"
+                f"No chord found to cellulate port-subgraph cycle of length {n}; "
+                f"cycle={cycle!r}"
             )
 
 
@@ -373,8 +369,8 @@ def build_bridge(
     extras_r_conn = _connect_induced_subgraph(G_r_aux, port_r)
 
     # Step 4: cellulation
-    extras_l_cell = _cellulate_strict(G_l_aux, port_l, max_len=cellulate_max_len)
-    extras_r_cell = _cellulate_strict(G_r_aux, port_r, max_len=cellulate_max_len)
+    extras_l_cell = _cellulate_port_subgraph(G_l_aux, port_l, max_len=cellulate_max_len)
+    extras_r_cell = _cellulate_port_subgraph(G_r_aux, port_r, max_len=cellulate_max_len)
 
     extras_l_edges = extras_l_conn + extras_l_cell
     extras_r_edges = extras_r_conn + extras_r_cell

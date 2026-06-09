@@ -1052,33 +1052,80 @@ def test_connect_induced_subgraph_adds_edges_to_disconnected_components():
 def test_cellulate_caps_cycle_length():
     """After cellulation, every basis cycle has length <= cap."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_strict
+    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
     # 10-cycle: 0-1-2-...-9-0 has one length-10 basis cycle
     G_aux = nx.cycle_graph(10)
-    added = _cellulate_strict(G_aux, ports=tuple(range(10)), max_len=6)
+    added = _cellulate_port_subgraph(G_aux, ports=tuple(range(10)), max_len=6)
     assert len(added) >= 1
     # All basis cycles now bounded
-    cycles = nx.cycle_basis(G_aux)
-    assert max(len(c) for c in cycles) <= 6
+    sub = G_aux.subgraph(tuple(range(10)))
+    assert max((len(c) for c in nx.cycle_basis(sub)), default=0) <= 6
 
 
 def test_cellulate_no_op_when_already_short():
     """If all basis cycles are short, no edges are added."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_strict
+    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
     G_aux = nx.cycle_graph(4)  # one 4-cycle
-    added = _cellulate_strict(G_aux, ports=(0, 1, 2, 3), max_len=6)
+    added = _cellulate_port_subgraph(G_aux, ports=(0, 1, 2, 3), max_len=6)
     assert added == []
 
 
-def test_cellulate_raises_when_no_port_chord_available():
-    """RuntimeError when long cycle exists but no port-port chord can be added."""
+def test_cellulate_raises_when_port_cycle_has_no_available_chord():
+    """RuntimeError when a port-subgraph cycle exists but every (i, j) pair
+    is already an edge — i.e. the port subgraph is complete on those vertices."""
     import networkx as nx
-    from qldpc.codes.surgery.bridge import _cellulate_strict
-    G_aux = nx.cycle_graph(10)
-    # Only cycle[0] is a port → no port-port pair exists in the cycle
-    with pytest.raises(RuntimeError, match=r"No port-port chord"):
-        _cellulate_strict(G_aux, ports=(0,), max_len=6)
+    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    # 7-cycle 0-1-2-3-4-5-6-0 plus ALL chords among {0..6} → complete graph K_7.
+    # cycle_basis still surfaces cycles of length > max_len in K_7 (basis cycles
+    # are length-3 triangles), so no long cycle exists in this case.
+    # Instead: make a 7-cycle without any extra edges, then call with max_len=2.
+    G = nx.cycle_graph(7)
+    ports = tuple(range(7))
+    # Already a complete graph K_7? No — cycle_graph(7) has only 7 edges.
+    # Pre-saturate with all possible chords so no chord can be added:
+    for i in range(7):
+        for j in range(i + 2, 7):
+            if not G.has_edge(i, j) and (i, j) != (0, 6):
+                G.add_edge(i, j)
+    # Now every (i, j) with j >= i+2 in the 7-cycle is already an edge.
+    # A length-7 basis cycle no longer exists (it's broken into triangles),
+    # so max_len=6 finds no long cycle and returns []. Use max_len=2 to force
+    # the failure path:
+    with pytest.raises(RuntimeError, match=r"No chord found"):
+        _cellulate_port_subgraph(G, ports, max_len=2)
+
+
+def test_cellulate_port_subgraph_breaks_long_port_cycle():
+    """A cycle > max_len in the port subgraph gets broken by adding a chord."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    # 10-cycle on port vertices only
+    G = nx.cycle_graph(10)
+    ports = tuple(range(10))
+    added = _cellulate_port_subgraph(G, ports, max_len=6)
+    assert len(added) >= 1
+    # All port-subgraph basis cycles now bounded
+    sub = G.subgraph(ports)
+    for c in nx.cycle_basis(sub):
+        assert len(c) <= 6
+
+
+def test_cellulate_port_subgraph_skips_non_port_cycle():
+    """Long cycle entirely on non-port vertices is ignored; no edges added."""
+    import networkx as nx
+    from qldpc.codes.surgery.bridge import _cellulate_port_subgraph
+    G = nx.Graph()
+    # Long non-port cycle: 10-11-12-...-17-10 (length 8)
+    G.add_edges_from([(10, 11), (11, 12), (12, 13), (13, 14),
+                      (14, 15), (15, 16), (16, 17), (17, 10)])
+    # Short port cycle: triangle on 0,1,2
+    G.add_edges_from([(0, 1), (1, 2), (2, 0)])
+    ports = (0, 1, 2)
+    n_edges_before = G.number_of_edges()
+    added = _cellulate_port_subgraph(G, ports, max_len=6)
+    assert added == []
+    assert G.number_of_edges() == n_edges_before
 
 
 def test_build_gadget_augmented_extends_F_and_recomputes_G():
@@ -1459,12 +1506,14 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
     g_l = build_gadget(code, x, basis=Pauli.Z)
     g_r = build_gadget(code, x, basis=Pauli.Z)
     bridge = build_bridge(g_l, g_r, cellulate_max_len=6)
-    # Build aux graph from g_l_aug.F and check cycle basis
+    # Cellulation is now scoped to the port subgraph (where SkipTree runs).
+    # Inspect cycles on the induced port subgraph, not the full graph.
     G_aux, _ = _build_aux_graph_strict(bridge.g_l_aug.F)
-    cycles = nx.cycle_basis(G_aux)
+    sub = G_aux.subgraph(bridge.port_l)
+    cycles = nx.cycle_basis(sub)
     if cycles:
         assert max(len(c) for c in cycles) <= 6, (
-            f"max cycle length {max(len(c) for c in cycles)} > 6"
+            f"max port-subgraph cycle length {max(len(c) for c in cycles)} > 6"
         )
 
 
