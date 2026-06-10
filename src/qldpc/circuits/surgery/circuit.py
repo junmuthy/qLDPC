@@ -101,23 +101,19 @@ def _surgery_qubit_coordinates(
         m_Z_r = g_r.code.matrix_z.shape[0]
         chi_r = len(g_r.V0)
         G_r = g_r.G.shape[0]
-        k_r = len(g_r.kappa_qubits)
     elif joint is not None:  # intracode: data shared, ancillas separate per gadget
         n_r = 0
         m_X_r = m_Z_r = 0  # data checks not duplicated for intracode
         chi_r = len(g_r.V0)
         G_r = g_r.G.shape[0]
-        # for intracode bridge code, kappa is the augmented one
-        k_l = bridge.g_l_aug.F.shape[0]
-        k_r = bridge.g_r_aug.F.shape[0]
     else:
         n_r = 0
         m_X_r = m_Z_r = 0
         chi_r = G_r = k_r = 0
 
-    # For joint cases, kappa counts come from the augmented gadgets carried
-    # by the bridge — they may exceed the bare gadget's |C_0| if cellulation
-    # added extra rows.
+    # For joint PPM, the in-circuit κ count is the augmented value (bridge may
+    # have added κ' ancillas during cellulation); use the bridge's augmented
+    # gadgets as the source of truth.
     if joint is not None:
         k_l = bridge.g_l_aug.F.shape[0]
         k_r = bridge.g_r_aug.F.shape[0]
