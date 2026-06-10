@@ -201,7 +201,7 @@ def test_cellulate_port_subgraph_skips_non_port_cycle():
 
 
 def test_bridge_dataclass_fields_universal_adapter():
-    """Bridge dataclass exposes the universal-adapter fields from spec §1."""
+    """Bridge dataclass exposes the universal-adapter fields (Swaroop et al. arXiv:2410.03628 §IV)."""
     import dataclasses
     from qldpc.circuits.surgery.bridge import Bridge
     fields = {f.name for f in dataclasses.fields(Bridge)}

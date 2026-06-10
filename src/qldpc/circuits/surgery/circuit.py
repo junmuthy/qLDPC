@@ -33,6 +33,12 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     except the one whose first argument equals ``keep_idx``. Recurses into
     REPEAT blocks so observables inside loops are filtered the same way.
 
+    For surgery PPM circuits, pass ``keep_idx=0`` to retain only obs0
+    (Webster Eq. 1, the physical syndrome-based readout). obs1 is an
+    implementation cross-check that directly measures the data on V_0 and
+    is NOT part of any physical protocol — keeping it for an LER run would
+    sample the wrong distribution.
+
     Useful for sinter LER sweeps that compare one observable against a
     memory-experiment baseline — sinter expects exactly one observable per task.
     """
@@ -56,7 +62,18 @@ def build_single_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> stim.Circuit:
-    """Cain §III.A single-PPM measurement circuit for `gadget`."""
+    """Cain §III.A single-PPM measurement circuit for `gadget`.
+
+    Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
+    full semantics):
+
+      * obs0 — Webster Eq. 1, the physical syndrome-based readout.
+      * obs1 — Direct data-qubit measurement on V_0, an implementation
+        cross-check that must agree with obs0 in noiseless runs (not a
+        physical protocol — it destroys the encoded state).
+
+    For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
+    """
     merged_code = _gadget_merged_csscode(gadget)
     qubit_ids = QubitIDs.from_code(merged_code)
     n_data = gadget.code.num_qudits
@@ -266,7 +283,7 @@ def _stitch_to_joint_csscode(
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> CSSCode:
-    """Assemble merged CSSCode for two-PPM surgery (spec §3 block tables).
+    """Assemble merged CSSCode for two-PPM surgery.
 
     Dispatches on the structural axis (g_l.code is g_r.code → intra-code
     shares data; otherwise inter-code).  Each branch handles both
@@ -285,7 +302,20 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model=None,
 ) -> tuple[stim.Circuit, CSSCode]:
-    """Joint-PPM circuit per spec §4 (universal adapter, no U_B in α*)."""
+    """Joint-PPM circuit (universal adapter; no U_B in α*).
+
+    Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
+    full semantics):
+
+      * obs0 — Webster Eq. 1, the physical syndrome-based readout of
+        X̄_l ⊗ X̄_r (or Z̄_l ⊗ Z̄_r for basis=Z).
+      * obs1 — Direct data-qubit measurement on V_0 = V_0^(l) ∪ V_0^(r),
+        an implementation cross-check that must agree with obs0 in
+        noiseless runs (not a physical protocol — it destroys the
+        encoded state).
+
+    For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
+    """
     joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
     intercode = g_l.code is not g_r.code
@@ -324,7 +354,7 @@ def build_joint_ppm_circuit(
         intercode=intercode,
     )
 
-    # χ check IDs per spec §4: data H_X^(l) rows occupy first mX_l indices in
+    # χ check IDs: data H_X^(l) rows occupy first mX_l indices in
     # qubit_ids.checks_x, then m_X_r (inter-code), then χ^(l), then χ^(r).
     if bridge.basis is Pauli.X:
         check_ids = qubit_ids.checks_x
@@ -571,7 +601,26 @@ def _surgery_observable(
     num_rounds: int,
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
-    """Obs 0 = ⊕ chi-XOR over rounds (Webster Eq. 1); Obs 1 = data on V_0."""
+    """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
+
+    obs0 — Webster Eq. 1: XOR of χ-check measurement records across all
+        rounds. This is the **physical readout** of the logical Pauli — the
+        protocol you would run on real hardware to learn the logical
+        eigenvalue from intermediate-round syndromes only.
+
+    obs1 — Direct stim measurement of the data qubits on V_0. This is
+        **NOT a physical protocol** — single-shot computational-basis
+        measurement of the data destroys the encoded state and bypasses
+        the whole point of surgery (a non-destructive logical Pauli
+        readout). It exists solely as an implementation cross-check:
+        under noiseless evolution, obs0 and obs1 must agree on every shot
+        because they measure the same underlying X̄_M (or Z̄_M for
+        basis=Z) operator. A noiseless-run disagreement between obs0 and
+        obs1 is a bug signal.
+
+    For LER sweeps and any noisy run, keep ONLY obs0 via
+    ``keep_only_observable(circuit, keep_idx=0)``.
+    """
     circuit = stim.Circuit()
     chi_targets = [
         measurement_record.get_target_rec(cid, -1 - r)
