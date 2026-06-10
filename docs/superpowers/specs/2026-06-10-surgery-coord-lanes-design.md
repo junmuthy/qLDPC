@@ -18,7 +18,7 @@ For someone debugging the surgery construction (e.g., checking which detectors f
 Replace both annotations with a coordinate scheme that encodes the **semantic role** of every qubit and detector. Lane numbers map 1:1 between QUBIT_COORDS (the `y` axis position) and DETECTOR coord arg `lane` (the second tuple element). After the change:
 
 - `detslice-svg` shows qubits in 7 horizontal stripes by semantic role.
-- `timeline-svg` detector labels read `(t, lane, idx)` where `lane ∈ {2, 3, 4, 5, 6}` immediately identifies which check class fired.
+- `timeline-svg` detector labels read `(idx, lane, t)` where `lane ∈ {2, 3, 4, 5, 6}` immediately identifies which check class fired.
 - Programmatic post-processing (DEM grouping, decoder debugging, fault-trace analysis) can filter detectors by lane in one line.
 
 This is purely a debugging visualization improvement — it does NOT model hardware geometry. Neutral-atom architectures use dynamic zone-based layouts (storage / entangling / readout) that this scheme cannot represent. The lane layout is a semantic convention chosen for clarity.
@@ -62,11 +62,13 @@ Bridge data qubits and bridge cycle ancillas have **different qubit ids** so sha
 
 ## DETECTOR coord convention
 
-DETECTOR coords become `(t, lane, idx)` where:
+DETECTOR coords become `(idx, lane, t)` where:
 
-- `t` = round index. `SHIFT_COORDS (1, 0, 0)` after each round (unchanged from today).
-- `lane` = the y-position of the ancilla being measured, so `lane ∈ {2, 3, 4, 5, 6}` for the 5 lanes that contain check ancillas (lane=0 = data and lane=1 = κ have no DETECTOR; κ is final-measured but not a syndrome check).
 - `idx` = position within that lane, matching the `x` coordinate of the ancilla being measured.
+- `lane` = the y-position of the ancilla being measured, so `lane ∈ {2, 3, 4, 5, 6}` for the 5 lanes that contain check ancillas (lane=0 = data and lane=1 = κ have no DETECTOR; κ is final-measured but not a syndrome check).
+- `t` = round index. `SHIFT_COORDS (0, 0, 1)` after each round (changed from `(1, 0, 0)` to put time in the last dimension per stim convention).
+
+The first two coord dimensions `(idx, lane)` exactly match the measured ancilla's QUBIT_COORDS `(x, y)`. Time is last so `SHIFT_COORDS (0, 0, 1)` accumulates rounds without disturbing spatial layout, matching stim's surface code convention `(x, y, t)`. This causes timeline-svg to render each detector aligned with its measured ancilla's qubit track.
 
 Lane / x mapping (single PPM, basis=X):
 
@@ -83,12 +85,12 @@ For joint PPM, the bridge cycle check (basis=X: new Z-check at `qubit_ids.checks
 
 **Steane example before/after** (basis=X, all 4 round-1 reliable detectors):
 
-| Detector | Old `(0, 0, kk)` | New `(0, lane, idx)` | Decoded |
+| Detector | Old `(0, 0, kk)` | New `(idx, lane, t)` | Decoded |
 |---|---|---|---|
-| D0 | (0, 0, 0) | (0, 2, 0) | round 0, data H_X check 0 |
-| D1 | (0, 0, 1) | (0, 2, 1) | round 0, data H_X check 1 |
-| D2 | (0, 0, 2) | (0, 2, 2) | round 0, data H_X check 2 |
-| D3 | (0, 0, 9) | (0, 5, 0) | round 0, G check 0 |
+| D0 | (0, 0, 0) | (0, 2, 0) | data H_X check 0, round 0 |
+| D1 | (0, 0, 1) | (1, 2, 0) | data H_X check 1, round 0 |
+| D2 | (0, 0, 2) | (2, 2, 0) | data H_X check 2, round 0 |
+| D3 | (0, 0, 9) | (0, 5, 0) | G check 0, round 0 |
 
 ## Implementation surface
 
@@ -104,7 +106,7 @@ Pure mapping: given a check ancilla `check_id`, return `(lane, idx)` matching th
 
 ### Modified emit sites in `circuit.py`
 
-Five emit sites change from `(0, 0, kk)` (or `(0, 0, det_idx)`) to `(0, lane, idx)`:
+Five emit sites change from `(0, 0, kk)` (or `(0, 0, det_idx)`) to `(idx, lane, t)`:
 
 - `_surgery_qec_cycle_joint` round-1 detectors (currently line 459).
 - `_surgery_qec_cycle_joint` repeat-block detectors (currently line 468).
@@ -113,7 +115,7 @@ Five emit sites change from `(0, 0, kk)` (or `(0, 0, det_idx)`) to `(0, lane, id
 - `_surgery_qec_cycle` repeat-block detectors (currently line 656).
 - `_surgery_final_detectors` (currently line 737).
 
-(`SHIFT_COORDS (1, 0, 0)` calls — currently at lines 466, 654, 770 — are unchanged.)
+(`SHIFT_COORDS` calls at the round boundary and pre-final-measurement use `(0, 0, 1)` to advance the time axis at coord-dim 2.)
 
 ### Modified call sites in `circuit.py`
 
@@ -140,7 +142,7 @@ Add to `_test_circuit.py` (~4 tests, ~80 lines):
 - Qubits 16..18 (data H_Z ancillas) on y=4.
 - Qubit 19 (G ancilla) on y=5.
 
-**2. `test_detector_coords_steane_round_1_reliable`** — Build Steane single-PPM circuit (basis=X), 1 round. Walk DETECTOR instructions; assert exactly 4 detectors with coords `{(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}` (the 3 data H_X reliable checks + the 1 G reliable check). Index-set match (order-insensitive).
+**2. `test_detector_coords_steane_round_1_reliable`** — Build Steane single-PPM circuit (basis=X), 1 round. Walk DETECTOR instructions; assert exactly 4 detectors with coords `{(0, 2, 0), (1, 2, 0), (2, 2, 0), (0, 5, 0)}` (the 3 data H_X reliable checks + the 1 G reliable check). Index-set match (order-insensitive).
 
 **3. `test_detector_coords_basis_z_preserves_lane_semantics`** — Build Steane gadget with `basis=Pauli.Z` (need a logical-Z support — use `get_logical_ops(Pauli.Z)[0]`). Round-1 reliable detector lanes should be `{4, 5}` (data H_Z = lane 4; G = lane 5). The χ would be lane 3 — but χ is NOT a round-1 reliable check, so it doesn't show up. Asserts the χ/G lane numbers stay stable under basis swap (i.e., `lane=5` is G, not χ, regardless of which matrix slot G lives in).
 
@@ -165,8 +167,8 @@ Add to `_test_circuit.py` (~4 tests, ~80 lines):
 ## Success criteria
 
 - `.venv/bin/python -m pytest src/qldpc/circuits/surgery/ -q | tail -3` reports **100 passed**.
-- `python -c "from qldpc.circuits.surgery import build_single_ppm_circuit; import numpy as np; from qldpc import codes; from qldpc.objects import Pauli; s = codes.SteaneCode(); x = np.asarray(s.get_logical_ops(Pauli.X)[0]).astype(np.uint8); from qldpc.circuits.surgery import build_gadget; g = build_gadget(s, x); c = build_single_ppm_circuit(g, rounds=1, noise_model=None); print([l for l in str(c).splitlines() if 'DETECTOR' in l])"` shows DETECTOR lines whose coord args are `{(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}` — i.e., `lane ∈ {2, 5}`, not `lane=0`.
-- `circuit.diagram("timeline-svg")` rendered on the same example shows detector labels `coords=(0, 2, 0) / (0, 2, 1) / (0, 2, 2) / (0, 5, 0)` instead of `(0, 0, 0..2, 9)`.
+- `python -c "from qldpc.circuits.surgery import build_single_ppm_circuit; import numpy as np; from qldpc import codes; from qldpc.objects import Pauli; s = codes.SteaneCode(); x = np.asarray(s.get_logical_ops(Pauli.X)[0]).astype(np.uint8); from qldpc.circuits.surgery import build_gadget; g = build_gadget(s, x); c = build_single_ppm_circuit(g, rounds=1, noise_model=None); print([l for l in str(c).splitlines() if 'DETECTOR' in l])"` shows DETECTOR lines whose coord args are `{(0, 2, 0), (1, 2, 0), (2, 2, 0), (0, 5, 0)}` — i.e., `lane ∈ {2, 5}` at coord index 1, not `lane=0`.
+- `circuit.diagram("timeline-svg")` rendered on the same example shows detector labels `coords=(0, 2, 0) / (1, 2, 0) / (2, 2, 0) / (0, 5, 0)` instead of `(0, 0, 0..2, 9)`, each detector on its own row aligned with its measured ancilla's qubit track.
 - `circuit.diagram("detslice-svg", tick=...)` rendered on the same example shows qubit dots in 4 distinct y-rows (0, 2, 1, 5 in this small case; or all 6 rows once χ ancillas are present at their position).
 - No existing test fails. No public function's signature changes.
 

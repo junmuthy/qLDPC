@@ -957,6 +957,10 @@ def test_detector_coords_steane_round_1_reliable():
     Round-1 reliable for basis=X gadget: 3 data H_X checks (lane=2) + 1 G
     check (lane=5). No χ or data H_Z because those aren't deterministic
     on the protocol-default |+⟩ init.
+
+    DETECTOR coord order is ``(idx, lane, t)`` per stim convention
+    (time last). The first two components ``(idx, lane)`` exactly match
+    the QUBIT_COORDS ``(x, y)`` of the ancilla being measured.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
@@ -971,13 +975,13 @@ def test_detector_coords_steane_round_1_reliable():
         line = line.strip()
         if not line.startswith("DETECTOR"):
             continue
-        # "DETECTOR(t, lane, idx) rec[-N] ..." — extract the tuple
+        # "DETECTOR(idx, lane, t) rec[-N] ..." — extract the tuple
         head = line.split(")")[0]
         tup = head[len("DETECTOR("):]
         parts = [int(p.strip()) for p in tup.split(",")]
         detector_coords.add(tuple(parts))
 
-    expected = {(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}
+    expected = {(0, 2, 0), (1, 2, 0), (2, 2, 0), (0, 5, 0)}
     assert detector_coords == expected, (
         f"\nexpected: {expected}\ngot:      {detector_coords}"
     )
@@ -1002,6 +1006,9 @@ def test_detector_coords_basis_z_preserves_lane_semantics():
     For Steane Z̄ (3-qubit support, 3 X-checks, F full-rank):
       - reliable_x = G rows (empty)
       - reliable_z = data H_Z rows (3 of them, lane=4)
+
+    DETECTOR coord order is ``(idx, lane, t)`` per stim convention; lane
+    is at index 1 of the tuple, unchanged from the previous ordering.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit

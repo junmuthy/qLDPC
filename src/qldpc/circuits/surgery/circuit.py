@@ -666,20 +666,20 @@ def _surgery_qec_cycle_joint(
     for check_id in all_check_ids:
         if check_id in reliable:
             lane, idx = lane_idx[check_id]
-            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, lane, idx))
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0))
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
     if num_rounds > 1:
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
-        repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+        repeat_circuit.append("SHIFT_COORDS", [], (0, 0, 1))
         for check_id in all_check_ids:
             lane, idx = lane_idx[check_id]
             repeat_circuit.append("DETECTOR", [
                 measurement_record.get_target_rec(check_id, -1),
                 measurement_record.get_target_rec(check_id, -2),
-            ], (0, lane, idx))
+            ], (idx, lane, 0))
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
@@ -723,7 +723,7 @@ def _surgery_final_detectors_joint(
         targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
         targets.append(measurement_record.get_target_rec(check_id, -1))
         lane, idx = lane_idx[check_id]
-        circuit.append("DETECTOR", targets, (0, lane, idx))
+        circuit.append("DETECTOR", targets, (idx, lane, 0))
 
     if g_l.basis is Pauli.X:
         for kk in range(m_X_l + m_X_r):
@@ -857,20 +857,20 @@ def _surgery_qec_cycle(
     for check_id in all_check_ids:
         if check_id in reliable:
             lane, idx = lane_idx[check_id]
-            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, lane, idx))
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0))
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
     if num_rounds > 1:
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
-        repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+        repeat_circuit.append("SHIFT_COORDS", [], (0, 0, 1))
         for check_id in all_check_ids:
             lane, idx = lane_idx[check_id]
             repeat_circuit.append("DETECTOR", [
                 measurement_record.get_target_rec(check_id, -1),
                 measurement_record.get_target_rec(check_id, -2),
-            ], (0, lane, idx))
+            ], (idx, lane, 0))
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
@@ -950,7 +950,7 @@ def _surgery_final_detectors(
         targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
         targets.append(measurement_record.get_target_rec(check_id, -1))
         lane, idx = lane_idx[check_id]
-        circuit.append("DETECTOR", targets, (0, lane, idx))
+        circuit.append("DETECTOR", targets, (idx, lane, 0))
 
     if gadget.basis is Pauli.X:
         for kk in range(m_X):
@@ -981,7 +981,7 @@ def _surgery_detach_and_readout(
     data_op = "MX" if gadget.basis is Pauli.X else "M"
     circuit.append(kappa_op, detach_qubits)
     measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
-    circuit.append("SHIFT_COORDS", [], (1, 0, 0))
+    circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append(data_op, list(data_ids))
     measurement_record.append({q: i for i, q in enumerate(data_ids)})
     return circuit
