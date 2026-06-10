@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Shrink `src/qldpc/codes/surgery/` to 5 public symbols (`build_gadget`, `build_bridge`, `build_single_ppm_circuit`, `build_joint_ppm_circuit`, `boost_gadget`) on a deterministic Webster L=1 gadget + standalone bridge + new Stim circuit module + Cheeger boost dispatcher. Keep Webster Table I exact match; add Ide BB↔LP exact match as ground truth.
+**Goal:** Shrink `src/qldpc/codes/surgery/` to 5 public symbols (`build_gadget`, `build_bridge`, `build_single_ppm_circuit`, `build_joint_ppm_circuit`, `boost_gadget`) on a deterministic Webster L=1 gadget + standalone bridge + new Stim circuit module + Cheeger boost dispatcher. Keep Webster Table I exact match; add Swaroop BB↔LP exact match as ground truth.
 
 **Architecture:** New files (`gadget.py`, `bridge.py`, `circuit.py`) are built in parallel with the existing files (TDD: test first, implement, commit, repeat). Once all five public APIs pass their tests, `__init__.py` is rewritten, old files (`layered.py`, `joint.py`, `skiptree.py`, `cellulation.py`, `multi.py`, `port.py`) are deleted, and example scripts are migrated. Old `surgery_test.py` moves to `surgery/_test.py` and is rewritten against the new API.
 
@@ -1686,13 +1686,13 @@ git commit -m "chore: migrate Cain Fig 1b joint scripts to build_joint_ppm_circu
 
 ---
 
-### Task 26: Migrate Ide scripts (table_ii, skiptree_verification, lemma10_prototype)
+### Task 26: Migrate Swaroop scripts (table_ii, skiptree_verification, lemma10_prototype)
 
 **Files:**
-- Modify: `examples/scripts/ide_table_ii_exact_match.py`
-- Modify: `examples/scripts/ide_table_ii_full_pipeline.py`
-- Modify: `examples/scripts/ide_skiptree_verification.py`
-- Modify: `examples/scripts/ide_lemma10_prototype.py`
+- Modify: `examples/scripts/swaroop_table_ii_exact_match.py`
+- Modify: `examples/scripts/swaroop_table_ii_full_pipeline.py`
+- Modify: `examples/scripts/swaroop_skiptree_verification.py`
+- Modify: `examples/scripts/swaroop_lemma10_prototype.py`
 
 - [ ] **Step 1: Replace any direct uses of `_skip_tree`, `_skip_tree_hr`, `_cellulate_long_cycles`, `_build_bridge_via_skiptree`, `_BridgeSpec`, `canonical_HR`, `_running_xor_b_c` etc.**
 
@@ -1703,17 +1703,17 @@ These helpers are now private to `bridge.py`. Two options per use:
 - [ ] **Step 2: Smoke-test imports**
 
 ```bash
-python -c "import examples.scripts.ide_table_ii_exact_match"
-python -c "import examples.scripts.ide_table_ii_full_pipeline"
-python -c "import examples.scripts.ide_skiptree_verification"
-python -c "import examples.scripts.ide_lemma10_prototype"
+python -c "import examples.scripts.swaroop_table_ii_exact_match"
+python -c "import examples.scripts.swaroop_table_ii_full_pipeline"
+python -c "import examples.scripts.swaroop_skiptree_verification"
+python -c "import examples.scripts.swaroop_lemma10_prototype"
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add examples/scripts/ide_*.py
-git commit -m "chore: migrate Ide scripts to new surgery API"
+git add examples/scripts/swaroop_*.py
+git commit -m "chore: migrate Swaroop scripts to new surgery API"
 ```
 
 ---
@@ -1769,12 +1769,12 @@ git commit -m "chore: delete examples/webster_table1_verify.py (now a unit test)
 
 ---
 
-## Phase 7 — Ide BB↔LP exact-match ground truth (spec §4.F)
+## Phase 7 — Swaroop BB↔LP exact-match ground truth (spec §4.F)
 
-### Task 29: Add `load_ide_BB_input_with_operator` and `load_ide_LP_input_with_operator` to `_ide_fixtures.py`
+### Task 29: Add `load_swaroop_BB_input_with_operator` and `load_swaroop_LP_input_with_operator` to `_swaroop_fixtures.py`
 
 **Files:**
-- Modify: `src/qldpc/codes/_ide_fixtures.py`
+- Modify: `src/qldpc/codes/_swaroop_fixtures.py`
 - Modify: `src/qldpc/codes/surgery/_test.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1783,12 +1783,12 @@ Append to `_test.py`:
 
 ```python
 @pytest.mark.skipif(
-    not __import__("qldpc.codes._ide_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
-    reason="Ide Zenodo fixtures not installed",
+    not __import__("qldpc.codes._swaroop_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
+    reason="Swaroop Zenodo fixtures not installed",
 )
-def test_load_ide_BB_input_with_operator_returns_csscode_and_op():
-    from qldpc.codes._ide_fixtures import load_ide_BB_input_with_operator
-    code, x = load_ide_BB_input_with_operator()
+def test_load_swaroop_BB_input_with_operator_returns_csscode_and_op():
+    from qldpc.codes._swaroop_fixtures import load_swaroop_BB_input_with_operator
+    code, x = load_swaroop_BB_input_with_operator()
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     assert ((HZ @ x) % 2 == 0).all()
     # x is a nontrivial logical-X
@@ -1796,12 +1796,12 @@ def test_load_ide_BB_input_with_operator_returns_csscode_and_op():
 
 
 @pytest.mark.skipif(
-    not __import__("qldpc.codes._ide_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
-    reason="Ide Zenodo fixtures not installed",
+    not __import__("qldpc.codes._swaroop_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
+    reason="Swaroop Zenodo fixtures not installed",
 )
-def test_load_ide_LP_input_with_operator_returns_csscode_and_op():
-    from qldpc.codes._ide_fixtures import load_ide_LP_input_with_operator
-    code, x = load_ide_LP_input_with_operator()
+def test_load_swaroop_LP_input_with_operator_returns_csscode_and_op():
+    from qldpc.codes._swaroop_fixtures import load_swaroop_LP_input_with_operator
+    code, x = load_swaroop_LP_input_with_operator()
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     assert ((HZ @ x) % 2 == 0).all()
     assert x.sum() > 0
@@ -1810,46 +1810,46 @@ def test_load_ide_LP_input_with_operator_returns_csscode_and_op():
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-pytest src/qldpc/codes/surgery/_test.py -k "load_ide_BB_input or load_ide_LP_input" -x
+pytest src/qldpc/codes/surgery/_test.py -k "load_swaroop_BB_input or load_swaroop_LP_input" -x
 ```
 Expected: `ImportError` (if fixtures available) or `SKIP` (if not).
 
 - [ ] **Step 3: Implement loaders**
 
-Edit `src/qldpc/codes/_ide_fixtures.py`. Reuse the existing `IDE_BB_KAPPA1_EDGES` (and the analogous LP table — read the existing file to find it) to construct the operator vectors. The BB and LP input codes themselves are the data codes (not the merged BB-LP joint code) — load them from the Zenodo bundle:
+Edit `src/qldpc/codes/_swaroop_fixtures.py`. Reuse the existing `SWAROOP_BB_KAPPA1_EDGES` (and the analogous LP table — read the existing file to find it) to construct the operator vectors. The BB and LP input codes themselves are the data codes (not the merged BB-LP joint code) — load them from the Zenodo bundle:
 
 ```python
-def load_ide_BB_input_with_operator() -> tuple[CSSCode, np.ndarray]:
-    """Return BB input code + the pinned V_0 logical-X operator (Ide §VII.B)."""
+def load_swaroop_BB_input_with_operator() -> tuple[CSSCode, np.ndarray]:
+    """Return BB input code + the pinned V_0 logical-X operator (Swaroop §VII.B)."""
     HX, HZ = _load_zenodo("BB_98_LP_200_adapter/BB_98_input_HX.npy",
                           "BB_98_LP_200_adapter/BB_98_input_HZ.npy")  # actual paths TBD per Zenodo layout
     code = CSSCode(GF2(HX.tolist()), GF2(HZ.tolist()), is_subsystem_code=False)
-    V0 = sorted({v for edge in IDE_BB_KAPPA1_EDGES.values() for v in edge})
+    V0 = sorted({v for edge in SWAROOP_BB_KAPPA1_EDGES.values() for v in edge})
     x = np.zeros(code.num_qudits, dtype=np.uint8)
     for v in V0:
         x[v] = 1
     return code, x
 ```
 
-If the Zenodo paths are not exactly as guessed: open `tests/fixtures/ide_zenodo/` and discover the actual file layout. If V_0 cannot be uniquely recovered from `IDE_BB_KAPPA1_EDGES` alone, fall back to reading Ide's published `Z_1` (or `X_1`) operator from the Zenodo bundle.
+If the Zenodo paths are not exactly as guessed: open `tests/fixtures/swaroop_zenodo/` and discover the actual file layout. If V_0 cannot be uniquely recovered from `SWAROOP_BB_KAPPA1_EDGES` alone, fall back to reading Swaroop's published `Z_1` (or `X_1`) operator from the Zenodo bundle.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-pytest src/qldpc/codes/surgery/_test.py -k "load_ide_BB_input or load_ide_LP_input" -x
+pytest src/qldpc/codes/surgery/_test.py -k "load_swaroop_BB_input or load_swaroop_LP_input" -x
 ```
 Expected: PASS (if fixtures available) or SKIP.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/qldpc/codes/_ide_fixtures.py src/qldpc/codes/surgery/_test.py
-git commit -m "feat: load Ide BB/LP INPUT codes + pinned logical-X operators"
+git add src/qldpc/codes/_swaroop_fixtures.py src/qldpc/codes/surgery/_test.py
+git commit -m "feat: load Swaroop BB/LP INPUT codes + pinned logical-X operators"
 ```
 
 ---
 
-### Task 30: Ide BB↔LP exact-match (n=355, k=25, d=10)
+### Task 30: Swaroop BB↔LP exact-match (n=355, k=25, d=10)
 
 **Files:**
 - Modify: `src/qldpc/codes/surgery/_test.py`
@@ -1860,18 +1860,18 @@ Append to `_test.py`:
 
 ```python
 @pytest.mark.skipif(
-    not __import__("qldpc.codes._ide_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
-    reason="Ide Zenodo fixtures not installed",
+    not __import__("qldpc.codes._swaroop_fixtures", fromlist=["fixtures_available"]).fixtures_available(),
+    reason="Swaroop Zenodo fixtures not installed",
 )
 def test_intercode_joint_bb_lp_exact():
-    from qldpc.codes._ide_fixtures import (
-        load_ide_BB_input_with_operator, load_ide_LP_input_with_operator,
+    from qldpc.codes._swaroop_fixtures import (
+        load_swaroop_BB_input_with_operator, load_swaroop_LP_input_with_operator,
     )
     from qldpc.codes.surgery import (
         build_gadget, build_bridge, build_joint_ppm_circuit,
     )
-    bb, x_bb = load_ide_BB_input_with_operator()
-    lp, x_lp = load_ide_LP_input_with_operator()
+    bb, x_bb = load_swaroop_BB_input_with_operator()
+    lp, x_lp = load_swaroop_LP_input_with_operator()
     g1 = build_gadget(bb, x_bb)
     g2 = build_gadget(lp, x_lp)
     bridge = build_bridge(g1, g2)
@@ -1887,15 +1887,15 @@ def test_intercode_joint_bb_lp_exact():
 pytest src/qldpc/codes/surgery/_test.py::test_intercode_joint_bb_lp_exact -v
 ```
 Expected: PASS (or SKIP). If it FAILs with one of:
-- `n != 355` — `build_bridge` chose a different cellulation than Ide's; add `cellulation_override=` kwarg to `build_bridge` per the spec's mitigation, and re-run the test feeding Ide's published cellulation choice via `load_ide_skiptree_TPG`.
-- `k != 25` — the joint code's gauge structure differs; inspect H_X^joint, H_Z^joint vs Ide's.
+- `n != 355` — `build_bridge` chose a different cellulation than Swaroop's; add `cellulation_override=` kwarg to `build_bridge` per the spec's mitigation, and re-run the test feeding Swaroop's published cellulation choice via `load_swaroop_skiptree_TPG`.
+- `k != 25` — the joint code's gauge structure differs; inspect H_X^joint, H_Z^joint vs Swaroop's.
 - `d != 10` — distance computation is slow; if test times out, mark as `@pytest.mark.slow` and skip in default runs (still assert n + k).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/qldpc/codes/surgery/_test.py
-git commit -m "test: Ide BB↔LP inter-code joint exact-match (n=355, k=25, d=10)"
+git commit -m "test: Swaroop BB↔LP inter-code joint exact-match (n=355, k=25, d=10)"
 ```
 
 ---
@@ -1939,7 +1939,7 @@ git commit -m "refactor: surgery modules within LOC budget"
 ```bash
 pytest src/qldpc/ -x
 ```
-Expected: all PASS (`-k "not slow"` if Ide distance test is marked slow).
+Expected: all PASS (`-k "not slow"` if Swaroop distance test is marked slow).
 
 - [ ] **Step 2: Lint / type-check (if repo uses them)**
 
@@ -1952,7 +1952,7 @@ Address any errors with focused fixes.
 - [ ] **Step 3: Final diff summary**
 
 ```bash
-git diff --stat main..HEAD -- src/qldpc/codes/surgery/ examples/ src/qldpc/codes/_ide_fixtures.py
+git diff --stat main..HEAD -- src/qldpc/codes/surgery/ examples/ src/qldpc/codes/_swaroop_fixtures.py
 git log --oneline main..HEAD | head -40
 ```
 
@@ -1969,7 +1969,7 @@ After writing this plan, verify against the spec:
 - [x] **Goal 1** (5 public symbols) — Tasks 20 + 18 establish the public surface.
 - [x] **Goal 2** (deterministic `build_gadget`) — Tasks 3, 5 explicitly test determinism.
 - [x] **Goal 3** (3 explicit Webster steps) — Tasks 2, 3, 4 each implement one step.
-- [x] **Goal 4** (Webster Table I + Ide BB↔LP exact match) — Tasks 7, 10, 30.
+- [x] **Goal 4** (Webster Table I + Swaroop BB↔LP exact match) — Tasks 7, 10, 30.
 - [x] **Goal 5** (Stim circuit API: noise + detectors + observables) — Tasks 14, 15, 16, 17.
 - [x] **Goal 6** (no backwards-compat aliases) — Task 20 + 21 delete old names.
 - [x] **Goal 7** (per-module LOC budget) — Tasks 13, 31.
@@ -1980,7 +1980,7 @@ After writing this plan, verify against the spec:
 - [x] §2 public API — covered above.
 - [x] §3 migration — Tasks 24–28.
 - [x] §4 test plan — Tasks 2–7, 9–12, 14–19, 29–30.
-- [x] §5 risks (Webster determinism, Ide cellulation override, script churn) — addressed in Task 7 step 2, Task 30 step 2, Task 24–27.
+- [x] §5 risks (Webster determinism, Swaroop cellulation override, script churn) — addressed in Task 7 step 2, Task 30 step 2, Task 24–27.
 
 **Placeholder scan:** No "TBD", "TODO", "implement later". Two notes explicitly say "if X doesn't exist with that exact name, substitute" — these are honest signposts where reading the actual file is required (the engineer has the file path); they are not undefined work.
 
