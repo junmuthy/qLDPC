@@ -1231,3 +1231,42 @@ def test_logical_state_init_invalid_state_raises(bad):
     code = codes.SteaneCode()
     with pytest.raises(ValueError, match="state"):
         logical_state_init(code, bad)
+
+
+@pytest.mark.parametrize("state,expected_obs0", [("0", 0), ("1", 1)])
+def test_logical_state_init_end_to_end_steane_basis_z(state, expected_obs0):
+    """Steane single-PPM (basis=Z) reads obs0 = int(state) deterministically.
+
+    Steane has wt(Z̄_0) = 3 (odd), so naive broadcast `"1" * n` ALSO works
+    — this test pins the helper to the textbook expectation on the
+    historically-working code, catching any regression where the helper
+    accidentally diverges from naive on this code.
+    """
+    from qldpc.circuits.surgery.circuit import (
+        build_single_ppm_circuit, logical_state_init,
+    )
+    from qldpc.circuits.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z_bar, basis=Pauli.Z)
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=None,
+        data_init=logical_state_init(code, state),
+    )
+    # Raw measurement records — see lattice_surgery.ipynb §0 raw_observables.
+    raw = circuit.compile_sampler().sample(shots=200).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs0_recs = []
+    for ln in str(circuit).splitlines():
+        if ln.startswith("OBSERVABLE_INCLUDE(0)"):
+            obs0_recs = [
+                int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")
+            ]
+            break
+    obs0 = np.bitwise_xor.reduce(
+        raw[:, [n_meas + off for off in obs0_recs]], axis=1
+    )
+    rate = float(obs0.mean())
+    assert rate == float(expected_obs0), (
+        f"state={state!r}: obs0 rate {rate:.3f} != expected {expected_obs0}"
+    )
