@@ -1270,3 +1270,52 @@ def test_logical_state_init_end_to_end_steane_basis_z(state, expected_obs0):
     assert rate == float(expected_obs0), (
         f"state={state!r}: obs0 rate {rate:.3f} != expected {expected_obs0}"
     )
+
+
+@pytest.mark.parametrize("state,expected_obs0", [("0", 0), ("1", 1)])
+def test_logical_state_init_end_to_end_bbcode_basis_z(state, expected_obs0):
+    """BBCode [[36, 8]] single-PPM (basis=Z): regression for even-weight Z̄.
+
+    For BBCode (l=3, m=6) the chosen Z̄_0 has weight 8 (even), so naive
+    broadcast `"1"*36` produces logical |0⟩_L (NOT |1⟩_L) and obs0=0,
+    silently failing any truth table that hardcodes expected=1 for "1".
+
+    The helper uses X̄_0 to flip the correct support, so obs0 tracks the
+    textbook expectation. If this test ever returns obs0=0 for state="1",
+    the helper has regressed to naive broadcast.
+    """
+    import sympy
+    from qldpc.circuits.surgery.circuit import (
+        build_single_ppm_circuit, logical_state_init,
+    )
+    from qldpc.circuits.surgery.gadget import build_gadget
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6},
+                        xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    assert int(z_bar.sum()) % 2 == 0, (
+        "test premise broken: this BBCode should have even-wt Z̄_0"
+    )
+    g = build_gadget(code, z_bar, basis=Pauli.Z)
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=None,
+        data_init=logical_state_init(code, state),
+    )
+    raw = circuit.compile_sampler().sample(shots=200).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs0_recs = []
+    for ln in str(circuit).splitlines():
+        if ln.startswith("OBSERVABLE_INCLUDE(0)"):
+            obs0_recs = [
+                int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")
+            ]
+            break
+    obs0 = np.bitwise_xor.reduce(
+        raw[:, [n_meas + off for off in obs0_recs]], axis=1
+    )
+    rate = float(obs0.mean())
+    assert rate == float(expected_obs0), (
+        f"state={state!r}: obs0 rate {rate:.3f} != expected {expected_obs0}. "
+        f"This is the BBCode even-wt regression test — failure here means "
+        f"logical_state_init is no better than naive '{state}' * n broadcast."
+    )
