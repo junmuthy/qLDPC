@@ -1190,8 +1190,8 @@ def test_logical_state_init_zero_and_plus_broadcast():
     from qldpc.circuits.surgery.circuit import logical_state_init
     code = codes.SteaneCode()
     n = code.num_qudits
-    assert logical_state_init(code, "0") == "0" * n
-    assert logical_state_init(code, "+") == "+" * n
+    assert logical_state_init(code, "0", log_idx=0) == "0" * n
+    assert logical_state_init(code, "+", log_idx=0) == "+" * n
 
 
 def test_logical_state_init_one_flips_x_bar_support():
@@ -1200,7 +1200,7 @@ def test_logical_state_init_one_flips_x_bar_support():
     code = codes.SteaneCode()
     n = code.num_qudits
     x_bar = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    s = logical_state_init(code, "1")
+    s = logical_state_init(code, "1", log_idx=0)
     assert len(s) == n
     expected_ones = set(int(i) for i in np.where(x_bar)[0])
     actual_ones = {i for i, c in enumerate(s) if c == "1"}
@@ -1215,7 +1215,7 @@ def test_logical_state_init_minus_flips_z_bar_support():
     code = codes.SteaneCode()
     n = code.num_qudits
     z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    s = logical_state_init(code, "-")
+    s = logical_state_init(code, "-", log_idx=0)
     assert len(s) == n
     expected_minus = set(int(i) for i in np.where(z_bar)[0])
     actual_minus = {i for i, c in enumerate(s) if c == "-"}
@@ -1230,7 +1230,15 @@ def test_logical_state_init_invalid_state_raises(bad):
     from qldpc.circuits.surgery.circuit import logical_state_init
     code = codes.SteaneCode()
     with pytest.raises(ValueError, match="state"):
-        logical_state_init(code, bad)
+        logical_state_init(code, bad, log_idx=0)
+
+
+def test_logical_state_init_missing_log_idx_raises():
+    """log_idx is keyword-only with no default — omitting it raises TypeError."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()
+    with pytest.raises(TypeError, match="log_idx"):
+        logical_state_init(code, "0")  # type: ignore[call-arg]
 
 
 def test_logical_state_init_log_idx_selects_different_logical_qubit():
@@ -1280,7 +1288,7 @@ def test_logical_state_init_end_to_end_steane_basis_z(state, expected_obs0):
     g = build_gadget(code, z_bar, basis=Pauli.Z)
     circuit = build_single_ppm_circuit(
         g, rounds=3, noise_model=None,
-        data_init=logical_state_init(code, state),
+        data_init=logical_state_init(code, state, log_idx=0),
     )
     # Raw measurement records — see lattice_surgery.ipynb §0 raw_observables.
     raw = circuit.compile_sampler().sample(shots=200).astype(np.uint8)
@@ -1328,7 +1336,7 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state, expected_obs0):
     g = build_gadget(code, z_bar, basis=Pauli.Z)
     circuit = build_single_ppm_circuit(
         g, rounds=3, noise_model=None,
-        data_init=logical_state_init(code, state),
+        data_init=logical_state_init(code, state, log_idx=0),
     )
     raw = circuit.compile_sampler().sample(shots=200).astype(np.uint8)
     n_meas = raw.shape[1]

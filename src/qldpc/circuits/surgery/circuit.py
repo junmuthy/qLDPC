@@ -55,7 +55,7 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     return out
 
 
-def logical_state_init(code: CSSCode, state: str, *, log_idx: int = 0) -> str:
+def logical_state_init(code: CSSCode, state: str, *, log_idx: int) -> str:
     """Per-qubit ``data_init`` string preparing a Pauli logical state on
     logical qubit ``log_idx`` of a CSS code.
 
@@ -76,13 +76,18 @@ def logical_state_init(code: CSSCode, state: str, *, log_idx: int = 0) -> str:
     wrong logical state on codes where they are even (e.g. BBCode [[36, 8]]
     with wt(Z̄_0) = 8).
 
-    ``log_idx`` (default 0) selects which logical qubit to act on. To get
-    a meaningful PPM truth-table check, ``log_idx`` MUST match the logical
-    qubit chosen for the gadget's measured Z̄ (or X̄) — i.e. the gadget's
-    seed operator should be ``code.get_logical_ops(Pauli.Z)[log_idx]``
-    (or ``[Pauli.X]`` for basis=X). The helper does NOT verify this; if
-    indices disagree the prep targets a logical qubit that the gadget
-    doesn't measure, and the obs0 outcome is silently random.
+    ``log_idx`` is REQUIRED (keyword-only, no default) — there is no
+    universally "right" logical qubit choice on a k>1 code, so the
+    caller must declare intent explicitly. Even for state="0" / "+"
+    (which physically broadcast and don't depend on log_idx), supplying
+    log_idx makes the targeted logical qubit unambiguous in the call
+    site. To get a meaningful PPM truth-table check, ``log_idx`` MUST
+    match the logical qubit chosen for the gadget's measured Z̄ (or X̄)
+    — i.e. the gadget's seed operator should be
+    ``code.get_logical_ops(Pauli.Z)[log_idx]`` (or ``[Pauli.X]`` for
+    basis=X). The helper does NOT verify this; if indices disagree the
+    prep targets a logical qubit that the gadget doesn't measure, and
+    the obs0 outcome is silently random.
 
     The returned string has length ``code.num_qudits``. Plug it straight
     into ``build_single_ppm_circuit(..., data_init=...)`` or wrap with a
