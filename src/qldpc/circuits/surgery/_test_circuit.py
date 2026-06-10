@@ -904,3 +904,186 @@ def test_data_init_validation(bad_init, error_substr):
     g = build_gadget(code, x)
     with pytest.raises(ValueError, match=error_substr):
         build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init=bad_init)
+
+
+def test_qubit_coords_layout_steane():
+    """Steane single-PPM circuit emits QUBIT_COORDS in 6 semantic lanes.
+
+    y=0 data (Steane ids 0..6), y=1 data H_X ancillas (3), y=2 data H_Z
+    ancillas (3), y=3 κ ancillas (3), y=4 χ ancillas (3), y=5 G ancilla (1).
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
+
+    # Parse QUBIT_COORDS lines: each line is "QUBIT_COORDS(x, y) qubit_id"
+    coord_map: dict[int, tuple[int, int]] = {}
+    for line in str(circuit).splitlines():
+        line = line.strip()
+        if not line.startswith("QUBIT_COORDS"):
+            continue
+        # "QUBIT_COORDS(x, y) qid" — parse "(x, y)" and qid
+        head, qid_str = line.rsplit(" ", 1)
+        tup = head[len("QUBIT_COORDS("):-1]
+        x_str, y_str = [t.strip() for t in tup.split(",")]
+        coord_map[int(qid_str)] = (int(x_str), int(y_str))
+
+    expected = {
+        # data qubits on y=0
+        0: (0, 0), 1: (1, 0), 2: (2, 0), 3: (3, 0),
+        4: (4, 0), 5: (5, 0), 6: (6, 0),
+        # κ ancillas on y=3
+        7: (0, 3), 8: (1, 3), 9: (2, 3),
+        # data H_X ancillas on y=1 (Steane has 3 X-checks)
+        10: (0, 1), 11: (1, 1), 12: (2, 1),
+        # χ ancillas on y=4 (basis=X gadget: χ in checks_x[m_X:])
+        13: (0, 4), 14: (1, 4), 15: (2, 4),
+        # data H_Z ancillas on y=2
+        16: (0, 2), 17: (1, 2), 18: (2, 2),
+        # G ancilla on y=5 (gauge-fix, basis=X: G in checks_z[m_Z:])
+        19: (0, 5),
+    }
+    assert coord_map == expected, f"\nexpected: {expected}\ngot:      {coord_map}"
+
+
+def test_detector_coords_steane_round_1_reliable():
+    """Steane single-PPM round-1 reliable detectors have lane ∈ {1, 5}.
+
+    Round-1 reliable for basis=X gadget: 3 data H_X checks (lane=1) + 1 G
+    check (lane=5). No χ or data H_Z because those aren't deterministic
+    on the protocol-default |+⟩ init.
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
+
+    detector_coords: set[tuple[int, int, int]] = set()
+    for line in str(circuit).splitlines():
+        line = line.strip()
+        if not line.startswith("DETECTOR"):
+            continue
+        # "DETECTOR(t, lane, idx) rec[-N] ..." — extract the tuple
+        head = line.split(")")[0]
+        tup = head[len("DETECTOR("):]
+        parts = [int(p.strip()) for p in tup.split(",")]
+        detector_coords.add(tuple(parts))
+
+    expected = {(0, 1, 0), (0, 1, 1), (0, 1, 2), (0, 5, 0)}
+    assert detector_coords == expected, (
+        f"\nexpected: {expected}\ngot:      {detector_coords}"
+    )
+
+
+def test_detector_coords_basis_z_preserves_lane_semantics():
+    """basis=Z gadget: round-1 reliable detector lanes ⊆ {2, 5}; no lane 1 or 4 leakage.
+
+    For Steane logical-Z under basis=Pauli.Z, G happens to be empty
+    (F = H_X[C_0, V_0] is invertible for this specific fixture), so
+    lane 5 does not actually appear. What this test pins down is the
+    **negative-direction basis symmetry**: the lane map must NOT route
+    G ancillas to lane 1 (data H_X) nor χ ancillas to lane 4 in the
+    basis=Z basis-swap. If `_check_lane_index_map` mis-classified G as
+    data H_X when basis=Z, lane 1 would appear in the reliable detectors
+    (since G ancillas live in checks_x[m_X:] for basis=Z and ARE
+    deterministically +1 on the |0⟩^n protocol-default init — but G is
+    empty in this fixture, so the leak would also be empty; we use this
+    test as a guard against any future regression where G becomes
+    non-empty AND the basis-swap is broken).
+
+    For Steane Z̄ (3-qubit support, 3 X-checks, F full-rank):
+      - reliable_x = G rows (empty)
+      - reliable_z = data H_Z rows (3 of them, lane=2)
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+
+    code = codes.SteaneCode()
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
+
+    detector_lanes: set[int] = set()
+    for line in str(circuit).splitlines():
+        line = line.strip()
+        if not line.startswith("DETECTOR"):
+            continue
+        head = line.split(")")[0]
+        tup = head[len("DETECTOR("):]
+        parts = [int(p.strip()) for p in tup.split(",")]
+        detector_lanes.add(parts[1])
+
+    # Real assertions:
+    assert detector_lanes.issubset({2, 5}), (
+        f"basis=Z round-1 reliable lanes leaked outside {{2, 5}}: got {detector_lanes}"
+    )
+    assert 2 in detector_lanes, (
+        f"basis=Z must have data H_Z reliable detectors (lane=2); got {detector_lanes}"
+    )
+    assert 1 not in detector_lanes, (
+        f"basis=Z must NOT route any check to lane=1 (data H_X); got {detector_lanes}"
+    )
+    assert 4 not in detector_lanes, (
+        f"basis=Z must NOT route any check to lane=4 (χ); got {detector_lanes}"
+    )
+
+
+def test_joint_ppm_qubit_coords_intercode_layout():
+    """Intercode joint Z̄⊗Z̄ on two Steane copies: QUBIT_COORDS lanes correct.
+
+    n_l = n_r = 7; left data on y=0 at x=0..6; right data on y=0 at x=7..13.
+    κ ancillas on y=3. Bridge data + cycle ancillas on y=6.
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    circuit, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=1, noise_model=None,
+    )
+
+    # Parse QUBIT_COORDS and group qubit ids by y.
+    by_y: dict[int, list[tuple[int, int]]] = {}
+    for line in str(circuit).splitlines():
+        line = line.strip()
+        if not line.startswith("QUBIT_COORDS"):
+            continue
+        head, qid_str = line.rsplit(" ", 1)
+        tup = head[len("QUBIT_COORDS("):-1]
+        x_str, y_str = [t.strip() for t in tup.split(",")]
+        x, y = int(x_str), int(y_str)
+        qid = int(qid_str)
+        by_y.setdefault(y, []).append((x, qid))
+
+    # y=0 must have n_l + n_r = 14 qubits at x=0..13.
+    y0 = sorted(by_y.get(0, []))
+    assert len(y0) == 14, f"y=0 expected 14 data qubits, got {len(y0)}"
+    assert [x for x, _ in y0] == list(range(14)), (
+        f"y=0 x positions: expected 0..13, got {[x for x, _ in y0]}"
+    )
+
+    # y=3 must have κ_l + κ_r qubits (depends on bridge augmentation).
+    y3 = sorted(by_y.get(3, []))
+    assert len(y3) >= 2, f"y=3 expected at least 2 κ qubits, got {len(y3)}"
+
+    # y=6 must have bridge data (= bridge.width) at x=0..w-1, plus
+    # cycle ancillas (= bridge.width - 1) at x=0..w-2.
+    y6 = sorted(by_y.get(6, []))
+    w = bridge.width
+    expected_y6_count = w + max(0, w - 1)  # bridge data + cycle ancillas
+    assert len(y6) == expected_y6_count, (
+        f"y=6 expected {expected_y6_count} qubits (w={w} bridge data + w-1 cycle ancillas), got {len(y6)}"
+    )

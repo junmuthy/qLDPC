@@ -11,7 +11,6 @@ import numpy as np
 import stim
 
 from qldpc.circuits.bookkeeping import MeasurementRecord, DetectorRecord, QubitIDs
-from qldpc.circuits.memory.memory import get_qubit_coordinates
 from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
@@ -56,6 +55,208 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     return out
 
 
+def _surgery_qubit_coordinates(
+    gadget: GadgetLayout,
+    qubit_ids: QubitIDs,
+    *,
+    joint: tuple[GadgetLayout, Bridge, bool] | None = None,
+) -> stim.Circuit:
+    """Emit QUBIT_COORDS in surgery's 6/7-lane semantic layout.
+
+    Lanes:
+      y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
+                                slot; we split them across y=0/3/6 here).
+      y=1  data H_X ancillas   (checks_x[:m_X])
+      y=2  data H_Z ancillas   (checks_z[:m_Z])
+      y=3  κ ancillas
+      y=4  χ ancillas          (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      y=5  G ancillas          (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
+      y=6  bridge data + bridge cycle ancillas (joint PPM only)
+
+    `joint=None` → single PPM. Otherwise pass (g_r, bridge, intercode).
+    """
+    circuit = stim.Circuit()
+
+    if joint is None:
+        g_l = gadget
+        g_r = None
+        bridge = None
+        intercode = False
+    else:
+        g_l = gadget
+        g_r, bridge, intercode = joint
+
+    # Sizes for left side (always present).
+    n_l = g_l.code.num_qudits
+    m_X_l = g_l.code.matrix_x.shape[0]
+    m_Z_l = g_l.code.matrix_z.shape[0]
+    chi_l = len(g_l.V0)
+    G_l = g_l.G.shape[0]
+    k_l = len(g_l.kappa_qubits)
+
+    # Sizes for right side (joint+intercode only — intracode shares data).
+    if joint is not None and intercode:
+        n_r = g_r.code.num_qudits
+        m_X_r = g_r.code.matrix_x.shape[0]
+        m_Z_r = g_r.code.matrix_z.shape[0]
+        chi_r = len(g_r.V0)
+        G_r = g_r.G.shape[0]
+        k_r = len(g_r.kappa_qubits)
+    elif joint is not None:  # intracode: data shared, ancillas separate per gadget
+        n_r = 0
+        m_X_r = m_Z_r = 0  # data checks not duplicated for intracode
+        chi_r = len(g_r.V0)
+        G_r = g_r.G.shape[0]
+        # for intracode bridge code, kappa is the augmented one
+        k_l = bridge.g_l_aug.F.shape[0]
+        k_r = bridge.g_r_aug.F.shape[0]
+    else:
+        n_r = 0
+        m_X_r = m_Z_r = 0
+        chi_r = G_r = k_r = 0
+
+    # For joint cases, kappa counts come from the augmented gadgets carried
+    # by the bridge — they may exceed the bare gadget's |C_0| if cellulation
+    # added extra rows.
+    if joint is not None:
+        k_l = bridge.g_l_aug.F.shape[0]
+        k_r = bridge.g_r_aug.F.shape[0]
+
+    n_data_total = n_l + n_r
+    w = bridge.width if joint is not None else 0
+
+    # y=0 data
+    for i in range(n_data_total):
+        circuit.append("QUBIT_COORDS", qubit_ids.data[i], (i, 0))
+
+    # y=3 κ
+    for i in range(k_l + k_r):
+        circuit.append("QUBIT_COORDS", qubit_ids.data[n_data_total + i], (i, 3))
+
+    # y=6 bridge data (joint PPM only)
+    for i in range(w):
+        circuit.append(
+            "QUBIT_COORDS",
+            qubit_ids.data[n_data_total + k_l + k_r + i],
+            (i, 6),
+        )
+
+    # X-check ancillas: data H_X on y=1, then either χ on y=4 (basis=X) or G on y=5 (basis=Z).
+    is_basis_x = g_l.basis is Pauli.X
+    m_X_total = m_X_l + m_X_r
+    chi_total = chi_l + chi_r
+    G_total = G_l + G_r
+
+    for i in range(m_X_total):
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 1))
+    if is_basis_x:
+        # χ rows on y=4 (within checks_x)
+        for i in range(chi_total):
+            circuit.append(
+                "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 4),
+            )
+    else:
+        # G rows on y=5 (within checks_x for basis=Z)
+        for i in range(G_total):
+            circuit.append(
+                "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 5),
+            )
+
+    # Z-check ancillas: data H_Z on y=2, then either G on y=5 (basis=X) or χ on y=4 (basis=Z).
+    m_Z_total = m_Z_l + m_Z_r
+    for i in range(m_Z_total):
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 2))
+    if is_basis_x:
+        for i in range(G_total):
+            circuit.append(
+                "QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 5),
+            )
+    else:
+        for i in range(chi_total):
+            circuit.append(
+                "QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 4),
+            )
+
+    # Joint PPM: bridge cycle ancillas on y=6 (sharing the row with bridge data).
+    if joint is not None and w > 1:
+        # The new cycle checks live at the end of checks_x (basis=Z) or
+        # checks_z (basis=X). They're (w - 1) of them.
+        if is_basis_x:
+            cycle_check_ids = qubit_ids.checks_z[m_Z_total + G_total:]
+        else:
+            cycle_check_ids = qubit_ids.checks_x[m_X_total + G_total:]
+        for i, cid in enumerate(cycle_check_ids):
+            circuit.append("QUBIT_COORDS", cid, (i, 6))
+
+    return circuit
+
+
+def _check_lane_index_map(
+    gadget: GadgetLayout,
+    qubit_ids: QubitIDs,
+    *,
+    joint: tuple[GadgetLayout, Bridge, bool] | None = None,
+) -> dict[int, tuple[int, int]]:
+    """Build a {check_id: (lane, idx)} map matching the QUBIT_COORDS layout.
+
+    Lanes for checks (idx is x position within lane):
+      lane=1: data H_X check ancillas (checks_x[:m_X_total])
+      lane=2: data H_Z check ancillas (checks_z[:m_Z_total])
+      lane=4: χ check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      lane=5: G check ancillas (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
+      lane=6: bridge cycle check ancillas (joint PPM only).
+    """
+    is_basis_x = gadget.basis is Pauli.X
+
+    if joint is None:
+        m_X_total = gadget.code.matrix_x.shape[0]
+        m_Z_total = gadget.code.matrix_z.shape[0]
+        chi_total = len(gadget.V0)
+        G_total = gadget.G.shape[0]
+    else:
+        g_r, bridge, intercode = joint
+        m_X_total = gadget.code.matrix_x.shape[0]
+        m_Z_total = gadget.code.matrix_z.shape[0]
+        if intercode:
+            m_X_total += g_r.code.matrix_x.shape[0]
+            m_Z_total += g_r.code.matrix_z.shape[0]
+        chi_total = len(gadget.V0) + len(g_r.V0)
+        G_total = gadget.G.shape[0] + g_r.G.shape[0]
+
+    result: dict[int, tuple[int, int]] = {}
+
+    # data H_X on lane=1
+    for i in range(m_X_total):
+        result[qubit_ids.checks_x[i]] = (1, i)
+    # data H_Z on lane=2
+    for i in range(m_Z_total):
+        result[qubit_ids.checks_z[i]] = (2, i)
+
+    if is_basis_x:
+        # χ on lane=4 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
+        for i in range(chi_total):
+            result[qubit_ids.checks_x[m_X_total + i]] = (4, i)
+        for i in range(G_total):
+            result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
+    else:
+        # G on lane=5 in checks_x[m_X:]; χ on lane=4 in checks_z[m_Z:]
+        for i in range(G_total):
+            result[qubit_ids.checks_x[m_X_total + i]] = (5, i)
+        for i in range(chi_total):
+            result[qubit_ids.checks_z[m_Z_total + i]] = (4, i)
+
+    # Joint PPM bridge cycle ancillas on lane=6.
+    if joint is not None:
+        if is_basis_x:
+            cycle_ids = qubit_ids.checks_z[m_Z_total + G_total:]
+        else:
+            cycle_ids = qubit_ids.checks_x[m_X_total + G_total:]
+        for i, cid in enumerate(cycle_ids):
+            result[cid] = (6, i)
+
+    return result
+
+
 def build_single_ppm_circuit(
     gadget: GadgetLayout,
     *,
@@ -85,7 +286,7 @@ def build_single_ppm_circuit(
     kappa_ids = qubit_ids.data[n_data:]
     bridge_ids: tuple[int, ...] = ()
 
-    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
+    circuit = _surgery_qubit_coordinates(gadget, qubit_ids)
     circuit += _surgery_state_prep(
         gadget, data_ids, kappa_ids, bridge_ids, data_init=data_init,
     )
@@ -348,12 +549,14 @@ def build_joint_ppm_circuit(
     bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
     assert len(bridge_ids) == w
 
-    circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
+    circuit = _surgery_qubit_coordinates(
+        g_l, qubit_ids, joint=(g_r, bridge, intercode),
+    )
     circuit += _surgery_state_prep(
         g_l, data_ids, kappa_ids, bridge_ids, data_init=data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
-        g_l, g_r, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
+        g_l, g_r, joint_code, bridge, num_rounds=rounds, qubit_ids=qubit_ids,
         intercode=intercode,
     )
     circuit += qec_cycle
@@ -362,7 +565,7 @@ def build_joint_ppm_circuit(
         measurement_record=measurement_record,
     )
     circuit += _surgery_final_detectors_joint(
-        g_l, g_r, joint_code, qubit_ids,
+        g_l, g_r, joint_code, bridge, qubit_ids,
         measurement_record=measurement_record,
         intercode=intercode,
     )
@@ -434,6 +637,7 @@ def _surgery_qec_cycle_joint(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
     joint_code: CSSCode,
+    bridge: Bridge,
     num_rounds: int,
     qubit_ids: QubitIDs,
     *,
@@ -447,6 +651,9 @@ def _surgery_qec_cycle_joint(
         g_l, g_r, qubit_ids, intercode=intercode,
     ))
     all_check_ids = qubit_ids.check
+    lane_idx = _check_lane_index_map(
+        g_l, qubit_ids, joint=(g_r, bridge, intercode),
+    )
 
     circuit = stim.Circuit()
     measurement_record = MeasurementRecord()
@@ -454,9 +661,10 @@ def _surgery_qec_cycle_joint(
 
     circuit += one_round
     measurement_record.append(round_measurement_record)
-    for kk, check_id in enumerate(all_check_ids):
+    for check_id in all_check_ids:
         if check_id in reliable:
-            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, 0, kk))
+            lane, idx = lane_idx[check_id]
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, lane, idx))
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
@@ -464,11 +672,12 @@ def _surgery_qec_cycle_joint(
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
         repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
-        for kk, check_id in enumerate(all_check_ids):
+        for check_id in all_check_ids:
+            lane, idx = lane_idx[check_id]
             repeat_circuit.append("DETECTOR", [
                 measurement_record.get_target_rec(check_id, -1),
                 measurement_record.get_target_rec(check_id, -2),
-            ], (0, 0, kk))
+            ], (0, lane, idx))
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
@@ -483,6 +692,7 @@ def _surgery_final_detectors_joint(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
     joint_code: CSSCode,
+    bridge: Bridge,
     qubit_ids: QubitIDs,
     *,
     measurement_record: MeasurementRecord,
@@ -502,28 +712,27 @@ def _surgery_final_detectors_joint(
     HZ = np.asarray(joint_code.matrix_z).astype(np.uint8)
 
     circuit = stim.Circuit()
+    lane_idx = _check_lane_index_map(
+        g_l, qubit_ids, joint=(g_r, bridge, intercode),
+    )
 
-    def _emit_detector(stab_row: np.ndarray, check_id: int, det_idx: int) -> None:
+    def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
         supp = np.where(stab_row)[0]
         targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
         targets.append(measurement_record.get_target_rec(check_id, -1))
-        circuit.append("DETECTOR", targets, (0, 0, det_idx))
+        lane, idx = lane_idx[check_id]
+        circuit.append("DETECTOR", targets, (0, lane, idx))
 
     if g_l.basis is Pauli.X:
-        # data H_X rows from both gadgets
         for kk in range(m_X_l + m_X_r):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk], kk)
-        # G_aug rows + new cycle-Z rows: indices [m_Z_l + m_Z_r : HZ.shape[0])
-        det_offset = m_X_l + m_X_r
-        for offset, kk in enumerate(range(m_Z_l + m_Z_r, HZ.shape[0])):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], det_offset + offset)
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
+        for kk in range(m_Z_l + m_Z_r, HZ.shape[0]):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
     else:
-        # data H_Z rows from both gadgets
         for kk in range(m_Z_l + m_Z_r):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], kk)
-        det_offset = m_Z_l + m_Z_r
-        for offset, kk in enumerate(range(m_X_l + m_X_r, HX.shape[0])):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk], det_offset + offset)
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
+        for kk in range(m_X_l + m_X_r, HX.shape[0]):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
 
     return circuit
 
@@ -634,6 +843,7 @@ def _surgery_qec_cycle(
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
     reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
     all_check_ids = qubit_ids.check
+    lane_idx = _check_lane_index_map(gadget, qubit_ids)
 
     circuit = stim.Circuit()
     measurement_record = MeasurementRecord()
@@ -642,9 +852,10 @@ def _surgery_qec_cycle(
     # Round 1: emit DETECTORs only for reliable checks.
     circuit += one_round
     measurement_record.append(round_measurement_record)
-    for kk, check_id in enumerate(all_check_ids):
+    for check_id in all_check_ids:
         if check_id in reliable:
-            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, 0, kk))
+            lane, idx = lane_idx[check_id]
+            circuit.append("DETECTOR", [measurement_record.get_target_rec(check_id)], (0, lane, idx))
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
@@ -652,11 +863,12 @@ def _surgery_qec_cycle(
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
         repeat_circuit.append("SHIFT_COORDS", [], (1, 0, 0))
-        for kk, check_id in enumerate(all_check_ids):
+        for check_id in all_check_ids:
+            lane, idx = lane_idx[check_id]
             repeat_circuit.append("DETECTOR", [
                 measurement_record.get_target_rec(check_id, -1),
                 measurement_record.get_target_rec(check_id, -2),
-            ], (0, 0, kk))
+            ], (0, lane, idx))
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
@@ -729,25 +941,25 @@ def _surgery_final_detectors(
     HZ = np.asarray(merged_code.matrix_z).astype(np.uint8)
 
     circuit = stim.Circuit()
+    lane_idx = _check_lane_index_map(gadget, qubit_ids)
 
-    def _emit_detector(stab_row: np.ndarray, check_id: int, det_idx: int) -> None:
+    def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
         supp = np.where(stab_row)[0]
         targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
         targets.append(measurement_record.get_target_rec(check_id, -1))
-        circuit.append("DETECTOR", targets, (0, 0, det_idx))
+        lane, idx = lane_idx[check_id]
+        circuit.append("DETECTOR", targets, (0, lane, idx))
 
     if gadget.basis is Pauli.X:
-        # data H_X rows (X-checks indices [:m_X])
         for kk in range(m_X):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk], kk)
-        # G rows (Z-checks indices [m_Z:])
-        for offset, kk in enumerate(range(m_Z, HZ.shape[0])):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], m_X + offset)
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
+        for kk in range(m_Z, HZ.shape[0]):
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
     else:  # Pauli.Z (symmetric: chi in HZ, G in HX)
         for kk in range(m_Z):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk], kk)
-        for offset, kk in enumerate(range(m_X, HX.shape[0])):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk], m_Z + offset)
+            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
+        for kk in range(m_X, HX.shape[0]):
+            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
 
     return circuit
 
