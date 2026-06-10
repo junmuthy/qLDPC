@@ -1,14 +1,16 @@
-"""Load Webster (arXiv:2511.15989) Appendix A seed data.
+"""Webster (arXiv:2511.15989) Appendix A seed-set test fixture.
 
-The 4 codes from the paper are generalised bicycle codes with l in
-{31, 63, 127, 255}; each has 4 seed operators that drive the surgery
-experiments.  ``webster_app_a.json`` (sibling to this file) is the
-canonical fixture; ``build_generalised_bicycle_code`` reconstructs a
-CSS code from the seed's cyclic-exponent sets.
+Private to the surgery test suite + the `examples/lattice_surgery.ipynb`
+demo. Not part of the public API; the leading `_test_` prefix matches the
+convention used by `_test_helpers.py` and the `_test_<feature>.py` modules
+(pytest collects this file, finds no `def test_*`, and moves on).
 
-These helpers live under examples/ because they exist only to reproduce
-the Webster paper's specific 4 codes (Kovalev-Pryadko 2012 family) — the
-qLDPC library proper has no production dependency on them.
+Provides:
+
+* `load_webster_seed_set(code_index)` — read the JSON fixture for code
+  index 0..3.
+* `build_generalised_bicycle_code(l, A_set, B_set)` — build a CSS code
+  from cyclic exponent sets per Kovalev-Pryadko arXiv:1212.6703.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import numpy as np
 
 from qldpc.codes.common import CSSCode
 
-_WEBSTER_APP_A_PATH = Path(__file__).resolve().parent / "webster_app_a.json"
+_WEBSTER_APP_A_PATH = Path(__file__).resolve().parent / "_test_webster_app_a.json"
 
 
 def load_webster_seed_set(code_index: int) -> dict:

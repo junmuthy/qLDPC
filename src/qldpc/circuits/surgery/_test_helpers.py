@@ -1,19 +1,10 @@
-"""Shared fixtures + helpers for the split surgery test files.
-
-Importing this module injects `<repo>/examples` onto sys.path so the
-Webster JSON seed-set loader is available.
-"""
+"""Shared fixtures + helpers for the split surgery test files."""
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 
-# Webster seed-set helpers live under examples/ (the JSON fixture is there too).
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "examples"))
-from _webster_seed_set import (  # noqa: E402
+from ._test_webster_fixture import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
 )
