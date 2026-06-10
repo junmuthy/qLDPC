@@ -890,7 +890,8 @@ def test_joint_ppm_data_init_superposition():
 
 
 @pytest.mark.parametrize("bad_init,error_substr", [
-    ("00", "does not match num data qubits"),    # wrong length (Steane n=7)
+    ("00", "does not match num data qubits"),    # wrong length: too short
+    ("0" * 8, "does not match num data qubits"), # wrong length: too long (Steane n=7)
     ("@" * 7, "invalid chars"),                   # invalid character
     ("0123456", "invalid chars"),                 # mixed valid + invalid
 ])
