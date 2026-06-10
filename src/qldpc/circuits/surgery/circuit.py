@@ -61,6 +61,7 @@ def build_single_ppm_circuit(
     *,
     rounds: int,
     noise_model=None,
+    data_init: str | None = None,
 ) -> stim.Circuit:
     """Cain §III.A single-PPM measurement circuit for `gadget`.
 
@@ -73,6 +74,9 @@ def build_single_ppm_circuit(
         physical protocol — it destroys the encoded state).
 
     For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
+
+    ``data_init`` (optional): per-data-qubit init override; see
+    ``_surgery_state_prep`` for the character-to-state mapping.
     """
     merged_code = _gadget_merged_csscode(gadget)
     qubit_ids = QubitIDs.from_code(merged_code)
@@ -82,7 +86,9 @@ def build_single_ppm_circuit(
     bridge_ids: tuple[int, ...] = ()
 
     circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
-    circuit += _surgery_state_prep(gadget, data_ids, kappa_ids, bridge_ids)
+    circuit += _surgery_state_prep(
+        gadget, data_ids, kappa_ids, bridge_ids, data_init=data_init,
+    )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
         gadget, merged_code, num_rounds=rounds, qubit_ids=qubit_ids,
     )
@@ -301,6 +307,7 @@ def build_joint_ppm_circuit(
     *,
     rounds: int,
     noise_model=None,
+    data_init: str | None = None,
 ) -> tuple[stim.Circuit, CSSCode]:
     """Joint-PPM circuit (universal adapter; no U_B in α*).
 
@@ -315,6 +322,10 @@ def build_joint_ppm_circuit(
         encoded state).
 
     For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
+
+    ``data_init`` (optional): per-data-qubit init override. For inter-code,
+    positions [0:n_l) are left, [n_l:n_l+n_r) are right; for intra-code,
+    length is n_l. See ``_surgery_state_prep`` for the character-to-state mapping.
     """
     joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
@@ -338,7 +349,9 @@ def build_joint_ppm_circuit(
     assert len(bridge_ids) == w
 
     circuit = get_qubit_coordinates(qubit_ids.data, qubit_ids.check)
-    circuit += _surgery_state_prep(g_l, data_ids, kappa_ids, bridge_ids)
+    circuit += _surgery_state_prep(
+        g_l, data_ids, kappa_ids, bridge_ids, data_init=data_init,
+    )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
         g_l, g_r, joint_code, num_rounds=rounds, qubit_ids=qubit_ids,
         intercode=intercode,
@@ -536,15 +549,77 @@ def _surgery_state_prep(
     data_ids: tuple[int, ...],
     kappa_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...] = (),
+    *,
+    data_init: str | None = None,
 ) -> stim.Circuit:
-    """Init data/κ/bridge: basis=X → data|+⟩, κ|0⟩; basis=Z → data|0⟩, κ|+⟩."""
-    circuit = stim.Circuit()
-    if gadget.basis is Pauli.X:
-        circuit.append("RX", list(data_ids))
-        circuit.append("R", list(kappa_ids) + (list(bridge_ids) if bridge_ids else []))
+    """Init data/κ/bridge qubits at the start of a surgery PPM circuit.
+
+    Default (``data_init=None``):
+      basis=X → data |+⟩ (RX), κ + bridge |0⟩ (R)
+      basis=Z → data |0⟩ (R),  κ + bridge |+⟩ (RX)
+
+    Optional ``data_init`` overrides per-data-qubit initial state. Each
+    character selects a state for the data qubit at the same position:
+
+      "0" → |0⟩  (R)
+      "1" → |1⟩  (R + post-init X)
+      "+" → |+⟩  (RX)
+      "-" → |-⟩  (RX + post-init Z)
+
+    A length-1 string broadcasts to all data qubits; otherwise length must
+    equal ``len(data_ids)``.  κ + bridge init is independent of ``data_init``
+    and always follows the protocol default (basis-complement +1 eigenstate).
+    """
+    if data_init is None:
+        default_char = "+" if gadget.basis is Pauli.X else "0"
+        per_qubit = default_char * len(data_ids)
     else:
-        circuit.append("R", list(data_ids))
-        circuit.append("RX", list(kappa_ids) + (list(bridge_ids) if bridge_ids else []))
+        if len(data_init) == 1:
+            data_init = data_init * len(data_ids)
+        if len(data_init) != len(data_ids):
+            raise ValueError(
+                f"data_init length {len(data_init)} does not match num data "
+                f"qubits {len(data_ids)}; pass a length-1 string to broadcast"
+            )
+        invalid = sorted(set(data_init) - set("01+-"))
+        if invalid:
+            raise ValueError(
+                f"data_init must contain only '0', '1', '+', '-'; "
+                f"got invalid chars {invalid}"
+            )
+        per_qubit = data_init
+
+    r_data: list[int] = []
+    rx_data: list[int] = []
+    x_after: list[int] = []
+    z_after: list[int] = []
+    for q, c in zip(data_ids, per_qubit):
+        if c == "0":
+            r_data.append(q)
+        elif c == "1":
+            r_data.append(q)
+            x_after.append(q)
+        elif c == "+":
+            rx_data.append(q)
+        else:  # "-"
+            rx_data.append(q)
+            z_after.append(q)
+
+    circuit = stim.Circuit()
+    if r_data:
+        circuit.append("R", r_data)
+    if rx_data:
+        circuit.append("RX", rx_data)
+    if x_after:
+        circuit.append("X", x_after)
+    if z_after:
+        circuit.append("Z", z_after)
+
+    anc_ids = list(kappa_ids) + (list(bridge_ids) if bridge_ids else [])
+    if anc_ids:
+        anc_init = "R" if gadget.basis is Pauli.X else "RX"
+        circuit.append(anc_init, anc_ids)
+
     return circuit
 
 

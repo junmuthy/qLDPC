@@ -786,3 +786,120 @@ def test_build_joint_ppm_circuit_intracode_noiseless_observables_zero():
     dets, obs = sampler.sample(8, separate_observables=True)
     assert dets.sum() == 0, "noiseless intra-code: detectors should not fire"
     assert obs.sum() == 0, "noiseless intra-code: observables should be 0"
+
+
+def test_single_ppm_data_init_default_matches_pre_kwarg():
+    """build_single_ppm_circuit(g, rounds=3) ≡ data_init=None ≡ data_init='+' for basis=X."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    c_no_kwarg = build_single_ppm_circuit(g, rounds=3, noise_model=None)
+    c_none = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init=None)
+    c_plus = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init="+")
+    assert str(c_no_kwarg) == str(c_none), "data_init=None must match no-kwarg call"
+    assert str(c_no_kwarg) == str(c_plus), "data_init='+' broadcast must match default for basis=X"
+
+
+def test_single_ppm_data_init_zero_random_outcome():
+    """data_init='0' on basis=X gadget → logical |0⟩, obs0 50% flip, obs0 ≡ obs1."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    circuit = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init="0")
+    sampler = circuit.compile_detector_sampler()
+    _, observables = sampler.sample(shots=4000, separate_observables=True)
+    obs0, obs1 = observables[:, 0], observables[:, 1]
+    rate0, rate1 = float(obs0.mean()), float(obs1.mean())
+    agree = float((obs0 == obs1).mean())
+    assert 0.40 < rate0 < 0.60, f"obs0 flip rate {rate0:.2%} not in (40%, 60%)"
+    assert 0.40 < rate1 < 0.60, f"obs1 flip rate {rate1:.2%} not in (40%, 60%)"
+    assert agree == 1.0, f"obs0 vs obs1 disagree on {int((1-agree)*4000)} of 4000 shots"
+
+
+def test_joint_ppm_data_init_truth_table():
+    """Joint Z̄⊗Z̄ on two Steane copies: 4 |a⟩|b⟩ inits give expected parity."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    n1 = c1.num_qudits
+    cases = [
+        ("0" * n1 + "0" * n1, 0),
+        ("0" * n1 + "1" * n1, 1),
+        ("1" * n1 + "0" * n1, 1),
+        ("1" * n1 + "1" * n1, 0),
+    ]
+    for data_init, expected in cases:
+        circuit, _ = build_joint_ppm_circuit(
+            g1, g2, bridge, rounds=3, noise_model=None, data_init=data_init,
+        )
+        sampler = circuit.compile_sampler()
+        raw = sampler.sample(shots=200).astype(np.uint8)
+        n_meas = raw.shape[1]
+        obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
+        offsets = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        meas_idx = [n_meas + off for off in offsets]
+        obs0 = np.bitwise_xor.reduce(raw[:, meas_idx], axis=1)
+        rate = float(obs0.mean())
+        assert rate == float(expected), (
+            f"data_init={data_init!r} gave obs0 rate {rate:.3f}, expected {expected}"
+        )
+
+
+def test_joint_ppm_data_init_superposition():
+    """c1 |0⟩ × c2 |+⟩: Z̄_2 random → obs0 ~50%, obs0 ≡ obs1 every shot."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    n = c1.num_qudits
+    circuit, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None,
+        data_init="0" * n + "+" * n,
+    )
+    sampler = circuit.compile_sampler()
+    raw = sampler.sample(shots=1000).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
+    cols = []
+    for line in obs_lines:
+        offsets = [int(t.strip("rec[]")) for t in line.split() if t.startswith("rec[")]
+        meas_idx = [n_meas + off for off in offsets]
+        cols.append(np.bitwise_xor.reduce(raw[:, meas_idx], axis=1))
+    obs = np.stack(cols, axis=1)
+    rate0 = float(obs[:, 0].mean())
+    rate1 = float(obs[:, 1].mean())
+    agree = float((obs[:, 0] == obs[:, 1]).mean())
+    assert 0.40 < rate0 < 0.60, f"obs0 rate {rate0:.2%} not random"
+    assert 0.40 < rate1 < 0.60, f"obs1 rate {rate1:.2%} not random"
+    assert agree == 1.0, f"obs0 vs obs1 disagree on {int((1-agree)*1000)} of 1000 shots"
+
+
+@pytest.mark.parametrize("bad_init,error_substr", [
+    ("00", "does not match num data qubits"),    # wrong length (Steane n=7)
+    ("@" * 7, "invalid chars"),                   # invalid character
+    ("0123456", "invalid chars"),                 # mixed valid + invalid
+])
+def test_data_init_validation(bad_init, error_substr):
+    """Bad data_init raises ValueError with informative message."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x)
+    with pytest.raises(ValueError, match=error_substr):
+        build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init=bad_init)
