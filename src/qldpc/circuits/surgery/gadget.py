@@ -30,7 +30,7 @@ class GadgetLayout:
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
     kappa_qubits: tuple[int, ...]
-    basis: PauliXZ = Pauli.X
+    basis: PauliXZ
 
 
 def _step1_restriction(
@@ -155,7 +155,7 @@ def _step3_assemble(
 
 
 def build_gadget(
-    code: CSSCode, x: np.ndarray, *, basis: PauliXZ = Pauli.X,
+    code: CSSCode, x: np.ndarray, *, basis: PauliXZ,
 ) -> GadgetLayout:
     """Webster L=1 gadget = steps 1+2+3 composed. Deterministic in (code, x, basis).
 
@@ -190,7 +190,7 @@ def build_gadget_augmented(
     x: np.ndarray,
     F_extra: np.ndarray,
     *,
-    basis: PauliXZ = Pauli.X,
+    basis: PauliXZ,
 ) -> GadgetLayout:
     """Rebuild a GadgetLayout with F augmented by extra weight-2 rows.
 

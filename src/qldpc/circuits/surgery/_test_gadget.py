@@ -32,7 +32,7 @@ def test_gadget_layout_is_frozen_dataclass():
     inst = GadgetLayout(
         code=None, x=None, V0=(), C0=(),
         F=None, G=None, HX_merged=None, HZ_merged=None,
-        kappa_qubits=(),
+        kappa_qubits=(), basis=Pauli.X,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         inst.code = object()
@@ -202,7 +202,7 @@ def test_build_gadget_steane_returns_valid_layout():
     from qldpc.circuits.surgery.gadget import build_gadget, GadgetLayout
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     assert isinstance(g, GadgetLayout)
     assert g.code is code
     assert np.array_equal(g.x, x)
@@ -214,8 +214,8 @@ def test_build_gadget_deterministic():
     from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g1 = build_gadget(code, x)
-    g2 = build_gadget(code, x)
+    g1 = build_gadget(code, x, basis=Pauli.X)
+    g2 = build_gadget(code, x, basis=Pauli.X)
     assert g1.V0 == g2.V0
     assert g1.C0 == g2.C0
     assert np.array_equal(g1.F, g2.F)
@@ -233,7 +233,7 @@ def test_build_gadget_rejects_non_x_logical():
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     if ((HZ @ x) % 2).any():
         with pytest.raises(ValueError, match="logical"):
-            build_gadget(code, x)
+            build_gadget(code, x, basis=Pauli.X)
 
 
 def test_load_webster_seed_set_returns_known_shape():
@@ -261,7 +261,7 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     data = load_webster_seed_set(code_index)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_1_operator(data)
-    g1 = build_gadget(code, x1)
+    g1 = build_gadget(code, x1, basis=Pauli.X)
     kappa = len(g1.kappa_qubits)
     chi = int(g1.x.sum())  # |V_0|
     r = g1.G.shape[0]
@@ -271,13 +271,15 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     )
 
 
-def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
-    """Backward compatibility: build_gadget without explicit basis defaults to Pauli.X."""
+def test_build_gadget_basis_is_required():
+    """basis has no default: a CSS code's X-logical and Z-logical can coincide
+    (e.g. self-dual Steane), so the caller must declare intent explicitly.
+    """
     from qldpc.circuits.surgery.gadget import build_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
-    assert g.basis is Pauli.X
+    with pytest.raises(TypeError, match="basis"):
+        build_gadget(code, x)  # type: ignore[call-arg]
 
 
 def test_step1_restriction_basis_z_uses_HX():

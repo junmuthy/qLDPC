@@ -20,7 +20,7 @@ def test_cheeger_constant_matches_boost_target():
     from qldpc.circuits.surgery import build_gadget, boost_gadget, cheeger_constant
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     h0 = cheeger_constant(g)
     assert h0 >= 0
     # Boosting to a higher target raises h(F) to (at least) that target.
@@ -43,7 +43,7 @@ def test_boost_gadget_dispatches_to_two_methods():
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_x_bar_1_operator(data)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     for method in ("combinatorial", "distance"):
         out = boost_gadget(g, method=method, target=1.0, seed=42)
         assert isinstance(out, GadgetLayout), f"method={method}"
@@ -54,7 +54,7 @@ def test_boost_gadget_seed_reproducible():
     from qldpc.circuits.surgery.cheeger import boost_gadget
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     a = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
     b = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
     assert np.array_equal(a.F, b.F)
@@ -71,7 +71,7 @@ def test_boost_gadget_preserves_css_commutation(method):
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x = _webster_x_bar_1_operator(data)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     boosted = boost_gadget(g, method=method, target=1.0, seed=0)
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))

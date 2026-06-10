@@ -22,7 +22,7 @@ def test_build_single_ppm_circuit_noiseless_compiles():
     import stim
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(g, rounds=2, noise_model=None)
     assert isinstance(circuit, stim.Circuit)
     assert len(circuit) > 0
@@ -33,7 +33,7 @@ def test_build_single_ppm_circuit_noiseless_no_detectors_fire():
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(g, rounds=2, noise_model=None)
     sampler = circuit.compile_detector_sampler()
     samples = sampler.sample(shots=16)
@@ -46,7 +46,7 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(
         g, rounds=2, noise_model=DepolarizingNoiseModel(p=0.05),
     )
@@ -794,7 +794,7 @@ def test_single_ppm_data_init_default_matches_pre_kwarg():
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     c_no_kwarg = build_single_ppm_circuit(g, rounds=3, noise_model=None)
     c_none = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init=None)
     c_plus = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init="+")
@@ -808,7 +808,7 @@ def test_single_ppm_data_init_zero_random_outcome():
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init="0")
     sampler = circuit.compile_detector_sampler()
     _, observables = sampler.sample(shots=4000, separate_observables=True)
@@ -889,6 +889,94 @@ def test_joint_ppm_data_init_superposition():
     assert agree == 1.0, f"obs0 vs obs1 disagree on {int((1-agree)*1000)} of 1000 shots"
 
 
+def test_joint_ppm_data_init_tuple_matches_per_qubit_string():
+    """data_init=("0", "+") produces the same circuit as "0"*n + "+"*n."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    n = c1.num_qudits
+    c_tuple, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None, data_init=("0", "+"),
+    )
+    c_string, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None, data_init="0" * n + "+" * n,
+    )
+    assert str(c_tuple) == str(c_string)
+
+
+def test_joint_ppm_data_init_tuple_per_qubit_entry():
+    """Each tuple entry may be per-qubit (length n_code), not only len-1 broadcast."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    n = c1.num_qudits
+    spec_l = "0011010"
+    spec_r = "+"
+    c_tuple, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None, data_init=(spec_l, spec_r),
+    )
+    c_string, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None, data_init=spec_l + "+" * n,
+    )
+    assert str(c_tuple) == str(c_string)
+
+
+@pytest.mark.parametrize("bad_init,error_substr", [
+    (("0",), "must have 2 entries"),
+    (("0", "+", "-"), "must have 2 entries"),
+    (("00", "+"), "data_init\\[0\\] length 2 does not match c_l data count 7"),
+    (("0", "++"), "data_init\\[1\\] length 2 does not match c_r data count 7"),
+    ((0, "+"), "must be str"),
+])
+def test_joint_ppm_data_init_tuple_validation(bad_init, error_substr):
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    expected = TypeError if "must be str" in error_substr else ValueError
+    with pytest.raises(expected, match=error_substr):
+        build_joint_ppm_circuit(
+            g1, g2, bridge, rounds=3, noise_model=None, data_init=bad_init,
+        )
+
+
+def test_joint_ppm_data_init_tuple_rejects_intracode():
+    """Tuple form is invalid for intracode joint PPM (single data set)."""
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    data = load_webster_seed_set(0)
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x1 = _webster_x_bar_operator(data, "X_bar_1")
+    x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
+    g_l = build_gadget(code, x1, basis=Pauli.X)
+    g_r = build_gadget(code, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    assert g_l.code is g_r.code, "intracode setup precondition"
+    with pytest.raises(ValueError, match="intracode joint has a single data set"):
+        build_joint_ppm_circuit(
+            g_l, g_r, bridge, rounds=3, noise_model=None,
+            data_init=("0", "0"),
+        )
+
+
 @pytest.mark.parametrize("bad_init,error_substr", [
     ("00", "does not match num data qubits"),    # wrong length: too short
     ("0" * 8, "does not match num data qubits"), # wrong length: too long (Steane n=7)
@@ -901,7 +989,7 @@ def test_data_init_validation(bad_init, error_substr):
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     with pytest.raises(ValueError, match=error_substr):
         build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init=bad_init)
 
@@ -918,7 +1006,7 @@ def test_qubit_coords_layout_steane():
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
 
     # Parse QUBIT_COORDS lines: each line is "QUBIT_COORDS(x, y) qubit_id"
@@ -967,7 +1055,7 @@ def test_detector_coords_steane_round_1_reliable():
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x)
+    g = build_gadget(code, x, basis=Pauli.X)
     circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
 
     detector_coords: set[tuple[int, int, int]] = set()

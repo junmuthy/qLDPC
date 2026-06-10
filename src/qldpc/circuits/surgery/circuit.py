@@ -503,6 +503,63 @@ def _stitch_to_joint_csscode(
     return _stitch_intercode(g_l, g_r, bridge)
 
 
+def _expand_joint_data_init(
+    data_init: str | tuple[str, ...] | list[str] | None,
+    n_l: int,
+    n_r: int,
+    intercode: bool,
+) -> str | None:
+    """Normalize ``data_init`` to a per-physical-qubit string.
+
+    Two accepted shapes:
+
+      * ``str`` (or ``None``) — passed through verbatim to ``_surgery_state_prep``
+        (length-1 broadcasts to all data qubits; length n_l + n_r is per-qubit).
+
+      * ``tuple[str, str]`` (or list) — per-code logical-init spec. Each entry
+        is a string that is itself per-code broadcast (length 1) or per-qubit
+        (length n_code). Tuple form is only valid for intercode joint PPM
+        (intracode has a single data set; use a plain string instead).
+        Example: ``("0", "+")`` initializes c_l data to |0⟩^{n_l} and c_r data
+        to |+⟩^{n_r} — which, after the first round of merged-code SE projects
+        into the codespace, equals logical |0⟩_L ⊗ |+⟩_L for any CSS code.
+    """
+    if data_init is None or isinstance(data_init, str):
+        return data_init
+    if not isinstance(data_init, (tuple, list)):
+        raise TypeError(
+            f"data_init must be str, tuple, list, or None; got {type(data_init).__name__}"
+        )
+    if not intercode:
+        raise ValueError(
+            "tuple/list data_init only valid for intercode joint PPM; "
+            "intracode joint has a single data set, pass a plain string instead"
+        )
+    if len(data_init) != 2:
+        raise ValueError(
+            f"data_init tuple must have 2 entries (one per code), got {len(data_init)}"
+        )
+    spec_l, spec_r = data_init
+    if not isinstance(spec_l, str) or not isinstance(spec_r, str):
+        raise TypeError(
+            f"data_init tuple entries must be str, got "
+            f"({type(spec_l).__name__}, {type(spec_r).__name__})"
+        )
+    if len(spec_l) == 1:
+        spec_l = spec_l * n_l
+    if len(spec_r) == 1:
+        spec_r = spec_r * n_r
+    if len(spec_l) != n_l:
+        raise ValueError(
+            f"data_init[0] length {len(spec_l)} does not match c_l data count {n_l}"
+        )
+    if len(spec_r) != n_r:
+        raise ValueError(
+            f"data_init[1] length {len(spec_r)} does not match c_r data count {n_r}"
+        )
+    return spec_l + spec_r
+
+
 def build_joint_ppm_circuit(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -510,7 +567,7 @@ def build_joint_ppm_circuit(
     *,
     rounds: int,
     noise_model=None,
-    data_init: str | None = None,
+    data_init: str | tuple[str, ...] | list[str] | None = None,
 ) -> tuple[stim.Circuit, CSSCode]:
     """Joint-PPM circuit (universal adapter; no U_B in α*).
 
@@ -526,9 +583,13 @@ def build_joint_ppm_circuit(
 
     For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
 
-    ``data_init`` (optional): per-data-qubit init override. For inter-code,
-    positions [0:n_l) are left, [n_l:n_l+n_r) are right; for intra-code,
-    length is n_l. See ``_surgery_state_prep`` for the character-to-state mapping.
+    ``data_init`` (optional): override the per-code data init.
+
+      * ``str`` — per-physical-qubit (or len-1 broadcast). For intercode,
+        positions [0:n_l) are left, [n_l:n_l+n_r) are right; for intracode,
+        length is n_l. See ``_surgery_state_prep`` for the char-to-state mapping.
+      * ``tuple[str, str]`` (intercode only) — per-code logical-init spec.
+        ``data_init=("0", "+")`` → c_l in |0⟩_L, c_r in |+⟩_L.
     """
     joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
@@ -554,8 +615,9 @@ def build_joint_ppm_circuit(
     circuit = _surgery_qubit_coordinates(
         g_l, qubit_ids, joint=(g_r, bridge, intercode),
     )
+    expanded_data_init = _expand_joint_data_init(data_init, n_l, n_r, intercode)
     circuit += _surgery_state_prep(
-        g_l, data_ids, kappa_ids, bridge_ids, data_init=data_init,
+        g_l, data_ids, kappa_ids, bridge_ids, data_init=expanded_data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
         g_l, g_r, joint_code, bridge, num_rounds=rounds, qubit_ids=qubit_ids,
