@@ -1183,3 +1183,51 @@ def test_joint_ppm_qubit_coords_intercode_layout():
     assert len(y6) == expected_y6_count, (
         f"y=6 expected {expected_y6_count} qubits (w={w} bridge data + w-1 cycle ancillas), got {len(y6)}"
     )
+
+
+def test_logical_state_init_zero_and_plus_broadcast():
+    """'0' and '+' return length-n broadcast strings — trivial CSS prep."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()
+    n = code.num_qudits
+    assert logical_state_init(code, "0") == "0" * n
+    assert logical_state_init(code, "+") == "+" * n
+
+
+def test_logical_state_init_one_flips_x_bar_support():
+    """'1' = X̄_0 |0⟩_L: '1' on supp(X̄_0), '0' elsewhere."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()
+    n = code.num_qudits
+    x_bar = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    s = logical_state_init(code, "1")
+    assert len(s) == n
+    expected_ones = set(int(i) for i in np.where(x_bar)[0])
+    actual_ones = {i for i, c in enumerate(s) if c == "1"}
+    actual_zeros = {i for i, c in enumerate(s) if c == "0"}
+    assert actual_ones == expected_ones
+    assert actual_zeros == set(range(n)) - expected_ones
+
+
+def test_logical_state_init_minus_flips_z_bar_support():
+    """'-' = Z̄_0 |+⟩_L: '-' on supp(Z̄_0), '+' elsewhere."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()
+    n = code.num_qudits
+    z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    s = logical_state_init(code, "-")
+    assert len(s) == n
+    expected_minus = set(int(i) for i in np.where(z_bar)[0])
+    actual_minus = {i for i, c in enumerate(s) if c == "-"}
+    actual_plus = {i for i, c in enumerate(s) if c == "+"}
+    assert actual_minus == expected_minus
+    assert actual_plus == set(range(n)) - expected_minus
+
+
+@pytest.mark.parametrize("bad", ["2", "x", "", "01", "0 ", " 0"])
+def test_logical_state_init_invalid_state_raises(bad):
+    """Anything outside {'0', '1', '+', '-'} raises ValueError."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()
+    with pytest.raises(ValueError, match="state"):
+        logical_state_init(code, bad)

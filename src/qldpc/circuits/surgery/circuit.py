@@ -55,6 +55,50 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     return out
 
 
+def logical_state_init(code: CSSCode, state: str) -> str:
+    """Per-qubit ``data_init`` string preparing a Pauli logical state on
+    logical qubit 0 of a CSS code.
+
+    ``state`` ∈ {"0", "1", "+", "-"}:
+      * "0" → ``"0" * n``  — |0⟩^n projects to |0⟩_L for any CSS code
+      * "1" → "1" on supp(X̄_0), "0" elsewhere — X̄_0 |0⟩_L = |1⟩_L
+      * "+" → ``"+" * n``  — |+⟩^n projects to |+⟩_L for any CSS code
+      * "-" → "-" on supp(Z̄_0), "+" elsewhere — Z̄_0 |+⟩_L = |-⟩_L
+
+    X̄_0 and Z̄_0 are taken from ``code.get_logical_ops(Pauli.X)[0]`` and
+    ``code.get_logical_ops(Pauli.Z)[0]``; qldpc guarantees they form an
+    anti-commuting symplectic pair on logical qubit 0, so the prep is
+    correct for ANY CSS code regardless of the parity of wt(X̄_0) /
+    wt(Z̄_0). Naive broadcast ``data_init = "1" * n`` (or ``"-" * n``)
+    is correct only when those weights are odd, and silently produces
+    the wrong logical state on codes where they are even (e.g. BBCode
+    [[36, 8]] with wt(Z̄_0) = 8).
+
+    The returned string has length ``code.num_qudits``. Plug it straight
+    into ``build_single_ppm_circuit(..., data_init=...)`` or wrap with a
+    tuple for ``build_joint_ppm_circuit(..., data_init=(s_l, s_r))``.
+
+    Raises
+    ------
+    ValueError
+        If ``state`` is not one of "0", "1", "+", "-".
+    """
+    if state not in ("0", "1", "+", "-"):
+        raise ValueError(
+            f"state must be one of '0', '1', '+', '-'; got {state!r}"
+        )
+    n = code.num_qudits
+    if state in ("0", "+"):
+        return state * n
+    if state == "1":
+        flip = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+        flip_char, base_char = "1", "0"
+    else:  # state == "-"
+        flip = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+        flip_char, base_char = "-", "+"
+    return "".join(flip_char if flip[i] else base_char for i in range(n))
+
+
 def _surgery_qubit_coordinates(
     gadget: GadgetLayout,
     qubit_ids: QubitIDs,
