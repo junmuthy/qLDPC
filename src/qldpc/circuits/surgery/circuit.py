@@ -1,4 +1,9 @@
-"""Stim surgery circuit construction (single-PPM and joint-PPM)."""
+"""Stim surgery circuit construction (single-PPM and joint-PPM).
+
+References:
+    Cain et al. arXiv:2603.28627 §III.A  — single-PPM measurement protocol.
+    Webster, Smith, Cohen arXiv:2511.15989  — gadget Eq. 1 observable.
+"""
 
 from __future__ import annotations
 

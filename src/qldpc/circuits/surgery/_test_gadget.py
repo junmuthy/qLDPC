@@ -13,8 +13,6 @@ from qldpc.objects import Pauli
 from ._test_helpers import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
-    _webster_x_bar_operator,
-    _webster_z_bar_operator,
     _webster_x_bar_1_operator,
 )
 
@@ -57,7 +55,7 @@ def test_step1_restriction_steane():
     # F = H_Z[C_0, V_0]
     assert F.shape == (len(C0), len(V0))
     assert np.array_equal(F, HZ[np.ix_(C0, V0)])
-    # F @ 1_{V0} == 0 (math.md §1.1 invariant)
+    # F @ 1_{V0} == 0 (Webster §II.A step 1 invariant)
     ones = np.ones(len(V0), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
 
@@ -68,7 +66,7 @@ def test_step2_gauge_fix_basis_property():
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     _, _, F = _step1_restriction(code, x)
     G = _step2_gauge_fix(F)
-    # math.md §1.2: G F = 0 over GF(2)
+    # Webster §II.A step 2: G F = 0 over GF(2)
     assert G.shape[1] == F.shape[0]
     GF = (G @ F) % 2
     assert np.array_equal(GF, np.zeros_like(GF))
@@ -124,7 +122,7 @@ def test_step3_assemble_steane_css_commutes():
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
     assert HX_m.shape == (mX + len(V0), n + len(C0))
     assert HZ_m.shape == (mZ + G.shape[0], n + len(C0))
-    # math.md §1.5(a): H_X^merged @ H_Z^merged.T == 0 over GF(2)
+    # Webster §II.A: H_X^merged @ H_Z^merged.T == 0 over GF(2) (CSS commutation)
     product = (HX_m @ HZ_m.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
 
@@ -273,12 +271,6 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     )
 
 
-def test_gadget_layout_has_basis_field():
-    from qldpc.circuits.surgery.gadget import GadgetLayout
-    fields = {f.name for f in dataclasses.fields(GadgetLayout)}
-    assert "basis" in fields, f"basis field missing; got {fields}"
-
-
 def test_gadget_layout_basis_defaults_to_x_via_build_gadget():
     """Backward compatibility: build_gadget without explicit basis defaults to Pauli.X."""
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -302,7 +294,7 @@ def test_step1_restriction_basis_z_uses_HX():
     assert C0 == tuple(touched)
     # F = H_X[C_0, V_0]
     assert np.array_equal(F, HX[np.ix_(C0, V0)])
-    # math.md §1.1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
+    # Webster §II.A step 1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
     ones = np.ones(len(V0), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
 

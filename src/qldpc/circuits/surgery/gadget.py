@@ -1,9 +1,9 @@
-"""L=1 Webster gadget construction (see math.md §1, spec §2).
+"""L=1 gadget construction (Webster, Smith, Cohen arXiv:2511.15989 §II.A).
 
 Three explicit named steps that map 1:1 to the paper:
-    _step1_restriction  — math.md §1.1
-    _step2_gauge_fix    — math.md §1.2
-    _step3_assemble     — math.md §1.4
+    _step1_restriction  — Webster §II.A step 1 (restriction)
+    _step2_gauge_fix    — Webster §II.A step 2 (gauge fix)
+    _step3_assemble     — Webster §II.A step 3 (block assembly)
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class GadgetLayout:
 def _step1_restriction(
     code: CSSCode, x: np.ndarray, *, basis: PauliXZ = Pauli.X,
 ) -> tuple[tuple[int, ...], tuple[int, ...], np.ndarray]:
-    """math.md §1.1 — V_0 = supp(x); C_0 = checks touching V_0; F = H_complement[C_0, V_0].
+    """Webster §II.A step 1 — V_0 = supp(x); C_0 = checks touching V_0; F = H_complement[C_0, V_0].
 
     For basis=Pauli.X: F = H_Z[C_0, V_0] (the complementary basis to the measured logical).
     For basis=Pauli.Z: F = H_X[C_0, V_0].
@@ -63,7 +63,7 @@ def _step1_restriction(
 
 
 def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
-    """math.md §1.2 — G whose rows form a canonical basis of ker(F.T) over GF(2).
+    """Webster §II.A step 2 — G whose rows form a canonical basis of ker(F.T) over GF(2).
 
     Uses galois ``left_null_space`` (row-reduced) so the basis is deterministic.
     """
@@ -112,7 +112,7 @@ def _step3_assemble(
     *,
     basis: PauliXZ = Pauli.X,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """math.md §1.4 — block assembly of HX_merged, HZ_merged.
+    """Webster §II.A step 3 — block assembly of HX_merged, HZ_merged.
 
     basis=X (default): χ rows added to HX_merged, G to HZ_merged.
     basis=Z: χ rows added to HZ_merged, G to HX_merged (basis-symmetric dual).

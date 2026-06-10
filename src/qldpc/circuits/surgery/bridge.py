@@ -1,4 +1,5 @@
-"""Standalone bridge adapter for two-PPM joint surgery (arXiv:2410.03628 §IV / §VII).
+"""Standalone bridge adapter for two-PPM joint surgery
+(Swaroop et al. arXiv:2410.03628 §IV / §VII).
 
 Handles both intra-code (g1.code is g2.code) and inter-code joints.
 """
@@ -17,7 +18,7 @@ from .gadget import GadgetLayout
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Bridge:
-    """Universal adapter between two GadgetLayouts (arXiv:2410.03628 §IV / §VII).
+    """Universal adapter between two GadgetLayouts (Swaroop et al. arXiv:2410.03628 §IV / §VII).
 
     Attributes match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
     """
@@ -41,7 +42,7 @@ def _skip_tree(
     root: int = 0,
     edge_index_verts: dict[tuple[int, int], int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """SkipTree basis transform (arXiv:2410.03628 §III). Returns T, P."""
+    """SkipTree basis transform (Swaroop et al. arXiv:2410.03628 §III). Returns T, P."""
     n = S.number_of_nodes()
     index = 0
     label = [0] * n
@@ -102,18 +103,6 @@ def _canonical_H_R(w: int) -> np.ndarray:
     return H
 
 
-def _label_inverse(P: np.ndarray) -> list[int]:
-    """Return inv[l] = v such that P[v, l] = 1."""
-    n = P.shape[0]
-    inv = [-1] * n
-    for v in range(n):
-        for l in range(n):
-            if P[v, l] == 1:
-                inv[l] = v
-                break
-    return inv
-
-
 def _skip_tree_fullrank(
     S: nx.Graph,
     root: int = 0,
@@ -133,7 +122,13 @@ def _skip_tree_fullrank(
     n = S.number_of_nodes()
     span = nx.minimum_spanning_tree(S)
     _, P = _skip_tree(span, root=root, edge_index_verts=None)
-    label = _label_inverse(P)
+    # P is a permutation matrix from _skip_tree; recover label[l] = v such that P[v, l] = 1.
+    label = [-1] * n
+    for v in range(n):
+        for l in range(n):
+            if P[v, l] == 1:
+                label[l] = v
+                break
 
     if edge_index_verts is None:
         edge_index_verts = {tuple(sorted(e)): i for i, e in enumerate(S.edges())}
@@ -158,7 +153,7 @@ def _cellulate_port_subgraph(
     SkipTree runs on G_aux.subgraph(ports); cycles entirely outside the
     port subgraph never enter T_s, so we cellulate only there.
 
-    Theorem 7 (arXiv:2410.03628) already bounds T_s row weight at ≤ 3
+    Theorem 7 (Swaroop et al. arXiv:2410.03628) already bounds T_s row weight at ≤ 3
     regardless of cycle length, so this step is not load-bearing for
     correctness — it tightens the structural distance argument (Theorem 12)
     by capping basis cycle lengths.
@@ -347,7 +342,7 @@ def build_bridge(
     spanning_tree_root_r: int = 0,
     cellulate_max_len: int = 6,
 ) -> Bridge:
-    """Universal-adapter bridge between two gadgets (arXiv:2410.03628 §IV).
+    """Universal-adapter bridge between two gadgets (Swaroop et al. arXiv:2410.03628 §IV).
 
     See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
     7-step recipe. ``spanning_tree_root_s`` is the index INTO the port tuple of

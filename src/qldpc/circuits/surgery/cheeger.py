@@ -1,4 +1,13 @@
-"""Cheeger and distance boost transformations for surgery gadgets."""
+"""Cheeger and distance boost transformations for surgery gadgets.
+
+References:
+    Webster, Smith, Cohen arXiv:2511.15989  — boundary Cheeger constant,
+        combinatorial boost (§II.A).
+    Cross et al. arXiv:2407.18393  — Cheeger-based distance preservation
+        (§III Thm 6).
+    Williamson & Yoder arXiv:2410.02213  — distance-verifying random
+        augmentation boost.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +22,7 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     """Exact boundary Cheeger constant of F per Webster §II.A Definition 1.
 
     Helper / sanity-check tool. Used by ``boost_gadget_cheeger_combinatorial``
-    (which follows Williamson-Yoder / Webster: random edge addition + distance
+    (which follows Williamson & Yoder / Webster, Smith, Cohen: random edge addition + distance
     verification). Also kept for diagnostic use to debug the cut structure
     when a boost run is unexpectedly long.
 
@@ -315,12 +324,13 @@ def boost_gadget_distance(
     decoder_trials: int = 10,
     seed: int | None = None,
 ) -> GadgetLayout:
-    """Williamson-Yoder / Webster distance-verifying gadget boost.
+    """Distance-verifying gadget boost (Williamson & Yoder arXiv:2410.02213 /
+    Webster, Smith, Cohen arXiv:2511.15989).
 
-    Per Cain et al. arXiv:2503.10390 / Webster: iteratively add small random
-    batches of degree-2 edges to F, use BP+OSD upper bound on merged code
-    distance to fast-reject any augmentation whose deformed code falls below
-    target. Starts from n_extra = 0 (verify bare gadget already meets target).
+    Iteratively add small random batches of degree-2 edges to F, use BP+OSD
+    upper bound on merged code distance to fast-reject any augmentation whose
+    deformed code falls below target. Starts from n_extra = 0 (verify bare
+    gadget already meets target).
 
     Args:
         g: input gadget produced by build_gadget.
