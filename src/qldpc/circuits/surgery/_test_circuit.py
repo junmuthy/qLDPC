@@ -909,8 +909,9 @@ def test_data_init_validation(bad_init, error_substr):
 def test_qubit_coords_layout_steane():
     """Steane single-PPM circuit emits QUBIT_COORDS in 6 semantic lanes.
 
-    y=0 data (Steane ids 0..6), y=1 data H_X ancillas (3), y=2 data H_Z
-    ancillas (3), y=3 κ ancillas (3), y=4 χ ancillas (3), y=5 G ancilla (1).
+    y=0 data (Steane ids 0..6), y=1 κ ancillas (3), y=2 data H_X ancillas
+    (3), y=3 χ ancillas (3), y=4 data H_Z ancillas (3), y=5 G ancilla (1).
+    Ordering chosen so y is monotonic in qubit ID for basis=X.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
@@ -933,27 +934,27 @@ def test_qubit_coords_layout_steane():
         coord_map[int(qid_str)] = (int(x_str), int(y_str))
 
     expected = {
-        # data qubits on y=0
+        # data qubits on y=0 (unchanged)
         0: (0, 0), 1: (1, 0), 2: (2, 0), 3: (3, 0),
         4: (4, 0), 5: (5, 0), 6: (6, 0),
-        # κ ancillas on y=3
-        7: (0, 3), 8: (1, 3), 9: (2, 3),
-        # data H_X ancillas on y=1 (Steane has 3 X-checks)
-        10: (0, 1), 11: (1, 1), 12: (2, 1),
-        # χ ancillas on y=4 (basis=X gadget: χ in checks_x[m_X:])
-        13: (0, 4), 14: (1, 4), 15: (2, 4),
-        # data H_Z ancillas on y=2
-        16: (0, 2), 17: (1, 2), 18: (2, 2),
-        # G ancilla on y=5 (gauge-fix, basis=X: G in checks_z[m_Z:])
+        # κ ancillas on y=1 (was y=3)
+        7: (0, 1), 8: (1, 1), 9: (2, 1),
+        # data H_X ancillas on y=2 (was y=1)
+        10: (0, 2), 11: (1, 2), 12: (2, 2),
+        # χ ancillas on y=3 (was y=4)
+        13: (0, 3), 14: (1, 3), 15: (2, 3),
+        # data H_Z ancillas on y=4 (was y=2)
+        16: (0, 4), 17: (1, 4), 18: (2, 4),
+        # G ancilla on y=5 (unchanged)
         19: (0, 5),
     }
     assert coord_map == expected, f"\nexpected: {expected}\ngot:      {coord_map}"
 
 
 def test_detector_coords_steane_round_1_reliable():
-    """Steane single-PPM round-1 reliable detectors have lane ∈ {1, 5}.
+    """Steane single-PPM round-1 reliable detectors have lane ∈ {2, 5}.
 
-    Round-1 reliable for basis=X gadget: 3 data H_X checks (lane=1) + 1 G
+    Round-1 reliable for basis=X gadget: 3 data H_X checks (lane=2) + 1 G
     check (lane=5). No χ or data H_Z because those aren't deterministic
     on the protocol-default |+⟩ init.
     """
@@ -976,22 +977,22 @@ def test_detector_coords_steane_round_1_reliable():
         parts = [int(p.strip()) for p in tup.split(",")]
         detector_coords.add(tuple(parts))
 
-    expected = {(0, 1, 0), (0, 1, 1), (0, 1, 2), (0, 5, 0)}
+    expected = {(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}
     assert detector_coords == expected, (
         f"\nexpected: {expected}\ngot:      {detector_coords}"
     )
 
 
 def test_detector_coords_basis_z_preserves_lane_semantics():
-    """basis=Z gadget: round-1 reliable detector lanes ⊆ {2, 5}; no lane 1 or 4 leakage.
+    """basis=Z gadget: round-1 reliable detector lanes ⊆ {4, 5}; no lane 2 or 3 leakage.
 
     For Steane logical-Z under basis=Pauli.Z, G happens to be empty
     (F = H_X[C_0, V_0] is invertible for this specific fixture), so
     lane 5 does not actually appear. What this test pins down is the
     **negative-direction basis symmetry**: the lane map must NOT route
-    G ancillas to lane 1 (data H_X) nor χ ancillas to lane 4 in the
+    G ancillas to lane 2 (data H_X) nor χ ancillas to lane 3 in the
     basis=Z basis-swap. If `_check_lane_index_map` mis-classified G as
-    data H_X when basis=Z, lane 1 would appear in the reliable detectors
+    data H_X when basis=Z, lane 2 would appear in the reliable detectors
     (since G ancillas live in checks_x[m_X:] for basis=Z and ARE
     deterministically +1 on the |0⟩^n protocol-default init — but G is
     empty in this fixture, so the leak would also be empty; we use this
@@ -1000,7 +1001,7 @@ def test_detector_coords_basis_z_preserves_lane_semantics():
 
     For Steane Z̄ (3-qubit support, 3 X-checks, F full-rank):
       - reliable_x = G rows (empty)
-      - reliable_z = data H_Z rows (3 of them, lane=2)
+      - reliable_z = data H_Z rows (3 of them, lane=4)
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
@@ -1021,17 +1022,17 @@ def test_detector_coords_basis_z_preserves_lane_semantics():
         detector_lanes.add(parts[1])
 
     # Real assertions:
-    assert detector_lanes.issubset({2, 5}), (
-        f"basis=Z round-1 reliable lanes leaked outside {{2, 5}}: got {detector_lanes}"
+    assert detector_lanes.issubset({4, 5}), (
+        f"basis=Z round-1 reliable lanes leaked outside {{4, 5}}: got {detector_lanes}"
     )
-    assert 2 in detector_lanes, (
-        f"basis=Z must have data H_Z reliable detectors (lane=2); got {detector_lanes}"
+    assert 4 in detector_lanes, (
+        f"basis=Z must have data H_Z reliable detectors (lane=4); got {detector_lanes}"
     )
-    assert 1 not in detector_lanes, (
-        f"basis=Z must NOT route any check to lane=1 (data H_X); got {detector_lanes}"
+    assert 2 not in detector_lanes, (
+        f"basis=Z must NOT route any check to lane=2 (data H_X); got {detector_lanes}"
     )
-    assert 4 not in detector_lanes, (
-        f"basis=Z must NOT route any check to lane=4 (χ); got {detector_lanes}"
+    assert 3 not in detector_lanes, (
+        f"basis=Z must NOT route any check to lane=3 (χ); got {detector_lanes}"
     )
 
 
@@ -1039,7 +1040,7 @@ def test_joint_ppm_qubit_coords_intercode_layout():
     """Intercode joint Z̄⊗Z̄ on two Steane copies: QUBIT_COORDS lanes correct.
 
     n_l = n_r = 7; left data on y=0 at x=0..6; right data on y=0 at x=7..13.
-    κ ancillas on y=3. Bridge data + cycle ancillas on y=6.
+    κ ancillas on y=1. Bridge data + cycle ancillas on y=6.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -1075,9 +1076,9 @@ def test_joint_ppm_qubit_coords_intercode_layout():
         f"y=0 x positions: expected 0..13, got {[x for x, _ in y0]}"
     )
 
-    # y=3 must have κ_l + κ_r qubits (depends on bridge augmentation).
-    y3 = sorted(by_y.get(3, []))
-    assert len(y3) >= 2, f"y=3 expected at least 2 κ qubits, got {len(y3)}"
+    # y=1 (was y=3) must have κ_l + κ_r qubits (depends on bridge augmentation).
+    y1 = sorted(by_y.get(1, []))
+    assert len(y1) >= 2, f"y=1 expected at least 2 κ qubits, got {len(y1)}"
 
     # y=6 must have bridge data (= bridge.width) at x=0..w-1, plus
     # cycle ancillas (= bridge.width - 1) at x=0..w-2.

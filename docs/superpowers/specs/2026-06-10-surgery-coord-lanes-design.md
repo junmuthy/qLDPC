@@ -18,7 +18,7 @@ For someone debugging the surgery construction (e.g., checking which detectors f
 Replace both annotations with a coordinate scheme that encodes the **semantic role** of every qubit and detector. Lane numbers map 1:1 between QUBIT_COORDS (the `y` axis position) and DETECTOR coord arg `lane` (the second tuple element). After the change:
 
 - `detslice-svg` shows qubits in 7 horizontal stripes by semantic role.
-- `timeline-svg` detector labels read `(t, lane, idx)` where `lane ∈ {1, 2, 4, 5, 6}` immediately identifies which check class fired.
+- `timeline-svg` detector labels read `(t, lane, idx)` where `lane ∈ {2, 3, 4, 5, 6}` immediately identifies which check class fired.
 - Programmatic post-processing (DEM grouping, decoder debugging, fault-trace analysis) can filter detectors by lane in one line.
 
 This is purely a debugging visualization improvement — it does NOT model hardware geometry. Neutral-atom architectures use dynamic zone-based layouts (storage / entangling / readout) that this scheme cannot represent. The lane layout is a semantic convention chosen for clarity.
@@ -36,13 +36,13 @@ This is purely a debugging visualization improvement — it does NOT model hardw
 | `y` | Content | Source slot | X range |
 |---|---|---|---|
 | 0 | data qubits | `qubit_ids.data[:n_data]` | `0 .. n_data - 1` |
-| 1 | data H_X ancillas (original X-stabilizer ancillas) | `qubit_ids.checks_x[:m_X]` | `0 .. m_X - 1` |
-| 2 | data H_Z ancillas (original Z-stabilizer ancillas) | `qubit_ids.checks_z[:m_Z]` | `0 .. m_Z - 1` |
-| 3 | κ ancillas | `qubit_ids.data[n_data : n_data + k]` (k = len(gadget.kappa_qubits)) | `0 .. k - 1` |
-| 4 | χ ancillas (surgery-added) | basis=X: `qubit_ids.checks_x[m_X:]`; basis=Z: `qubit_ids.checks_z[m_Z:]` | `0 .. \|V_0\| - 1` |
+| 1 | κ ancillas | `qubit_ids.data[n_data : n_data + k]` (k = len(gadget.kappa_qubits)) | `0 .. k - 1` |
+| 2 | data H_X ancillas (original X-stabilizer ancillas) | `qubit_ids.checks_x[:m_X]` | `0 .. m_X - 1` |
+| 3 | χ ancillas (surgery-added) | basis=X: `qubit_ids.checks_x[m_X:]`; basis=Z: `qubit_ids.checks_z[m_Z:]` | `0 .. \|V_0\| - 1` |
+| 4 | data H_Z ancillas (original Z-stabilizer ancillas) | `qubit_ids.checks_z[:m_Z]` | `0 .. m_Z - 1` |
 | 5 | G ancillas (gauge-fix) | basis=X: `qubit_ids.checks_z[m_Z:]`; basis=Z: `qubit_ids.checks_x[m_X:]` | `0 .. r - 1` |
 
-Semantic structure: **y = 0..2 = original code material** (data + original stabilizer ancillas); **y = 3..5 = surgery-added material** (κ + χ + G). The `χ` and `G` lane numbers are stable across `basis=X` / `basis=Z` even though the underlying matrix slot swaps between `checks_x` and `checks_z`.
+Rationale: y is monotonic in qubit ID for basis=X (ids 0..6→y=0, 7..9→y=1, 10..12→y=2, 13..15→y=3, 16..18→y=4, 19→y=5), so QUBIT_COORDS lines in the circuit text dump appear in increasing y order. basis=Z breaks monotonicity because χ and G swap matrix slots, but the lane numbers remain stable: χ always y=3, G always y=5.
 
 ## Lane layout (joint PPM)
 
@@ -51,10 +51,10 @@ Joint PPM adds bridge qubits + bridge cycle check ancillas. Both go on `y = 6`:
 | `y` | Joint PPM content | X range |
 |---|---|---|
 | 0 | data: left then right (intercode) or shared (intracode) | intercode: `0 .. n_l + n_r - 1`; intracode: `0 .. n_l - 1` |
-| 1 | data H_X ancillas: left then right (intercode) | intercode: `0 .. m_X_l + m_X_r - 1`; intracode: `0 .. m_X - 1` |
-| 2 | data H_Z ancillas: left then right (intercode) | analogous |
-| 3 | κ ancillas: left then right | `0 .. k_l + k_r - 1` |
-| 4 | χ ancillas: left then right | `0 .. \|V_0_l\| + \|V_0_r\| - 1` |
+| 1 | κ ancillas: left then right | `0 .. k_l + k_r - 1` |
+| 2 | data H_X ancillas: left then right (intercode) | intercode: `0 .. m_X_l + m_X_r - 1`; intracode: `0 .. m_X - 1` |
+| 3 | χ ancillas: left then right | `0 .. \|V_0_l\| + \|V_0_r\| - 1` |
+| 4 | data H_Z ancillas: left then right (intercode) | analogous |
 | 5 | G ancillas: left then right | `0 .. r_l + r_r - 1` |
 | 6 | bridge data qubits + bridge cycle check ancillas (sharing the row) | data: `0 .. w - 1`; cycle ancillas: `0 .. w - 2` |
 
@@ -65,16 +65,16 @@ Bridge data qubits and bridge cycle ancillas have **different qubit ids** so sha
 DETECTOR coords become `(t, lane, idx)` where:
 
 - `t` = round index. `SHIFT_COORDS (1, 0, 0)` after each round (unchanged from today).
-- `lane` = the y-position of the ancilla being measured, so `lane ∈ {1, 2, 4, 5, 6}` for the 5 lanes that contain check ancillas (lane=0 = data and lane=3 = κ have no DETECTOR; κ is final-measured but not a syndrome check).
+- `lane` = the y-position of the ancilla being measured, so `lane ∈ {2, 3, 4, 5, 6}` for the 5 lanes that contain check ancillas (lane=0 = data and lane=1 = κ have no DETECTOR; κ is final-measured but not a syndrome check).
 - `idx` = position within that lane, matching the `x` coordinate of the ancilla being measured.
 
 Lane / x mapping (single PPM, basis=X):
 
 | Check role | lane | idx |
 |---|---|---|
-| data H_X row `j` (j ∈ [0, m_X)) | 1 | `j` |
-| data H_Z row `j` (j ∈ [0, m_Z)) | 2 | `j` |
-| χ row `j` (j ∈ [0, \|V_0\|)) | 4 | `j` |
+| data H_X row `j` (j ∈ [0, m_X)) | 2 | `j` |
+| data H_Z row `j` (j ∈ [0, m_Z)) | 4 | `j` |
+| χ row `j` (j ∈ [0, \|V_0\|)) | 3 | `j` |
 | G row `j` (j ∈ [0, r)) | 5 | `j` |
 
 For basis=Z, the source-matrix slot swaps but lane is preserved.
@@ -85,9 +85,9 @@ For joint PPM, the bridge cycle check (basis=X: new Z-check at `qubit_ids.checks
 
 | Detector | Old `(0, 0, kk)` | New `(0, lane, idx)` | Decoded |
 |---|---|---|---|
-| D0 | (0, 0, 0) | (0, 1, 0) | round 0, data H_X check 0 |
-| D1 | (0, 0, 1) | (0, 1, 1) | round 0, data H_X check 1 |
-| D2 | (0, 0, 2) | (0, 1, 2) | round 0, data H_X check 2 |
+| D0 | (0, 0, 0) | (0, 2, 0) | round 0, data H_X check 0 |
+| D1 | (0, 0, 1) | (0, 2, 1) | round 0, data H_X check 1 |
+| D2 | (0, 0, 2) | (0, 2, 2) | round 0, data H_X check 2 |
 | D3 | (0, 0, 9) | (0, 5, 0) | round 0, G check 0 |
 
 ## Implementation surface
@@ -134,19 +134,19 @@ Add to `_test_circuit.py` (~4 tests, ~80 lines):
 
 **1. `test_qubit_coords_layout_steane`** — Build Steane single-PPM circuit (basis=X). Parse `QUBIT_COORDS` lines from `str(circuit)`. Assert:
 - Qubits 0..6 (Steane data) all on y=0, x=0..6.
-- Qubits 7..9 (κ) all on y=3, x=0..2.
-- Qubits 10..12 (data H_X ancillas) on y=1.
-- Qubits 13..15 (χ ancillas) on y=4.
-- Qubits 16..18 (data H_Z ancillas) on y=2.
+- Qubits 7..9 (κ) all on y=1, x=0..2.
+- Qubits 10..12 (data H_X ancillas) on y=2.
+- Qubits 13..15 (χ ancillas) on y=3.
+- Qubits 16..18 (data H_Z ancillas) on y=4.
 - Qubit 19 (G ancilla) on y=5.
 
-**2. `test_detector_coords_steane_round_1_reliable`** — Build Steane single-PPM circuit (basis=X), 1 round. Walk DETECTOR instructions; assert exactly 4 detectors with coords `{(0, 1, 0), (0, 1, 1), (0, 1, 2), (0, 5, 0)}` (the 3 data H_X reliable checks + the 1 G reliable check). Index-set match (order-insensitive).
+**2. `test_detector_coords_steane_round_1_reliable`** — Build Steane single-PPM circuit (basis=X), 1 round. Walk DETECTOR instructions; assert exactly 4 detectors with coords `{(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}` (the 3 data H_X reliable checks + the 1 G reliable check). Index-set match (order-insensitive).
 
-**3. `test_detector_coords_basis_z_preserves_lane_semantics`** — Build Steane gadget with `basis=Pauli.Z` (need a logical-Z support — use `get_logical_ops(Pauli.Z)[0]`). Round-1 reliable detector lanes should be `{2, 5}` (data H_Z = lane 2; G = lane 5). The χ would be lane 4 — but χ is NOT a round-1 reliable check, so it doesn't show up. Asserts the χ/G lane numbers stay stable under basis swap (i.e., `lane=5` is G, not χ, regardless of which matrix slot G lives in).
+**3. `test_detector_coords_basis_z_preserves_lane_semantics`** — Build Steane gadget with `basis=Pauli.Z` (need a logical-Z support — use `get_logical_ops(Pauli.Z)[0]`). Round-1 reliable detector lanes should be `{4, 5}` (data H_Z = lane 4; G = lane 5). The χ would be lane 3 — but χ is NOT a round-1 reliable check, so it doesn't show up. Asserts the χ/G lane numbers stay stable under basis swap (i.e., `lane=5` is G, not χ, regardless of which matrix slot G lives in).
 
 **4. `test_joint_ppm_qubit_coords_intercode_layout`** — Build intercode joint PPM (e.g., two Steane copies, basis=Pauli.Z). Parse `QUBIT_COORDS`. Assert:
 - left+right data on y=0, x = 0..n_l + n_r - 1, with x = 0..n_l-1 being left and x = n_l..n_l+n_r-1 being right.
-- κ ancillas on y=3, similarly left-then-right.
+- κ ancillas on y=1, similarly left-then-right.
 - bridge data on y=6 at x=0..w-1.
 - bridge cycle ancillas on y=6 at x=0..w-2.
 
@@ -165,9 +165,9 @@ Add to `_test_circuit.py` (~4 tests, ~80 lines):
 ## Success criteria
 
 - `.venv/bin/python -m pytest src/qldpc/circuits/surgery/ -q | tail -3` reports **100 passed**.
-- `python -c "from qldpc.circuits.surgery import build_single_ppm_circuit; import numpy as np; from qldpc import codes; from qldpc.objects import Pauli; s = codes.SteaneCode(); x = np.asarray(s.get_logical_ops(Pauli.X)[0]).astype(np.uint8); from qldpc.circuits.surgery import build_gadget; g = build_gadget(s, x); c = build_single_ppm_circuit(g, rounds=1, noise_model=None); print([l for l in str(c).splitlines() if 'DETECTOR' in l])"` shows DETECTOR lines whose coord args are `{(0, 1, 0), (0, 1, 1), (0, 1, 2), (0, 5, 0)}` — i.e., `lane ∈ {1, 5}`, not `lane=0`.
-- `circuit.diagram("timeline-svg")` rendered on the same example shows detector labels `coords=(0, 1, 0) / (0, 1, 1) / (0, 1, 2) / (0, 5, 0)` instead of `(0, 0, 0..2, 9)`.
-- `circuit.diagram("detslice-svg", tick=...)` rendered on the same example shows qubit dots in 4 distinct y-rows (0, 1, 3, 5 in this small case; or all 6 rows once χ ancillas are present at their position).
+- `python -c "from qldpc.circuits.surgery import build_single_ppm_circuit; import numpy as np; from qldpc import codes; from qldpc.objects import Pauli; s = codes.SteaneCode(); x = np.asarray(s.get_logical_ops(Pauli.X)[0]).astype(np.uint8); from qldpc.circuits.surgery import build_gadget; g = build_gadget(s, x); c = build_single_ppm_circuit(g, rounds=1, noise_model=None); print([l for l in str(c).splitlines() if 'DETECTOR' in l])"` shows DETECTOR lines whose coord args are `{(0, 2, 0), (0, 2, 1), (0, 2, 2), (0, 5, 0)}` — i.e., `lane ∈ {2, 5}`, not `lane=0`.
+- `circuit.diagram("timeline-svg")` rendered on the same example shows detector labels `coords=(0, 2, 0) / (0, 2, 1) / (0, 2, 2) / (0, 5, 0)` instead of `(0, 0, 0..2, 9)`.
+- `circuit.diagram("detslice-svg", tick=...)` rendered on the same example shows qubit dots in 4 distinct y-rows (0, 2, 1, 5 in this small case; or all 6 rows once χ ancillas are present at their position).
 - No existing test fails. No public function's signature changes.
 
 ## Open questions

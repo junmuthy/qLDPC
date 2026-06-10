@@ -65,13 +65,19 @@ def _surgery_qubit_coordinates(
 
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
-                                slot; we split them across y=0/3/6 here).
-      y=1  data H_X ancillas   (checks_x[:m_X])
-      y=2  data H_Z ancillas   (checks_z[:m_Z])
-      y=3  κ ancillas
-      y=4  χ ancillas          (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+                                slot; we split them across y=0/1/6 here).
+      y=1  κ ancillas
+      y=2  data H_X ancillas   (checks_x[:m_X])
+      y=3  χ ancillas          (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      y=4  data H_Z ancillas   (checks_z[:m_Z])
       y=5  G ancillas          (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
       y=6  bridge data + bridge cycle ancillas (joint PPM only)
+
+    For basis=X, y is monotonic in qubit ID order (ids 0..6→y=0, 7..9→y=1,
+    10..12→y=2, 13..15→y=3, 16..18→y=4, 19→y=5), so QUBIT_COORDS lines in
+    the stringified circuit dump appear in increasing y order. basis=Z
+    breaks monotonicity because χ and G swap matrix slots, but the lane
+    numbers remain stable: χ always y=3, G always y=5.
 
     `joint=None` → single PPM. Otherwise pass (g_r, bridge, intercode).
     """
@@ -125,9 +131,9 @@ def _surgery_qubit_coordinates(
     for i in range(n_data_total):
         circuit.append("QUBIT_COORDS", qubit_ids.data[i], (i, 0))
 
-    # y=3 κ
+    # y=1 κ
     for i in range(k_l + k_r):
-        circuit.append("QUBIT_COORDS", qubit_ids.data[n_data_total + i], (i, 3))
+        circuit.append("QUBIT_COORDS", qubit_ids.data[n_data_total + i], (i, 1))
 
     # y=6 bridge data (joint PPM only)
     for i in range(w):
@@ -137,19 +143,19 @@ def _surgery_qubit_coordinates(
             (i, 6),
         )
 
-    # X-check ancillas: data H_X on y=1, then either χ on y=4 (basis=X) or G on y=5 (basis=Z).
+    # X-check ancillas: data H_X on y=2, then either χ on y=3 (basis=X) or G on y=5 (basis=Z).
     is_basis_x = g_l.basis is Pauli.X
     m_X_total = m_X_l + m_X_r
     chi_total = chi_l + chi_r
     G_total = G_l + G_r
 
     for i in range(m_X_total):
-        circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 1))
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 2))
     if is_basis_x:
-        # χ rows on y=4 (within checks_x)
+        # χ rows on y=3 (within checks_x)
         for i in range(chi_total):
             circuit.append(
-                "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 4),
+                "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 3),
             )
     else:
         # G rows on y=5 (within checks_x for basis=Z)
@@ -158,10 +164,10 @@ def _surgery_qubit_coordinates(
                 "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 5),
             )
 
-    # Z-check ancillas: data H_Z on y=2, then either G on y=5 (basis=X) or χ on y=4 (basis=Z).
+    # Z-check ancillas: data H_Z on y=4, then either G on y=5 (basis=X) or χ on y=3 (basis=Z).
     m_Z_total = m_Z_l + m_Z_r
     for i in range(m_Z_total):
-        circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 2))
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 4))
     if is_basis_x:
         for i in range(G_total):
             circuit.append(
@@ -170,7 +176,7 @@ def _surgery_qubit_coordinates(
     else:
         for i in range(chi_total):
             circuit.append(
-                "QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 4),
+                "QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 3),
             )
 
     # Joint PPM: bridge cycle ancillas on y=6 (sharing the row with bridge data).
@@ -196,9 +202,9 @@ def _check_lane_index_map(
     """Build a {check_id: (lane, idx)} map matching the QUBIT_COORDS layout.
 
     Lanes for checks (idx is x position within lane):
-      lane=1: data H_X check ancillas (checks_x[:m_X_total])
-      lane=2: data H_Z check ancillas (checks_z[:m_Z_total])
-      lane=4: χ check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      lane=2: data H_X check ancillas (checks_x[:m_X_total])
+      lane=3: χ check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      lane=4: data H_Z check ancillas (checks_z[:m_Z_total])
       lane=5: G check ancillas (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
       lane=6: bridge cycle check ancillas (joint PPM only).
     """
@@ -221,25 +227,25 @@ def _check_lane_index_map(
 
     result: dict[int, tuple[int, int]] = {}
 
-    # data H_X on lane=1
+    # data H_X on lane=2
     for i in range(m_X_total):
-        result[qubit_ids.checks_x[i]] = (1, i)
-    # data H_Z on lane=2
+        result[qubit_ids.checks_x[i]] = (2, i)
+    # data H_Z on lane=4
     for i in range(m_Z_total):
-        result[qubit_ids.checks_z[i]] = (2, i)
+        result[qubit_ids.checks_z[i]] = (4, i)
 
     if is_basis_x:
-        # χ on lane=4 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
+        # χ on lane=3 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
         for i in range(chi_total):
-            result[qubit_ids.checks_x[m_X_total + i]] = (4, i)
+            result[qubit_ids.checks_x[m_X_total + i]] = (3, i)
         for i in range(G_total):
             result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
     else:
-        # G on lane=5 in checks_x[m_X:]; χ on lane=4 in checks_z[m_Z:]
+        # G on lane=5 in checks_x[m_X:]; χ on lane=3 in checks_z[m_Z:]
         for i in range(G_total):
             result[qubit_ids.checks_x[m_X_total + i]] = (5, i)
         for i in range(chi_total):
-            result[qubit_ids.checks_z[m_Z_total + i]] = (4, i)
+            result[qubit_ids.checks_z[m_Z_total + i]] = (3, i)
 
     # Joint PPM bridge cycle ancillas on lane=6.
     if joint is not None:
