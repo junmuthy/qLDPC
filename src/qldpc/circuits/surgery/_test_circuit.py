@@ -1233,6 +1233,35 @@ def test_logical_state_init_invalid_state_raises(bad):
         logical_state_init(code, bad)
 
 
+def test_logical_state_init_log_idx_selects_different_logical_qubit():
+    """log_idx=i flips supp(X̄_i) — distinct from X̄_0 on k>1 codes."""
+    import sympy
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6},
+                        xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    # k = 8 logical qubits — pick two distinct indices.
+    s0 = logical_state_init(code, "1", log_idx=0)
+    s3 = logical_state_init(code, "1", log_idx=3)
+    x0 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x3 = np.asarray(code.get_logical_ops(Pauli.X)[3]).astype(np.uint8)
+    n = code.num_qudits
+    expected_s0 = "".join("1" if x0[i] else "0" for i in range(n))
+    expected_s3 = "".join("1" if x3[i] else "0" for i in range(n))
+    assert s0 == expected_s0
+    assert s3 == expected_s3
+    assert s0 != s3, "different log_idx must give different prep strings"
+
+
+@pytest.mark.parametrize("log_idx", [-1, 1, 7, 100])
+def test_logical_state_init_log_idx_out_of_range_raises(log_idx):
+    """log_idx outside [0, code.dimension) raises IndexError."""
+    from qldpc.circuits.surgery.circuit import logical_state_init
+    code = codes.SteaneCode()  # k = 1; only log_idx=0 is valid
+    with pytest.raises(IndexError, match="log_idx"):
+        logical_state_init(code, "1", log_idx=log_idx)
+
+
 @pytest.mark.parametrize("state,expected_obs0", [("0", 0), ("1", 1)])
 def test_logical_state_init_end_to_end_steane_basis_z(state, expected_obs0):
     """Steane single-PPM (basis=Z) reads obs0 = int(state) deterministically.

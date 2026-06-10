@@ -55,24 +55,34 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     return out
 
 
-def logical_state_init(code: CSSCode, state: str) -> str:
+def logical_state_init(code: CSSCode, state: str, *, log_idx: int = 0) -> str:
     """Per-qubit ``data_init`` string preparing a Pauli logical state on
-    logical qubit 0 of a CSS code.
+    logical qubit ``log_idx`` of a CSS code.
 
     ``state`` ∈ {"0", "1", "+", "-"}:
-      * "0" → ``"0" * n``  — |0⟩^n projects to |0⟩_L for any CSS code
-      * "1" → "1" on supp(X̄_0), "0" elsewhere — X̄_0 |0⟩_L = |1⟩_L
-      * "+" → ``"+" * n``  — |+⟩^n projects to |+⟩_L for any CSS code
-      * "-" → "-" on supp(Z̄_0), "+" elsewhere — Z̄_0 |+⟩_L = |-⟩_L
+      * "0" → ``"0" * n``  — |0⟩^n projects to |0⟩_L^{⊗k} for any CSS code
+      * "1" → "1" on supp(X̄_{log_idx}), "0" elsewhere — flips logical qubit
+        ``log_idx`` from |0⟩_L to |1⟩_L; other logical qubits stay at |0⟩_L
+      * "+" → ``"+" * n``  — |+⟩^n projects to |+⟩_L^{⊗k} for any CSS code
+      * "-" → "-" on supp(Z̄_{log_idx}), "+" elsewhere — flips logical qubit
+        ``log_idx`` from |+⟩_L to |-⟩_L; other logical qubits stay at |+⟩_L
 
-    X̄_0 and Z̄_0 are taken from ``code.get_logical_ops(Pauli.X)[0]`` and
-    ``code.get_logical_ops(Pauli.Z)[0]``; qldpc guarantees they form an
-    anti-commuting symplectic pair on logical qubit 0, so the prep is
-    correct for ANY CSS code regardless of the parity of wt(X̄_0) /
-    wt(Z̄_0). Naive broadcast ``data_init = "1" * n`` (or ``"-" * n``)
-    is correct only when those weights are odd, and silently produces
-    the wrong logical state on codes where they are even (e.g. BBCode
-    [[36, 8]] with wt(Z̄_0) = 8).
+    X̄_{log_idx} and Z̄_{log_idx} are taken from
+    ``code.get_logical_ops(Pauli.X)[log_idx]`` and ``[Pauli.Z][log_idx]``;
+    qldpc guarantees they form an anti-commuting symplectic pair on that
+    logical qubit, so the prep is correct for ANY CSS code regardless of
+    the parity of wt(X̄) / wt(Z̄). Naive broadcast ``data_init = "1" * n``
+    is correct only when those weights are odd, and silently produces the
+    wrong logical state on codes where they are even (e.g. BBCode [[36, 8]]
+    with wt(Z̄_0) = 8).
+
+    ``log_idx`` (default 0) selects which logical qubit to act on. To get
+    a meaningful PPM truth-table check, ``log_idx`` MUST match the logical
+    qubit chosen for the gadget's measured Z̄ (or X̄) — i.e. the gadget's
+    seed operator should be ``code.get_logical_ops(Pauli.Z)[log_idx]``
+    (or ``[Pauli.X]`` for basis=X). The helper does NOT verify this; if
+    indices disagree the prep targets a logical qubit that the gadget
+    doesn't measure, and the obs0 outcome is silently random.
 
     The returned string has length ``code.num_qudits``. Plug it straight
     into ``build_single_ppm_circuit(..., data_init=...)`` or wrap with a
@@ -82,19 +92,26 @@ def logical_state_init(code: CSSCode, state: str) -> str:
     ------
     ValueError
         If ``state`` is not one of "0", "1", "+", "-".
+    IndexError
+        If ``log_idx`` is out of range for ``code.dimension``.
     """
     if state not in ("0", "1", "+", "-"):
         raise ValueError(
             f"state must be one of '0', '1', '+', '-'; got {state!r}"
         )
+    if not 0 <= log_idx < code.dimension:
+        raise IndexError(
+            f"log_idx={log_idx} out of range for code with "
+            f"dimension={code.dimension}"
+        )
     n = code.num_qudits
     if state in ("0", "+"):
         return state * n
     if state == "1":
-        flip = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+        flip = np.asarray(code.get_logical_ops(Pauli.X)[log_idx]).astype(np.uint8)
         flip_char, base_char = "1", "0"
     else:  # state == "-"
-        flip = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+        flip = np.asarray(code.get_logical_ops(Pauli.Z)[log_idx]).astype(np.uint8)
         flip_char, base_char = "-", "+"
     return "".join(flip_char if flip[i] else base_char for i in range(n))
 
