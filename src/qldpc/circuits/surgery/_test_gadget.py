@@ -14,6 +14,7 @@ from ._test_helpers import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
     _webster_x_bar_1_operator,
+    _webster_x_bar_operator,
 )
 
 WEBSTER_TABLE_I_KAPPA_CHI_R = [(0, 19), (1, 31), (2, 49), (3, 79)]
@@ -406,3 +407,77 @@ def test_build_gadget_augmented_extends_F_and_recomputes_G():
     # CSS commutation
     product = (g_aug.HX_merged @ g_aug.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
+
+
+def test_step2_gauge_fix_rows_linearly_independent():
+    """G rows from _step2_gauge_fix are linearly independent over GF(2).
+
+    Webster §II.A step 3 requires |S_L| - wt(L) + 1 INDEPENDENT gauge
+    constraints. The existing test verifies G @ F == 0 (i.e. G is in
+    ker(F.T)) but not that G has full row rank.
+
+    A degenerate F could let the gauge fix return redundant rows,
+    inflating g.G.shape[0] without changing the actual gauge structure.
+    The Cain Table III bb_18 G=20 reproduction would catch the final
+    count but not the underlying rank degeneracy.
+    """
+    import sympy
+    from qldpc.circuits.surgery.gadget import build_gadget
+    import galois
+
+    F2 = galois.GF(2)
+    xs, ys = sympy.symbols("x y")
+
+    cases: list[tuple[str, object, np.ndarray]] = []
+
+    # Case 1: Steane
+    steane = codes.SteaneCode()
+    x_steane = np.asarray(steane.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    cases.append(("Steane", steane, x_steane))
+
+    # Case 2: Webster GB code 0
+    data = load_webster_seed_set(0)
+    webster = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    x_webster = _webster_x_bar_operator(data, "X_bar_1")
+    cases.append(("Webster GB 0", webster, x_webster))
+
+    # Case 3: Cain bb_18 (cached Z̄ support — same as notebook §3.2)
+    bb18 = codes.BBCode(
+        (31, 4),
+        1 + xs**6 * ys + xs**27,
+        ys**2 + xs**15 * ys**3 + xs**24,
+    )
+    # Use the same cached wt-20 Z̄ rep used by the notebook §3.2 cell to
+    # exercise the largest realistic gauge-fix case (G=20 rows). Treat
+    # via swap (matrix_z ↔ matrix_x) so vec_20 acts as the X̄ on
+    # target_code (matches notebook usage).
+    z_bar_support = [8, 9, 14, 18, 24, 34, 40, 56, 75, 76,
+                     97, 111, 122, 171, 202, 208, 213, 218, 228, 238]
+    from qldpc.codes.common import CSSCode
+    vec_20 = np.zeros(bb18.num_qudits, dtype=np.uint8)
+    vec_20[z_bar_support] = 1
+    bb18_swapped = CSSCode(
+        bb18.matrix_z, bb18.matrix_x, is_subsystem_code=False,
+    )
+    cases.append(("Cain bb_18 (swapped, wt-20)", bb18_swapped, vec_20))
+
+    for label, code, seed_op in cases:
+        g = build_gadget(code, seed_op, basis=Pauli.X)
+        G = g.G
+        if G.shape[0] == 0:
+            # Steane has G empty; trivially row-rank == 0 == shape[0].
+            assert G.shape[0] == 0
+            continue
+        rank = int(np.linalg.matrix_rank(F2(G.astype(np.uint8).tolist())))
+        assert rank == G.shape[0], (
+            f"{label}: gauge-fix G has {G.shape[0]} rows but rank only "
+            f"{rank}. _step2_gauge_fix returned redundant rows on this F."
+        )
+        # Re-assert the existing G @ F == 0 invariant alongside.
+        # (G is a basis of ker(F.T), i.e. G F = 0 over GF(2);
+        # see gadget._step2_gauge_fix and existing test_step2_gauge_fix.)
+        F_mat = g.F.astype(np.uint8)
+        commute = (G.astype(np.uint8) @ F_mat) % 2
+        assert not commute.any(), (
+            f"{label}: G @ F != 0 (gauge-fix output failed commutation)."
+        )
