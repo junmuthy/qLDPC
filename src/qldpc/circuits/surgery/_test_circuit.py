@@ -1412,3 +1412,101 @@ def test_multi_round_invariance_steane_basis_z(rounds, state):
         f"expected {expected_obs0} (rounds parity = "
         f"{'odd → Z̄ outcome' if rounds % 2 == 1 else 'even → identity'})"
     )
+
+
+@pytest.mark.parametrize("error_qubit", list(range(7)))
+def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
+    error_qubit,
+):
+    """Inject X_ERROR(1.0) on data qubit ``error_qubit`` between state
+    prep and the first QEC round of the Steane basis=Z PPM. Assert
+    exactly the round-1 Z-stab detectors whose support contains
+    ``error_qubit`` fire.
+
+    Why X_ERROR (not data_init):
+    * Stim's detector sampler reports ``actual XOR tableau-predicted``.
+      A state-prep-only change is already known to the tableau, so
+      detectors stay 0 (no deviation from prediction).
+    * X_ERROR(1.0) is a noise channel — the tableau prediction is
+      computed without noise, so applying X always deviates the
+      measured Z-stab parities from the prediction, firing the
+      affected detectors.
+
+    Why this catches stim wiring bugs:
+    * Round-1 reliable Z-checks compare measured syndrome to +1.
+    * An X error on data qubit i flips the parity of every Z-stab whose
+      support contains i — exactly those detectors must fire, no others.
+    * CX target/control swap, wrong measurement basis, or EdgeColoring
+      delaying a check to a later round all break this exact-match
+      pattern loudly.
+    """
+    import stim
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z_bar, basis=Pauli.Z)
+    clean_circuit = build_single_ppm_circuit(
+        g, rounds=1, noise_model=None, data_init="0" * 7,
+    )
+
+    # Splice X_ERROR(1.0) at the boundary between state prep and QEC.
+    # The prep block contains only R, RX, X, Z, and QUBIT_COORDS
+    # instructions; the QEC block starts with the first measurement /
+    # multi-qubit gate. Insert X_ERROR just before the first such op.
+    lines = str(clean_circuit).splitlines()
+    qec_start_ops = ("CX", "CZ", "H", "S", "M", "MX", "MZ", "MR", "MRX")
+    boundary_idx = None
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        op = s.split()[0].split("(")[0]
+        if any(op == k or op.startswith(k + " ") for k in qec_start_ops):
+            boundary_idx = i
+            break
+    assert boundary_idx is not None, (
+        "could not locate prep/QEC boundary in Steane PPM circuit"
+    )
+    injected_lines = (
+        lines[:boundary_idx]
+        + [f"X_ERROR(1.0) {error_qubit}"]
+        + lines[boundary_idx:]
+    )
+    injected_circuit = stim.Circuit("\n".join(injected_lines))
+
+    sampler = injected_circuit.compile_detector_sampler()
+    detection_events, _ = sampler.sample(
+        shots=1, separate_observables=True,
+    )
+    events = detection_events[0]
+
+    # Identify Z-side detectors via the clean reference: detectors whose
+    # outcome is deterministic-0 across many shots are the ones measuring
+    # Z-stab parities on a Z-basis-eigenstate input.
+    clean_sampler = clean_circuit.compile_detector_sampler()
+    clean_events, _ = clean_sampler.sample(
+        shots=256, separate_observables=True,
+    )
+    deterministic_zero = np.where(clean_events.sum(axis=0) == 0)[0]
+
+    # Steane Z-stabs touching error_qubit
+    HZ = np.asarray(code.matrix_z).astype(int)
+    z_stabs_touching = set(np.where(HZ[:, error_qubit] == 1)[0].tolist())
+
+    # Sanity: at least m_Z deterministic-zero detectors should exist.
+    n_reliable_z = HZ.shape[0]  # 3 for Steane
+    assert len(deterministic_zero) >= n_reliable_z, (
+        f"expected >= {n_reliable_z} deterministic-zero detectors on "
+        f"clean Steane basis=Z PPM, got {len(deterministic_zero)}"
+    )
+
+    fired_on_z_side = int(events[deterministic_zero].sum())
+    expected_fired = len(z_stabs_touching)
+    assert fired_on_z_side == expected_fired, (
+        f"X_ERROR on qubit {error_qubit}: expected {expected_fired} "
+        f"Z-side detectors to fire (one per Z-stab containing the qubit), "
+        f"got {fired_on_z_side}. This is the syndrome-extraction wiring "
+        f"regression: CX swap, wrong measurement basis, or EdgeColoring "
+        f"schedule bug."
+    )
