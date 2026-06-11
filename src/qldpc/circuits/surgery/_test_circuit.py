@@ -257,17 +257,17 @@ def test_surgery_observable_emits_two_observable_include():
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
     n_data = code.num_qudits
-    chi_check_ids = tuple(range(100, 100 + len(g.support)))   # placeholder ids
+    meas_check_ids = tuple(range(100, 100 + len(g.support)))   # placeholder ids
     data_ids = tuple(range(n_data))
     meas_rec = MeasurementRecord()
     # Simulate 2 rounds of chi-check measurements
     for _ in range(2):
-        meas_rec.append({cid: i for i, cid in enumerate(chi_check_ids)})
+        meas_rec.append({cid: i for i, cid in enumerate(meas_check_ids)})
     # Simulate final data measurement
     meas_rec.append({d: i for i, d in enumerate(data_ids)})
 
     circuit = _surgery_observable(
-        g, chi_check_ids=chi_check_ids, data_ids=data_ids,
+        g, meas_check_ids=meas_check_ids, data_ids=data_ids,
         support_indices=g.support, num_rounds=2, measurement_record=meas_rec,
     )
     text = str(circuit)
