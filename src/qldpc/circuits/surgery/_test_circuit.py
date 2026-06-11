@@ -688,7 +688,15 @@ def test_build_joint_ppm_circuit_meas_check_ids_no_UB():
 
 
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
-    """basis=X init: data in |+⟩, κ in |0⟩, adapter in |0⟩. Joint observables are deterministic."""
+    """Cross-check obs0 == obs1 per shot across all 4 parity inits.
+
+    Previously asserted only ``obs.sum() == 0`` (via compile_detector_sampler)
+    for a single |+⟩^n init, which was vacuous: noiseless flips are 0
+    regardless of obs0's correctness, and parity=+1 trivially gave the
+    expected 0. Now uses compile_sampler + raw XOR so noiseless obs0 and
+    obs1 are the actual eigenvalue bits, and sweeps non-trivial parity inits
+    so a regression in obs0 is caught.
+    """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
@@ -697,12 +705,24 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
     g_l = build_gadget(code, x, basis=Pauli.X)
     g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=2)
-    sampler = circuit.compile_detector_sampler()
-    _, obs = sampler.sample(8, separate_observables=True)
-    # Joint observable 0 (chi XOR over rounds) deterministic = 0 in noiseless |+⟩^n init
-    # Observable 1 (final M-X on V_0 ∪) deterministic = 0
-    assert obs.sum() == 0
+    for data_init in [("+", "+"), ("-", "+"), ("+", "-"), ("-", "-")]:
+        circuit, _ = build_joint_ppm_circuit(
+            g_l, g_r, bridge, rounds=2, data_init=data_init,
+        )
+        raw = circuit.compile_sampler().sample(shots=8).astype(np.uint8)
+        n_meas = raw.shape[1]
+        obs_lines = [
+            ln for ln in str(circuit).splitlines()
+            if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+        assert (obs0 == obs1).all(), (
+            f"data_init={data_init!r}: obs0 disagrees with obs1 on "
+            f"{(obs0 != obs1).sum()}/8 noiseless shots"
+        )
 
 
 @pytest.mark.slow
