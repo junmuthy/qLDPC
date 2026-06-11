@@ -26,7 +26,7 @@ class GadgetLayout:
     support: tuple[int, ...]
     data_checks: tuple[int, ...]
     incidence: np.ndarray
-    G: np.ndarray
+    gauge: np.ndarray
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
     ancilla_qubits: tuple[int, ...]
@@ -69,8 +69,8 @@ def _step2_gauge_fix(incidence: np.ndarray) -> np.ndarray:
     """
     if incidence.size == 0:
         return np.zeros((0, incidence.shape[0]), dtype=np.uint8)
-    G = GF2(incidence.astype(np.int_).tolist()).left_null_space()
-    return np.asarray(G).astype(np.uint8)
+    gauge = GF2(incidence.astype(np.int_).tolist()).left_null_space()
+    return np.asarray(gauge).astype(np.uint8)
 
 
 def _assemble_HX_L1(
@@ -108,7 +108,7 @@ def _step3_assemble(
     support: tuple[int, ...],
     data_checks: tuple[int, ...],
     incidence: np.ndarray,
-    G: np.ndarray,
+    gauge: np.ndarray,
     *,
     basis: PauliXZ = Pauli.X,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -122,7 +122,7 @@ def _step3_assemble(
     n = code.num_qudits
     mX, mZ = HX.shape[0], HZ.shape[0]
     nV, nC = len(support), len(data_checks)
-    r = G.shape[0]
+    r = gauge.shape[0]
 
     # incidence_tilde : (mZ_or_mX × nC) selection matrix — incidence_tilde[j, k] = 1 iff j == C_0[k]
     if basis is Pauli.X:
@@ -141,14 +141,14 @@ def _step3_assemble(
         HX_merged = _assemble_HX_L1(HX, support_arr, incidence)
         HZ_merged = np.block([
             [HZ, incidence_tilde],
-            [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
+            [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
         ]).astype(np.uint8)
     else:
         # basis=Z (symmetric dual): χ rows extend HZ_merged; G rows extend HX_merged
         HZ_merged = _assemble_HX_L1(HZ, support_arr, incidence)
         HX_merged = np.block([
             [HX, incidence_tilde],
-            [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
+            [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
         ]).astype(np.uint8)
 
     return HX_merged, HZ_merged
@@ -175,11 +175,11 @@ def build_gadget(
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
 
     support, data_checks, incidence = _step1_restriction(code, x, basis=basis)
-    G = _step2_gauge_fix(incidence)
-    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, G, basis=basis)
+    gauge = _step2_gauge_fix(incidence)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, gauge, basis=basis)
     ancilla_qubits = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
     return GadgetLayout(
-        code=code, x=x, support=support, data_checks=data_checks, incidence=incidence, G=G,
+        code=code, x=x, support=support, data_checks=data_checks, incidence=incidence, gauge=gauge,
         HX_merged=HX_m, HZ_merged=HZ_m, ancilla_qubits=ancilla_qubits,
         basis=basis,
     )
@@ -218,7 +218,7 @@ def build_gadget_augmented(
         raise ValueError(f"incidence_extra rows {bad} have weight != 2; required weight 2.")
 
     incidence_aug = np.vstack([incidence, incidence_extra]).astype(np.uint8)
-    G_aug = _step2_gauge_fix(incidence_aug)
+    gauge_aug = _step2_gauge_fix(incidence_aug)
 
     # _step3_assemble computes tilde_F by indexing into C_0; we need an extended
     # C_0_aug that has the new rows as sentinels (their tilde_F columns must be 0).
@@ -227,11 +227,11 @@ def build_gadget_augmented(
     n_extra = incidence_extra.shape[0]
     data_checks_aug = tuple(data_checks) + tuple([-1] * n_extra)
     HX_aug, HZ_aug = _step3_assemble(
-        code, support, data_checks_aug, incidence_aug, G_aug, basis=basis,
+        code, support, data_checks_aug, incidence_aug, gauge_aug, basis=basis,
     )
     ancilla_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))
     return GadgetLayout(
-        code=code, x=x, support=support, data_checks=data_checks_aug, incidence=incidence_aug, G=G_aug,
+        code=code, x=x, support=support, data_checks=data_checks_aug, incidence=incidence_aug, gauge=gauge_aug,
         HX_merged=HX_aug, HZ_merged=HZ_aug, ancilla_qubits=ancilla_qubits_aug,
         basis=basis,
     )

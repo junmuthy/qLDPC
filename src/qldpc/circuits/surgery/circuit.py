@@ -163,7 +163,7 @@ def _surgery_qubit_coordinates(
     m_X_l = g_l.code.matrix_x.shape[0]
     m_Z_l = g_l.code.matrix_z.shape[0]
     chi_l = len(g_l.support)
-    G_l = g_l.G.shape[0]
+    n_gauge_l = g_l.gauge.shape[0]
     k_l = len(g_l.ancilla_qubits)
 
     # Sizes for right side (joint+intercode only — intracode shares data).
@@ -172,16 +172,16 @@ def _surgery_qubit_coordinates(
         m_X_r = g_r.code.matrix_x.shape[0]
         m_Z_r = g_r.code.matrix_z.shape[0]
         chi_r = len(g_r.support)
-        G_r = g_r.G.shape[0]
+        n_gauge_r = g_r.gauge.shape[0]
     elif joint is not None:  # intracode: data shared, ancillas separate per gadget
         n_r = 0
         m_X_r = m_Z_r = 0  # data checks not duplicated for intracode
         chi_r = len(g_r.support)
-        G_r = g_r.G.shape[0]
+        n_gauge_r = g_r.gauge.shape[0]
     else:
         n_r = 0
         m_X_r = m_Z_r = 0
-        chi_r = G_r = k_r = 0
+        chi_r = n_gauge_r = k_r = 0
 
     # For joint PPM, the in-circuit κ count is the augmented value (bridge may
     # have added κ' ancillas during cellulation); use the bridge's augmented
@@ -213,7 +213,7 @@ def _surgery_qubit_coordinates(
     is_basis_x = g_l.basis is Pauli.X
     m_X_total = m_X_l + m_X_r
     chi_total = chi_l + chi_r
-    G_total = G_l + G_r
+    n_gauge_total = n_gauge_l + n_gauge_r
 
     for i in range(m_X_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 2))
@@ -225,7 +225,7 @@ def _surgery_qubit_coordinates(
             )
     else:
         # G rows on y=5 (within checks_x for basis=Z)
-        for i in range(G_total):
+        for i in range(n_gauge_total):
             circuit.append(
                 "QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 5),
             )
@@ -235,7 +235,7 @@ def _surgery_qubit_coordinates(
     for i in range(m_Z_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 4))
     if is_basis_x:
-        for i in range(G_total):
+        for i in range(n_gauge_total):
             circuit.append(
                 "QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 5),
             )
@@ -250,9 +250,9 @@ def _surgery_qubit_coordinates(
         # The new cycle checks live at the end of checks_x (basis=Z) or
         # checks_z (basis=X). They're (w - 1) of them.
         if is_basis_x:
-            cycle_check_ids = qubit_ids.checks_z[m_Z_total + G_total:]
+            cycle_check_ids = qubit_ids.checks_z[m_Z_total + n_gauge_total:]
         else:
-            cycle_check_ids = qubit_ids.checks_x[m_X_total + G_total:]
+            cycle_check_ids = qubit_ids.checks_x[m_X_total + n_gauge_total:]
         for i, cid in enumerate(cycle_check_ids):
             circuit.append("QUBIT_COORDS", cid, (i, 6))
 
@@ -280,7 +280,7 @@ def _check_lane_index_map(
         m_X_total = gadget.code.matrix_x.shape[0]
         m_Z_total = gadget.code.matrix_z.shape[0]
         chi_total = len(gadget.support)
-        G_total = gadget.G.shape[0]
+        n_gauge_total = gadget.gauge.shape[0]
     else:
         g_r, bridge, intercode = joint
         m_X_total = gadget.code.matrix_x.shape[0]
@@ -289,7 +289,7 @@ def _check_lane_index_map(
             m_X_total += g_r.code.matrix_x.shape[0]
             m_Z_total += g_r.code.matrix_z.shape[0]
         chi_total = len(gadget.support) + len(g_r.support)
-        G_total = gadget.G.shape[0] + g_r.G.shape[0]
+        n_gauge_total = gadget.gauge.shape[0] + g_r.gauge.shape[0]
 
     result: dict[int, tuple[int, int]] = {}
 
@@ -304,11 +304,11 @@ def _check_lane_index_map(
         # χ on lane=3 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
         for i in range(chi_total):
             result[qubit_ids.checks_x[m_X_total + i]] = (3, i)
-        for i in range(G_total):
+        for i in range(n_gauge_total):
             result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
     else:
         # G on lane=5 in checks_x[m_X:]; χ on lane=3 in checks_z[m_Z:]
-        for i in range(G_total):
+        for i in range(n_gauge_total):
             result[qubit_ids.checks_x[m_X_total + i]] = (5, i)
         for i in range(chi_total):
             result[qubit_ids.checks_z[m_Z_total + i]] = (3, i)
@@ -316,9 +316,9 @@ def _check_lane_index_map(
     # Joint PPM bridge cycle ancillas on lane=6.
     if joint is not None:
         if is_basis_x:
-            cycle_ids = qubit_ids.checks_z[m_Z_total + G_total:]
+            cycle_ids = qubit_ids.checks_z[m_Z_total + n_gauge_total:]
         else:
-            cycle_ids = qubit_ids.checks_x[m_X_total + G_total:]
+            cycle_ids = qubit_ids.checks_x[m_X_total + n_gauge_total:]
         for i, cid in enumerate(cycle_ids):
             result[cid] = (6, i)
 
@@ -423,7 +423,7 @@ def _stitch_intercode(g_l, g_r, bridge):
     k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n_l + n_r + k_l + k_r + w
-    r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
+    r_l, r_r = g_l_aug.gauge.shape[0], g_r_aug.gauge.shape[0]
 
     cl_data   = slice(0, n_l)
     cr_data   = slice(n_l, n_l + n_r)
@@ -506,7 +506,7 @@ def _stitch_intracode(g_l, g_r, bridge):
     k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n + k_l + k_r + w
-    r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
+    r_l, r_r = g_l_aug.gauge.shape[0], g_r_aug.gauge.shape[0]
 
     c_data    = slice(0, n)
     cl_ancilla  = slice(n, n + k_l)

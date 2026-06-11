@@ -424,7 +424,7 @@ def boost_gadget(
         **kwargs: forwarded to the underlying boost function.
 
     Returns:
-        A NEW GadgetLayout with boosted incidence, G, HX_merged, HZ_merged,
+        A NEW GadgetLayout with boosted incidence, gauge, HX_merged, HZ_merged,
         ancilla_qubits.
     """
     if method == "combinatorial":

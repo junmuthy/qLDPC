@@ -248,14 +248,14 @@ def test_build_bridge_skiptree_invariant_holds():
         T = getattr(bridge, f"T_{side}")
         g_aug = getattr(bridge, f"g_{side}_aug")
         label = getattr(bridge, f"label_{side}")
-        # G_aug = F_aug (incidence: rows = edges = κ qubits, cols = V_0 vertices)
-        G_aug = g_aug.incidence.astype(np.int_)
+        # adjacency = incidence_aug (rows = edges = ancilla qubits, cols = support vertices)
+        adjacency = g_aug.incidence.astype(np.int_)
         # P_s: |V_0^(s)| × w; P_s[v, k] = 1 iff v ∈ port AND label[v] == k
-        P = np.zeros((G_aug.shape[1], bridge.width), dtype=np.int_)
+        P = np.zeros((adjacency.shape[1], bridge.width), dtype=np.int_)
         for v_idx, lab in enumerate(label):
             if lab >= 0:
                 P[v_idx, lab] = 1
-        lhs = (T @ G_aug @ P) % 2
+        lhs = (T @ adjacency @ P) % 2
         assert np.array_equal(lhs, bridge.H_R), f"side {side}:\n{lhs}\nvs\n{bridge.H_R}"
 
 
