@@ -315,9 +315,9 @@ def test_adapter_cycle_check_weight_bounded():
 
     For basis=Z, the new adapter cycle checks are placed in HX (the last w-1 rows).
     Each row has the form [T_l | H_R | T_r]:
-      - T_l row: at most 3 entries on cl_kappa (SkipTree (3,2)-sparsity)
+      - T_l row: at most 3 entries on cl_ancilla (SkipTree (3,2)-sparsity)
       - H_R row: exactly 2 entries on c_adapter (canonical rep code)
-      - T_r row: at most 3 entries on cr_kappa (SkipTree (3,2)-sparsity)
+      - T_r row: at most 3 entries on cr_ancilla (SkipTree (3,2)-sparsity)
     Total: weight <= 3 + 2 + 3 = 8.
     """
     from qldpc.circuits.surgery.gadget import (

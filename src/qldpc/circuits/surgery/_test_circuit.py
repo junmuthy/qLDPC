@@ -134,11 +134,11 @@ def test_surgery_state_prep_basis_x_resets():
     qubit_ids = QubitIDs.from_code(merged)
     n_data = code.num_qudits
     data_ids = qubit_ids.data[:n_data]
-    kappa_ids = qubit_ids.data[n_data:]
-    circuit = _surgery_state_prep(g, data_ids, kappa_ids, bridge_ids=())
+    ancilla_ids = qubit_ids.data[n_data:]
+    circuit = _surgery_state_prep(g, data_ids, ancilla_ids, bridge_ids=())
     text = str(circuit)
     assert f"RX {' '.join(str(q) for q in data_ids)}" in text
-    assert f"R {' '.join(str(q) for q in kappa_ids)}" in text
+    assert f"R {' '.join(str(q) for q in ancilla_ids)}" in text
 
 
 def test_surgery_state_prep_basis_z_resets():
@@ -160,11 +160,11 @@ def test_surgery_state_prep_basis_z_resets():
     qubit_ids = QubitIDs.from_code(merged)
     n_data = code.num_qudits
     data_ids = qubit_ids.data[:n_data]
-    kappa_ids = qubit_ids.data[n_data:]
-    circuit = _surgery_state_prep(g, data_ids, kappa_ids, bridge_ids=())
+    ancilla_ids = qubit_ids.data[n_data:]
+    circuit = _surgery_state_prep(g, data_ids, ancilla_ids, bridge_ids=())
     text = str(circuit)
     assert f"R {' '.join(str(q) for q in data_ids)}" in text
-    assert f"RX {' '.join(str(q) for q in kappa_ids)}" in text
+    assert f"RX {' '.join(str(q) for q in ancilla_ids)}" in text
 
 
 def test_surgery_qec_cycle_round_1_detectors_classified():
@@ -210,16 +210,16 @@ def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
     g = build_gadget(code, x, basis=Pauli.X)
     n_data = code.num_qudits
     data_ids = tuple(range(n_data))
-    kappa_ids = tuple(range(n_data, n_data + len(g.kappa_qubits)))
+    ancilla_ids = tuple(range(n_data, n_data + len(g.ancilla_qubits)))
     bridge_ids = ()
     meas_rec = MeasurementRecord()
     circuit = _surgery_detach_and_readout(
-        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        g, data_ids=data_ids, ancilla_ids=ancilla_ids, bridge_ids=bridge_ids,
         measurement_record=meas_rec,
     )
     text = str(circuit)
     # κ measured first (in Z), then data (in X)
-    m_kappa_idx = text.find(f"M {' '.join(str(q) for q in kappa_ids)}")
+    m_kappa_idx = text.find(f"M {' '.join(str(q) for q in ancilla_ids)}")
     m_data_idx = text.find(f"MX {' '.join(str(q) for q in data_ids)}")
     assert m_kappa_idx >= 0 and m_data_idx >= 0
     assert m_kappa_idx < m_data_idx
@@ -235,14 +235,14 @@ def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z()
     g = build_gadget(code, z, basis=Pauli.Z)
     n_data = code.num_qudits
     data_ids = tuple(range(n_data))
-    kappa_ids = tuple(range(n_data, n_data + len(g.kappa_qubits)))
+    ancilla_ids = tuple(range(n_data, n_data + len(g.ancilla_qubits)))
     meas_rec = MeasurementRecord()
     circuit = _surgery_detach_and_readout(
-        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=(),
+        g, data_ids=data_ids, ancilla_ids=ancilla_ids, bridge_ids=(),
         measurement_record=meas_rec,
     )
     text = str(circuit)
-    m_kappa_idx = text.find(f"MX {' '.join(str(q) for q in kappa_ids)}")
+    m_kappa_idx = text.find(f"MX {' '.join(str(q) for q in ancilla_ids)}")
     m_data_idx = text.find(f"M {' '.join(str(q) for q in data_ids)}")
     assert m_kappa_idx >= 0 and m_data_idx >= 0
     assert m_kappa_idx < m_data_idx
@@ -343,12 +343,12 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis):
     qubit_ids = QubitIDs.from_code(merged)
     n_data = code.num_qudits
     data_ids = qubit_ids.data[:n_data]
-    kappa_ids = qubit_ids.data[n_data:]
+    ancilla_ids = qubit_ids.data[n_data:]
 
     # Simulate the pipeline through detach (we need measurement_record populated).
     _qec, mrec, _det = _surgery_qec_cycle(g, merged, num_rounds=2, qubit_ids=qubit_ids)
     _surgery_detach_and_readout(
-        g, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=(),
+        g, data_ids=data_ids, ancilla_ids=ancilla_ids, bridge_ids=(),
         measurement_record=mrec,
     )
 

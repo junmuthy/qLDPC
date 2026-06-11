@@ -132,7 +132,7 @@ def _surgery_qubit_coordinates(
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
                                 slot; we split them across y=0/1/6 here).
-      y=1  κ ancillas
+      y=1  ancilla qubits (Q')
       y=2  data H_X ancillas   (checks_x[:m_X])
       y=3  χ ancillas          (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
       y=4  data H_Z ancillas   (checks_z[:m_Z])
@@ -164,7 +164,7 @@ def _surgery_qubit_coordinates(
     m_Z_l = g_l.code.matrix_z.shape[0]
     chi_l = len(g_l.support)
     G_l = g_l.G.shape[0]
-    k_l = len(g_l.kappa_qubits)
+    k_l = len(g_l.ancilla_qubits)
 
     # Sizes for right side (joint+intercode only — intracode shares data).
     if joint is not None and intercode:
@@ -351,19 +351,19 @@ def build_single_ppm_circuit(
     qubit_ids = QubitIDs.from_code(merged_code)
     n_data = gadget.code.num_qudits
     data_ids = qubit_ids.data[:n_data]
-    kappa_ids = qubit_ids.data[n_data:]
+    ancilla_ids = qubit_ids.data[n_data:]
     bridge_ids: tuple[int, ...] = ()
 
     circuit = _surgery_qubit_coordinates(gadget, qubit_ids)
     circuit += _surgery_state_prep(
-        gadget, data_ids, kappa_ids, bridge_ids, data_init=data_init,
+        gadget, data_ids, ancilla_ids, bridge_ids, data_init=data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
         gadget, merged_code, num_rounds=rounds, qubit_ids=qubit_ids,
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
-        gadget, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        gadget, data_ids=data_ids, ancilla_ids=ancilla_ids, bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
     circuit += _surgery_final_detectors(
@@ -427,8 +427,8 @@ def _stitch_intercode(g_l, g_r, bridge):
 
     cl_data   = slice(0, n_l)
     cr_data   = slice(n_l, n_l + n_r)
-    cl_kappa  = slice(n_l + n_r, n_l + n_r + k_l)
-    cr_kappa  = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
+    cl_ancilla  = slice(n_l + n_r, n_l + n_r + k_l)
+    cr_ancilla  = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
     c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
 
     # Build M_chi: data χ-carrier rows (left & right) + χ rows + adapter Π labels.
@@ -442,9 +442,9 @@ def _stitch_intercode(g_l, g_r, bridge):
     chi_r_rows = M_chi_r[m_chi_r_data :, :]
     chi_start = m_chi_l_data + m_chi_r_data
     M_chi[chi_start : chi_start + len(g_l.support), cl_data] = chi_l_rows[:, : n_l]
-    M_chi[chi_start : chi_start + len(g_l.support), cl_kappa] = chi_l_rows[:, n_l :]
+    M_chi[chi_start : chi_start + len(g_l.support), cl_ancilla] = chi_l_rows[:, n_l :]
     M_chi[chi_start + len(g_l.support) :, cr_data] = chi_r_rows[:, : n_r]
-    M_chi[chi_start + len(g_l.support) :, cr_kappa] = chi_r_rows[:, n_r :]
+    M_chi[chi_start + len(g_l.support) :, cr_ancilla] = chi_r_rows[:, n_r :]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_chi[chi_start + v_idx, c_adapter.start + lab] = 1
@@ -458,15 +458,15 @@ def _stitch_intercode(g_l, g_r, bridge):
         dtype=np.int_,
     )
     M_co[: m_co_l_data, cl_data]  = M_co_l[: m_co_l_data, : n_l]
-    M_co[: m_co_l_data, cl_kappa] = M_co_l[: m_co_l_data, n_l :]
+    M_co[: m_co_l_data, cl_ancilla] = M_co_l[: m_co_l_data, n_l :]
     M_co[m_co_l_data : m_co_l_data + m_co_r_data, cr_data]  = M_co_r[: m_co_r_data, : n_r]
-    M_co[m_co_l_data : m_co_l_data + m_co_r_data, cr_kappa] = M_co_r[: m_co_r_data, n_r :]
+    M_co[m_co_l_data : m_co_l_data + m_co_r_data, cr_ancilla] = M_co_r[: m_co_r_data, n_r :]
     g_start = m_co_l_data + m_co_r_data
-    M_co[g_start : g_start + r_l, cl_kappa] = M_co_l[m_co_l_data :, n_l :]
-    M_co[g_start + r_l : g_start + r_l + r_r, cr_kappa] = M_co_r[m_co_r_data :, n_r :]
+    M_co[g_start : g_start + r_l, cl_ancilla] = M_co_l[m_co_l_data :, n_l :]
+    M_co[g_start + r_l : g_start + r_l + r_r, cr_ancilla] = M_co_r[m_co_r_data :, n_r :]
     cyc_start = g_start + r_l + r_r
-    M_co[cyc_start :, cl_kappa]  = bridge.T_l
-    M_co[cyc_start :, cr_kappa]  = bridge.T_r
+    M_co[cyc_start :, cl_ancilla]  = bridge.T_l
+    M_co[cyc_start :, cr_ancilla]  = bridge.T_r
     M_co[cyc_start :, c_adapter] = bridge.H_R
 
     if bridge.basis is Pauli.X:
@@ -509,8 +509,8 @@ def _stitch_intracode(g_l, g_r, bridge):
     r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
 
     c_data    = slice(0, n)
-    cl_kappa  = slice(n, n + k_l)
-    cr_kappa  = slice(n + k_l, n + k_l + k_r)
+    cl_ancilla  = slice(n, n + k_l)
+    cr_ancilla  = slice(n + k_l, n + k_l + k_r)
     c_adapter = slice(n + k_l + k_r, n_merged)
 
     # Build M_chi: shared data check rows + χ rows (both sides into shared data).
@@ -522,9 +522,9 @@ def _stitch_intracode(g_l, g_r, bridge):
     chi_l_rows = M_chi_l[m_chi_data :, :]
     chi_r_rows = M_chi_r[m_chi_data :, :]
     M_chi[m_chi_data : m_chi_data + len(g_l.support), c_data]  = chi_l_rows[:, : n]
-    M_chi[m_chi_data : m_chi_data + len(g_l.support), cl_kappa] = chi_l_rows[:, n :]
+    M_chi[m_chi_data : m_chi_data + len(g_l.support), cl_ancilla] = chi_l_rows[:, n :]
     M_chi[m_chi_data + len(g_l.support) :, c_data]  = chi_r_rows[:, : n]
-    M_chi[m_chi_data + len(g_l.support) :, cr_kappa] = chi_r_rows[:, n :]
+    M_chi[m_chi_data + len(g_l.support) :, cr_ancilla] = chi_r_rows[:, n :]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_chi[m_chi_data + v_idx, c_adapter.start + lab] = 1
@@ -539,13 +539,13 @@ def _stitch_intracode(g_l, g_r, bridge):
         dtype=np.int_,
     )
     M_co[: m_co_data, c_data]    = M_co_l[: m_co_data, : n]
-    M_co[: m_co_data, cl_kappa]  = M_co_l[: m_co_data, n :]
-    M_co[: m_co_data, cr_kappa]  = M_co_r[: m_co_data, n :]
-    M_co[m_co_data : m_co_data + r_l, cl_kappa] = M_co_l[m_co_data :, n :]
-    M_co[m_co_data + r_l : m_co_data + r_l + r_r, cr_kappa] = M_co_r[m_co_data :, n :]
+    M_co[: m_co_data, cl_ancilla]  = M_co_l[: m_co_data, n :]
+    M_co[: m_co_data, cr_ancilla]  = M_co_r[: m_co_data, n :]
+    M_co[m_co_data : m_co_data + r_l, cl_ancilla] = M_co_l[m_co_data :, n :]
+    M_co[m_co_data + r_l : m_co_data + r_l + r_r, cr_ancilla] = M_co_r[m_co_data :, n :]
     cyc_start = m_co_data + r_l + r_r
-    M_co[cyc_start :, cl_kappa]  = bridge.T_l
-    M_co[cyc_start :, cr_kappa]  = bridge.T_r
+    M_co[cyc_start :, cl_ancilla]  = bridge.T_l
+    M_co[cyc_start :, cr_ancilla]  = bridge.T_r
     M_co[cyc_start :, c_adapter] = bridge.H_R
 
     if bridge.basis is Pauli.X:
@@ -674,7 +674,7 @@ def build_joint_ppm_circuit(
     else:
         data_ids = qubit_ids.data[: n_l]
         support_combined = tuple(g_l.support) + tuple(g_r.support)
-    kappa_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
+    ancilla_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
     bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
     assert len(bridge_ids) == w
 
@@ -683,7 +683,7 @@ def build_joint_ppm_circuit(
     )
     expanded_data_init = _expand_joint_data_init(data_init, n_l, n_r, intercode)
     circuit += _surgery_state_prep(
-        g_l, data_ids, kappa_ids, bridge_ids, data_init=expanded_data_init,
+        g_l, data_ids, ancilla_ids, bridge_ids, data_init=expanded_data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
         g_l, g_r, joint_code, bridge, num_rounds=rounds, qubit_ids=qubit_ids,
@@ -691,7 +691,7 @@ def build_joint_ppm_circuit(
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
-        g_l, data_ids=data_ids, kappa_ids=kappa_ids, bridge_ids=bridge_ids,
+        g_l, data_ids=data_ids, ancilla_ids=ancilla_ids, bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
     circuit += _surgery_final_detectors_joint(
@@ -886,7 +886,7 @@ def _classify_reliable_round1_checks(
 def _surgery_state_prep(
     gadget: GadgetLayout,
     data_ids: tuple[int, ...],
-    kappa_ids: tuple[int, ...],
+    ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...] = (),
     *,
     data_init: str | None = None,
@@ -954,7 +954,7 @@ def _surgery_state_prep(
     if z_after:
         circuit.append("Z", z_after)
 
-    anc_ids = list(kappa_ids) + (list(bridge_ids) if bridge_ids else [])
+    anc_ids = list(ancilla_ids) + (list(bridge_ids) if bridge_ids else [])
     if anc_ids:
         anc_init = "R" if gadget.basis is Pauli.X else "RX"
         circuit.append(anc_init, anc_ids)
@@ -1098,16 +1098,16 @@ def _surgery_detach_and_readout(
     gadget: GadgetLayout,
     *,
     data_ids: tuple[int, ...],
-    kappa_ids: tuple[int, ...],
+    ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...],
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
     """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
     circuit = stim.Circuit()
-    detach_qubits = list(kappa_ids) + list(bridge_ids)
-    kappa_op = "M" if gadget.basis is Pauli.X else "MX"
+    detach_qubits = list(ancilla_ids) + list(bridge_ids)
+    ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
     data_op = "MX" if gadget.basis is Pauli.X else "M"
-    circuit.append(kappa_op, detach_qubits)
+    circuit.append(ancilla_op, detach_qubits)
     measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append(data_op, list(data_ids))

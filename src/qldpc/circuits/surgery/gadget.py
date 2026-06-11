@@ -29,7 +29,7 @@ class GadgetLayout:
     G: np.ndarray
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
-    kappa_qubits: tuple[int, ...]
+    ancilla_qubits: tuple[int, ...]
     basis: PauliXZ
 
 
@@ -177,10 +177,10 @@ def build_gadget(
     support, data_checks, F = _step1_restriction(code, x, basis=basis)
     G = _step2_gauge_fix(F)
     HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G, basis=basis)
-    kappa_qubits = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
+    ancilla_qubits = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
     return GadgetLayout(
         code=code, x=x, support=support, data_checks=data_checks, F=F, G=G,
-        HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
+        HX_merged=HX_m, HZ_merged=HZ_m, ancilla_qubits=ancilla_qubits,
         basis=basis,
     )
 
@@ -203,7 +203,7 @@ def build_gadget_augmented(
        The extra columns of tilde_F are all zero (no original check sits on the
        new κ qubits).
 
-    The returned ``GadgetLayout.data_checks`` and ``kappa_qubits`` are extended to cover
+    The returned ``GadgetLayout.data_checks`` and ``ancilla_qubits`` are extended to cover
     the new κ qubits; the new κ indices come after the original ones.
     """
     x = np.asarray(x).astype(np.uint8)
@@ -229,10 +229,10 @@ def build_gadget_augmented(
     HX_aug, HZ_aug = _step3_assemble(
         code, support, data_checks_aug, F_aug, G_aug, basis=basis,
     )
-    kappa_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))
+    ancilla_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))
     return GadgetLayout(
         code=code, x=x, support=support, data_checks=data_checks_aug, F=F_aug, G=G_aug,
-        HX_merged=HX_aug, HZ_merged=HZ_aug, kappa_qubits=kappa_qubits_aug,
+        HX_merged=HX_aug, HZ_merged=HZ_aug, ancilla_qubits=ancilla_qubits_aug,
         basis=basis,
     )
 

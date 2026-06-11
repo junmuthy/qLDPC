@@ -425,7 +425,7 @@ def boost_gadget(
 
     Returns:
         A NEW GadgetLayout with boosted F, G, HX_merged, HZ_merged,
-        kappa_qubits.
+        ancilla_qubits.
     """
     if method == "combinatorial":
         return boost_gadget_cheeger_combinatorial(

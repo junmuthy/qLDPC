@@ -27,13 +27,13 @@ def test_gadget_layout_is_frozen_dataclass():
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert fields == {
         "code", "x", "support", "data_checks", "F", "G",
-        "HX_merged", "HZ_merged", "kappa_qubits", "basis",
+        "HX_merged", "HZ_merged", "ancilla_qubits", "basis",
     }
     # Verify actually frozen: mutation must raise
     inst = GadgetLayout(
         code=None, x=None, support=(), data_checks=(),
         F=None, G=None, HX_merged=None, HZ_merged=None,
-        kappa_qubits=(), basis=Pauli.X,
+        ancilla_qubits=(), basis=Pauli.X,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         inst.code = object()
@@ -139,8 +139,8 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
 
     Verifies:
     1. CSS commutation: HX_merged @ HZ_merged.T == 0 over GF(2).
-    2. Indicator form: each Z-check in C_0 attaches to EXACTLY ONE kappa
-       ancilla (row-sum == 1 in the kappa block).
+    2. Indicator form: each Z-check in data_checks attaches to EXACTLY ONE
+       ancilla (row-sum == 1 in the ancilla block).
     """
     from qldpc.circuits.surgery.gadget import (
         _step1_restriction, _step2_gauge_fix, _step3_assemble,
@@ -186,15 +186,15 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
         "CSS commutation failed: HX_merged @ HZ_merged.T != 0"
     )
 
-    # 2. Indicator form: each Z-check j in C_0 should attach to exactly
-    #    one kappa ancilla (column-slice after n data qubits in HZ_merged).
+    # 2. Indicator form: each Z-check j in data_checks should attach to exactly
+    #    one ancilla (column-slice after n data qubits in HZ_merged).
     n = code.num_qudits
     mZ = HZ_raw.shape[0]
-    HZ_kappa_block = HZ_m[:mZ, n:]
+    HZ_ancilla_block = HZ_m[:mZ, n:]
     for k, j in enumerate(data_checks):
-        row_sum = int(HZ_kappa_block[j].sum())
+        row_sum = int(HZ_ancilla_block[j].sum())
         assert row_sum == 1, (
-            f"row j={j} of HZ kappa-block should have exactly 1 one (indicator form), "
+            f"row j={j} of HZ ancilla-block should have exactly 1 one (indicator form), "
             f"got {row_sum} — F_tilde indicator form violated"
         )
 
@@ -208,7 +208,7 @@ def test_build_gadget_steane_returns_valid_layout():
     assert g.code is code
     assert np.array_equal(g.x, x)
     # κ qubits indexed contiguously after data qubits
-    assert g.kappa_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.data_checks)))
+    assert g.ancilla_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.data_checks)))
 
 
 def test_build_gadget_deterministic():
@@ -223,7 +223,7 @@ def test_build_gadget_deterministic():
     assert np.array_equal(g1.G, g2.G)
     assert np.array_equal(g1.HX_merged, g2.HX_merged)
     assert np.array_equal(g1.HZ_merged, g2.HZ_merged)
-    assert g1.kappa_qubits == g2.kappa_qubits
+    assert g1.ancilla_qubits == g2.ancilla_qubits
 
 
 def test_build_gadget_rejects_non_x_logical():
@@ -263,7 +263,7 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_1_operator(data)
     g1 = build_gadget(code, x1, basis=Pauli.X)
-    kappa = len(g1.kappa_qubits)
+    kappa = len(g1.ancilla_qubits)
     chi = int(g1.x.sum())  # |V_0|
     r = g1.G.shape[0]
     assert kappa + chi + r == n_anc, (
@@ -375,7 +375,7 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
         z = z_bar_1_operator(d)
         g = build_gadget(c, z, basis=Pauli.Z)
-        kappa = len(g.kappa_qubits)
+        kappa = len(g.ancilla_qubits)
         chi = len(g.support)
         r = g.G.shape[0]
         assert kappa + chi + r == expected, (
