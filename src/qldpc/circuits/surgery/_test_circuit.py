@@ -1356,3 +1356,59 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state, expected_obs0):
         f"This is the BBCode even-wt regression test — failure here means "
         f"logical_state_init is no better than naive '{state}' * n broadcast."
     )
+
+
+@pytest.mark.parametrize("rounds", [1, 2, 3, 5, 10])
+@pytest.mark.parametrize("state", ["0", "1"])
+def test_multi_round_invariance_steane_basis_z(rounds, state):
+    """obs0 follows the documented Webster Eq.1 round-parity semantic.
+
+    Webster Eq.1 (single-PPM): obs0 = XOR of χ-check outcomes across all
+    R rounds. Each noiseless round measures Z̄, so the XOR of R copies
+    of the Z̄ outcome equals Z̄ for ODD R and the identity for EVEN R
+    (see lattice_surgery.ipynb §2 comment: ``rounds = 3  # odd →
+    Webster Eq.1 ≡ Z̄``).
+
+    Therefore:
+      * state="0" (|0⟩^n → Z̄=+1): obs0 = 0 for all R
+      * state="1" (|1⟩^n → Z̄=-1 since wt(Z̄_Steane)=3 odd):
+          obs0 = 1 for odd R, obs0 = 0 for even R
+
+    Existing PPM tests pin rounds=3 only. A round-index drift in
+    _surgery_qec_cycle, _surgery_observable, or
+    MeasurementRecord.get_target_rec(...,-1-r) would slip past every
+    one of them. This test enforces the round-parity identity across a
+    wide range of round counts.
+    """
+    from qldpc.circuits.surgery.circuit import (
+        build_single_ppm_circuit, logical_state_init,
+    )
+    from qldpc.circuits.surgery.gadget import build_gadget
+    code = codes.SteaneCode()
+    z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z_bar, basis=Pauli.Z)
+    circuit = build_single_ppm_circuit(
+        g, rounds=rounds, noise_model=None,
+        data_init=logical_state_init(code, state, log_idx=0),
+    )
+    raw = circuit.compile_sampler().sample(shots=200).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs0_recs = []
+    for ln in str(circuit).splitlines():
+        if ln.startswith("OBSERVABLE_INCLUDE(0)"):
+            obs0_recs = [
+                int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")
+            ]
+            break
+    obs0 = np.bitwise_xor.reduce(
+        raw[:, [n_meas + off for off in obs0_recs]], axis=1
+    )
+    rate = float(obs0.mean())
+    # Round-parity semantic: state-induced Z̄ flip is observed for ODD
+    # rounds; EVEN rounds XOR pairs of identical measurements → 0.
+    expected_obs0 = int(state) if rounds % 2 == 1 else 0
+    assert rate == float(expected_obs0), (
+        f"rounds={rounds}, state={state!r}: obs0 rate {rate:.3f} != "
+        f"expected {expected_obs0} (rounds parity = "
+        f"{'odd → Z̄ outcome' if rounds % 2 == 1 else 'even → identity'})"
+    )
