@@ -130,9 +130,9 @@ def test_boost_gadget_combinatorial_basis_z_preserves_chi_carrier():
     assert boosted.basis is Pauli.Z, (
         f"basis dropped through boost: got {boosted.basis!r}, expected Pauli.Z"
     )
-    n_chi = len(boosted.support)
+    n_meas_checks = len(boosted.support)
     n_z_data = code.matrix_z.shape[0]
-    chi_block = boosted.HZ_merged[n_z_data : n_z_data + n_chi, :]
+    chi_block = boosted.HZ_merged[n_z_data : n_z_data + n_meas_checks, :]
     assert chi_block.any(), (
         "χ rows missing from HZ_merged; basis=Z boost path likely swapped HX/HZ."
     )

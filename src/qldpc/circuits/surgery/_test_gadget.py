@@ -17,7 +17,7 @@ from ._test_helpers import (
     _webster_x_bar_operator,
 )
 
-WEBSTER_TABLE_I_KAPPA_CHI_R = [(0, 19), (1, 31), (2, 49), (3, 79)]
+WEBSTER_TABLE_I_ANCILLA_MEAS_COMP = [(0, 19), (1, 31), (2, 49), (3, 79)]
 
 
 def test_gadget_layout_is_frozen_dataclass():
@@ -253,9 +253,10 @@ def test_build_generalised_bicycle_code_constructs_css():
     assert np.array_equal((HX @ HZ.T) % 2, np.zeros((HX.shape[0], HZ.shape[0]), dtype=np.uint8))
 
 
-@pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_KAPPA_CHI_R)
-def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
-    """Webster Table I: κ + χ + r matches for each of the 4 codes."""
+@pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_ANCILLA_MEAS_COMP)
+def test_webster_table_i_ancilla_meas_comp_exact(code_index, n_anc):
+    """Webster Table I in Cain notation: |Q'| + |S'_meas| + |S'_comp| matches
+    each of the 4 generalised-bicycle codes. Reproduces Webster Table I exactly."""
     from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
@@ -263,12 +264,12 @@ def test_webster_table_i_kappa_chi_r_exact(code_index, n_anc):
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_1_operator(data)
     g1 = build_gadget(code, x1, basis=Pauli.X)
-    kappa = len(g1.ancilla_qubits)
-    chi = int(g1.x.sum())  # |V_0|
-    r = g1.gauge.shape[0]
-    assert kappa + chi + r == n_anc, (
-        f"code {code_index}: κ={kappa}, χ={chi}, r={r}, "
-        f"sum={kappa+chi+r}, expected {n_anc}"
+    n_ancilla = len(g1.ancilla_qubits)
+    n_meas_checks = int(g1.x.sum())  # |support|
+    n_comp_checks = g1.gauge.shape[0]
+    assert n_ancilla + n_meas_checks + n_comp_checks == n_anc, (
+        f"code {code_index}: |Q'|={n_ancilla}, |S'_meas|={n_meas_checks}, |S'_comp|={n_comp_checks}, "
+        f"sum={n_ancilla+n_meas_checks+n_comp_checks}, expected {n_anc}"
     )
 
 
@@ -352,8 +353,9 @@ def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code():
     )
 
 
-def test_webster_table_i_z_basis_kappa_chi_r_exact():
-    """Webster Z̄_1 seed produces the same κ+χ+r counts (basis-symmetric)."""
+def test_webster_table_i_z_basis_ancilla_meas_comp_exact():
+    """Webster Z̄_1 seed in Cain notation: |Q'| + |S'_meas| + |S'_comp| matches
+    (basis-symmetric dual; reproduces Webster Table I)."""
     from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
@@ -375,11 +377,11 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
         z = z_bar_1_operator(d)
         g = build_gadget(c, z, basis=Pauli.Z)
-        kappa = len(g.ancilla_qubits)
-        chi = len(g.support)
-        r = g.gauge.shape[0]
-        assert kappa + chi + r == expected, (
-            f"code {code_index}: Z-basis got κ+χ+r={kappa+chi+r}, expected {expected}"
+        n_ancilla = len(g.ancilla_qubits)
+        n_meas_checks = len(g.support)
+        n_comp_checks = g.gauge.shape[0]
+        assert n_ancilla + n_meas_checks + n_comp_checks == expected, (
+            f"code {code_index}: Z-basis got |Q'|+|S'_meas|+|S'_comp|={n_ancilla+n_meas_checks+n_comp_checks}, expected {expected}"
         )
 
 

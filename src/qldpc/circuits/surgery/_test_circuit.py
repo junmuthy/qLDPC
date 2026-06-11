@@ -77,8 +77,8 @@ def test_classify_reliable_round1_checks_basis_x():
     m_Z = code.matrix_z.shape[0]
     # Reliable X-checks: first m_X of checks_x (the original data H_X rows)
     expected_x_reliable = set(qubit_ids.checks_x[:m_X])
-    # Reliable Z-checks: last r of checks_z (the gauge-fix G rows)
-    r = g.gauge.shape[0]
+    # Reliable Z-checks: last n_comp_checks of checks_z (the gauge-fix G rows)
+    n_comp_checks = g.gauge.shape[0]
     expected_z_reliable = set(qubit_ids.checks_z[m_Z:])
     expected = expected_x_reliable | expected_z_reliable
     assert set(reliable) == expected, (
@@ -107,8 +107,8 @@ def test_classify_reliable_round1_checks_basis_z():
     reliable = _classify_reliable_round1_checks(g, qubit_ids)
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
-    r = g.gauge.shape[0]
-    # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last r X-checks
+    n_comp_checks = g.gauge.shape[0]
+    # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last n_comp_checks X-checks
     expected_z_reliable = set(qubit_ids.checks_z[:m_Z])
     expected_x_reliable = set(qubit_ids.checks_x[m_X:])
     expected = expected_z_reliable | expected_x_reliable
@@ -200,8 +200,8 @@ def test_surgery_qec_cycle_round_1_detectors_classified():
     )
 
 
-def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
-    """basis=X: detach with M (Z-basis) on κ, then MX on data."""
+def test_surgery_detach_and_readout_basis_x_measures_ancilla_then_data():
+    """basis=X: detach with M (Z-basis) on ancilla, then MX on data."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import _surgery_detach_and_readout
     from qldpc.circuits.bookkeeping import MeasurementRecord
@@ -218,15 +218,15 @@ def test_surgery_detach_and_readout_basis_x_measures_kappa_then_data():
         measurement_record=meas_rec,
     )
     text = str(circuit)
-    # κ measured first (in Z), then data (in X)
-    m_kappa_idx = text.find(f"M {' '.join(str(q) for q in ancilla_ids)}")
+    # ancilla measured first (in Z), then data (in X)
+    m_ancilla_idx = text.find(f"M {' '.join(str(q) for q in ancilla_ids)}")
     m_data_idx = text.find(f"MX {' '.join(str(q) for q in data_ids)}")
-    assert m_kappa_idx >= 0 and m_data_idx >= 0
-    assert m_kappa_idx < m_data_idx
+    assert m_ancilla_idx >= 0 and m_data_idx >= 0
+    assert m_ancilla_idx < m_data_idx
 
 
-def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z():
-    """basis=Z: detach with MX on κ, then M on data."""
+def test_surgery_detach_and_readout_basis_z_measures_ancilla_in_x_then_data_in_z():
+    """basis=Z: detach with MX on ancilla, then M on data."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import _surgery_detach_and_readout
     from qldpc.circuits.bookkeeping import MeasurementRecord
@@ -242,10 +242,10 @@ def test_surgery_detach_and_readout_basis_z_measures_kappa_in_x_then_data_in_z()
         measurement_record=meas_rec,
     )
     text = str(circuit)
-    m_kappa_idx = text.find(f"MX {' '.join(str(q) for q in ancilla_ids)}")
+    m_ancilla_idx = text.find(f"MX {' '.join(str(q) for q in ancilla_ids)}")
     m_data_idx = text.find(f"M {' '.join(str(q) for q in data_ids)}")
-    assert m_kappa_idx >= 0 and m_data_idx >= 0
-    assert m_kappa_idx < m_data_idx
+    assert m_ancilla_idx >= 0 and m_data_idx >= 0
+    assert m_ancilla_idx < m_data_idx
 
 
 def test_surgery_observable_emits_two_observable_include():
@@ -670,7 +670,7 @@ def test_stitch_intracode_both_bases_commute(basis):
     assert merged.dimension == code.dimension - 1
 
 
-def test_build_joint_ppm_circuit_chi_check_ids_no_UB():
+def test_build_joint_ppm_circuit_meas_check_ids_no_UB():
     """build_joint_ppm_circuit's noiseless first sample has zero detectors firing."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.bridge import build_bridge
