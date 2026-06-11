@@ -1647,3 +1647,47 @@ def test_joint_ppm_even_rounds_truth_table():
         assert (obs0 == obs1).all(), (
             f"data_init={data_init!r}: obs0 != obs1 in noiseless run"
         )
+
+
+def test_single_ppm_even_rounds_truth_table():
+    """obs0 must encode single-patch X̄ (or Z̄) parity at EVEN rounds.
+
+    Same regression as test_joint_ppm_even_rounds_truth_table but for the
+    single-patch PPM construction. Sweeps "+" and "-" data inits in basis=X
+    and "0", "1" in basis=Z to expose the cumulative-XOR bug at even rounds.
+    Uses compile_sampler + manual XOR for the same reason as Task 1.
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit, logical_state_init
+    code = codes.SteaneCode()
+    for basis, cases in [
+        (Pauli.X, [("+", 0), ("-", 1)]),
+        (Pauli.Z, [("0", 0), ("1", 1)]),
+    ]:
+        op = (code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X
+              else code.get_logical_ops(Pauli.Z)[0])
+        op_arr = np.asarray(op).astype(np.uint8)
+        g = build_gadget(code, op_arr, basis=basis)
+        for state, expected in cases:
+            data_init = logical_state_init(code, state=state, log_idx=0)
+            circuit = build_single_ppm_circuit(
+                g, rounds=2, noise_model=None, data_init=data_init,
+            )
+            raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
+            n_meas = raw.shape[1]
+            obs_lines = [
+                ln for ln in str(circuit).splitlines()
+                if ln.startswith("OBSERVABLE_INCLUDE")
+            ]
+            offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+            offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+            obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+            obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+            assert (obs0 == expected).all(), (
+                f"basis={basis!r} state={state!r}: obs0 has "
+                f"{(obs0 != expected).sum()}/16 shots disagreeing with "
+                f"expected parity bit {expected}"
+            )
+            assert (obs0 == obs1).all(), (
+                f"basis={basis!r} state={state!r}: obs0 != obs1 in noiseless run"
+            )
