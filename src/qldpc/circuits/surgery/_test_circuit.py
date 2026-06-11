@@ -268,7 +268,7 @@ def test_surgery_observable_emits_two_observable_include():
 
     circuit = _surgery_observable(
         g, meas_check_ids=meas_check_ids, data_ids=data_ids,
-        support_indices=g.support, num_rounds=2, measurement_record=meas_rec,
+        support_indices=g.support, measurement_record=meas_rec,
     )
     text = str(circuit)
     assert text.count("OBSERVABLE_INCLUDE") == 2  # PPM + cross-check
@@ -1381,24 +1381,23 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state, expected_obs0):
 @pytest.mark.parametrize("rounds", [1, 2, 3, 5, 10])
 @pytest.mark.parametrize("state", ["0", "1"])
 def test_multi_round_invariance_steane_basis_z(rounds, state):
-    """obs0 follows the documented Webster Eq.1 round-parity semantic.
+    """obs0 reads the merged Z̄ eigenvalue independently of R.
 
-    Webster Eq.1 (single-PPM): obs0 = XOR of χ-check outcomes across all
-    R rounds. Each noiseless round measures Z̄, so the XOR of R copies
-    of the Z̄ outcome equals Z̄ for ODD R and the identity for EVEN R
-    (see lattice_surgery.ipynb §2 comment: ``rounds = 3  # odd →
-    Webster Eq.1 ≡ Z̄``).
+    Webster et al. arXiv:2410.03628 §II.A (L2255 of the v4 PDF) gives the
+    single-round identity Z̄ = ∏_{v ∈ support} A_v on the merged stabilizer
+    group: the XOR of one round's meas-check outcomes equals the eigenvalue
+    bit of Z̄. Cohen et al. arXiv:2407.18393 §3.5 selects the final QEC
+    round as the readout point; detectors carry the FT load round-to-round.
 
-    Therefore:
-      * state="0" (|0⟩^n → Z̄=+1): obs0 = 0 for all R
-      * state="1" (|1⟩^n → Z̄=-1 since wt(Z̄_Steane)=3 odd):
-          obs0 = 1 for odd R, obs0 = 0 for even R
+    Therefore obs0 = int(state) for every R ≥ 1:
+      * state="0" (|0⟩^n → Z̄=+1): obs0 = 0
+      * state="1" (|1⟩^n → Z̄=−1, wt(Z̄_Steane)=3 odd): obs0 = 1
 
-    Existing PPM tests pin rounds=3 only. A round-index drift in
-    _surgery_qec_cycle, _surgery_observable, or
-    MeasurementRecord.get_target_rec(...,-1-r) would slip past every
-    one of them. This test enforces the round-parity identity across a
-    wide range of round counts.
+    This R-invariance is exactly what the single-round identity guarantees;
+    any round-index drift in _surgery_qec_cycle, _surgery_observable, or
+    MeasurementRecord.get_target_rec would break it for some R. The previous
+    XOR-across-R-rounds formula collapsed to R·m_v mod 2, which was silently
+    0 for every even R — the bug this test now guards against.
     """
     from qldpc.circuits.surgery.circuit import (
         build_single_ppm_circuit, logical_state_init,
@@ -1424,13 +1423,12 @@ def test_multi_round_invariance_steane_basis_z(rounds, state):
         raw[:, [n_meas + off for off in obs0_recs]], axis=1
     )
     rate = float(obs0.mean())
-    # Round-parity semantic: state-induced Z̄ flip is observed for ODD
-    # rounds; EVEN rounds XOR pairs of identical measurements → 0.
-    expected_obs0 = int(state) if rounds % 2 == 1 else 0
+    # Webster single-round identity: obs0 = last-round XOR of meas-checks
+    # = eigenvalue bit of Z̄ on the merged group, independent of R.
+    expected_obs0 = int(state)
     assert rate == float(expected_obs0), (
         f"rounds={rounds}, state={state!r}: obs0 rate {rate:.3f} != "
-        f"expected {expected_obs0} (rounds parity = "
-        f"{'odd → Z̄ outcome' if rounds % 2 == 1 else 'even → identity'})"
+        f"expected {expected_obs0} (Webster Z̄=∏A_v should hold for any R)"
     )
 
 

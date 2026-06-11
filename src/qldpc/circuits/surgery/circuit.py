@@ -387,7 +387,6 @@ def build_single_ppm_circuit(
         meas_check_ids=meas_check_ids,
         data_ids=data_ids,
         support_indices=gadget.support,
-        num_rounds=rounds,
         measurement_record=measurement_record,
     )
 
@@ -729,7 +728,6 @@ def build_joint_ppm_circuit(
         meas_check_ids=meas_check_ids,
         data_ids=data_ids,
         support_indices=support_combined,
-        num_rounds=rounds,
         measurement_record=measurement_record,
     )
 
@@ -1022,34 +1020,39 @@ def _surgery_observable(
     meas_check_ids: tuple[int, ...],
     data_ids: tuple[int, ...],
     support_indices: tuple[int, ...],
-    num_rounds: int,
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
     """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
 
-    obs0 — Webster Eq. 1: XOR of meas-basis check (S'_meas) measurement records
-        across all rounds. This is the **physical readout** of the logical Pauli —
-        the protocol you would run on real hardware to learn the logical
-        eigenvalue from intermediate-round syndromes only.
+    obs0 — physical readout of the logical Pauli. The merged stabilizer group
+        satisfies the single-round identity Z̄ = ∏_{v ∈ support} A_v (Webster
+        et al. arXiv:2410.03628 §II.A and L2255 of the v4 PDF). We point
+        ``OBSERVABLE_INCLUDE`` at the **last** QEC round's meas-check (S'_meas)
+        outcomes — their XOR is the eigenvalue bit of Z̄ (or X̄ for basis=X).
+        Detectors carry the FT load via round-to-round consistency; following
+        Cohen et al. arXiv:2407.18393 §3.5 the final round is the natural
+        readout point.
 
-    obs1 — Direct stim measurement of the data qubits on V_0. This is
-        **NOT a physical protocol** — single-shot computational-basis
-        measurement of the data destroys the encoded state and bypasses
-        the whole point of surgery (a non-destructive logical Pauli
-        readout). It exists solely as an implementation cross-check:
-        under noiseless evolution, obs0 and obs1 must agree on every shot
-        because they measure the same underlying X̄_M (or Z̄_M for
-        basis=Z) operator. A noiseless-run disagreement between obs0 and
-        obs1 is a bug signal.
+    obs1 — Direct stim measurement of the data qubits on ``support``. NOT a
+        physical protocol — destructively projects the data — but a useful
+        noiseless cross-check: in any noiseless shot ``obs0 == obs1``.
 
     For LER sweeps and any noisy run, keep ONLY obs0 via
     ``keep_only_observable(circuit, keep_idx=0)``.
     """
+    # Precondition: every meas-check ancilla must have been measured during
+    # the QEC cycle. Detach/readout only touches data + κ + bridge, never the
+    # meas-check ancillas, so ``get_target_rec(cid)`` (default -1) is
+    # guaranteed to resolve to the last QEC round. Fail loudly if a future
+    # refactor breaks this.
+    for cid in meas_check_ids:
+        assert measurement_record[cid], (
+            f"meas-check {cid} has no measurement record; "
+            f"_surgery_observable expects the QEC cycle to have run first."
+        )
     circuit = stim.Circuit()
     meas_targets = [
-        measurement_record.get_target_rec(cid, -1 - r)
-        for r in range(num_rounds)
-        for cid in meas_check_ids
+        measurement_record.get_target_rec(cid) for cid in meas_check_ids
     ]
     circuit.append("OBSERVABLE_INCLUDE", meas_targets, 0)
     data_targets = [
