@@ -1598,3 +1598,52 @@ def test_joint_code_dimension_webster_x_steane_equals_ten():
         f"Webster × Steane intercode joint_code.dimension = "
         f"{joint_code.dimension}, expected {expected}"
     )
+
+
+def test_joint_ppm_even_rounds_truth_table():
+    """obs0 must encode logical X̄_l X̄_r parity correctly at EVEN rounds.
+
+    Regression test for the bug where _surgery_observable XOR'd χ syndromes
+    across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of using a
+    single round's product (Webster L2255: Z̄ = ∏_v A_v). Uses
+    ``compile_sampler`` + manual XOR so we read the raw observable bit,
+    not stim's noiseless-flip from its (possibly wrong) prediction.
+    """
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    # basis=X, so we sweep ("+", "+"), ("-", "+"), ("+", "-"), ("-", "-").
+    # "-" on data flips X̄ to -1; X̄_l X̄_r = product → parity bit.
+    cases = [
+        (("+", "+"), 0),
+        (("-", "+"), 1),
+        (("+", "-"), 1),
+        (("-", "-"), 0),
+    ]
+    for data_init, expected in cases:
+        circuit, _ = build_joint_ppm_circuit(
+            g_l, g_r, bridge, rounds=2, noise_model=None,
+            data_init=data_init,
+        )
+        raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
+        n_meas = raw.shape[1]
+        obs_lines = [
+            ln for ln in str(circuit).splitlines()
+            if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+        assert (obs0 == expected).all(), (
+            f"data_init={data_init!r}: obs0 has {(obs0 != expected).sum()}/"
+            f"16 shots disagreeing with expected parity bit {expected}"
+        )
+        assert (obs0 == obs1).all(), (
+            f"data_init={data_init!r}: obs0 != obs1 in noiseless run"
+        )
