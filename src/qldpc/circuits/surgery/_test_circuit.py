@@ -249,7 +249,13 @@ def test_surgery_detach_and_readout_basis_z_measures_ancilla_in_x_then_data_in_z
 
 
 def test_surgery_observable_emits_two_observable_include():
-    """Observable 0 = XOR of χ-row records across all rounds; Observable 1 = data measurement on V_0."""
+    """Direct unit test on _surgery_observable: emits two OBSERVABLE_INCLUDE entries.
+
+    Observable 0 = XOR of the last QEC round's meas-check records (Webster,
+    Smith, Cohen single-round identity Z̄ = ∏_v A_v, arXiv:2511.15989 §II.A).
+    Observable 1 = XOR of data records on support (destructive cross-check).
+    Asserts exactly two OBSERVABLE_INCLUDE lines are emitted with distinct
+    observable indices."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import _surgery_observable
     from qldpc.circuits.bookkeeping import MeasurementRecord
@@ -1383,11 +1389,11 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state, expected_obs0):
 def test_multi_round_invariance_steane_basis_z(rounds, state):
     """obs0 reads the merged Z̄ eigenvalue independently of R.
 
-    Webster et al. arXiv:2410.03628 §II.A (L2255 of the v4 PDF) gives the
-    single-round identity Z̄ = ∏_{v ∈ support} A_v on the merged stabilizer
-    group: the XOR of one round's meas-check outcomes equals the eigenvalue
-    bit of Z̄. Cohen et al. arXiv:2407.18393 §3.5 selects the final QEC
-    round as the readout point; detectors carry the FT load round-to-round.
+    Webster, Smith, Cohen arXiv:2511.15989 §II.A gives the single-round
+    identity Z̄ = ∏_{v ∈ support} A_v on the merged stabilizer group: the XOR
+    of one round's meas-check outcomes equals the eigenvalue bit of Z̄. Cain
+    et al. arXiv:2603.28627 §III.A selects the final QEC round as the readout
+    point; detectors carry the FT load round-to-round.
 
     Therefore obs0 = int(state) for every R ≥ 1:
       * state="0" (|0⟩^n → Z̄=+1): obs0 = 0
@@ -1621,9 +1627,10 @@ def test_joint_code_dimension_webster_x_steane_equals_ten():
 def test_joint_ppm_even_rounds_truth_table():
     """obs0 must encode logical X̄_l X̄_r parity correctly at EVEN rounds.
 
-    Regression test for the bug where _surgery_observable XOR'd χ syndromes
-    across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of using a
-    single round's product (Webster L2255: Z̄ = ∏_v A_v). Uses
+    Regression test for the bug where _surgery_observable XOR'd meas-check
+    syndromes across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of
+    using a single round's product (Webster, Smith, Cohen arXiv:2511.15989
+    §II.A: Z̄ = ∏_v A_v). Uses
     ``compile_sampler`` + manual XOR so we read the raw observable bit,
     not stim's noiseless-flip from its (possibly wrong) prediction.
     """

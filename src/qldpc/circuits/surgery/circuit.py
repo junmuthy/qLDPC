@@ -342,10 +342,13 @@ def build_single_ppm_circuit(
     Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
     full semantics):
 
-      * obs0 — Webster Eq. 1, the physical syndrome-based readout.
-      * obs1 — Direct data-qubit measurement on V_0, an implementation
-        cross-check that must agree with obs0 in noiseless runs (not a
-        physical protocol — it destroys the encoded state).
+      * obs0 — Single-round Z̄ = ∏_{v ∈ support} A_v readout (Webster, Smith,
+        Cohen arXiv:2511.15989 §II.A, gadget Eq. 1). XOR of the **last** QEC
+        round's meas-check outcomes. The repeated rounds give FT distance
+        via the detector layer; following Cain et al. arXiv:2603.28627 §III.A
+        we read the logical eigenvalue from the final round.
+      * obs1 — Direct destructive M on ``support`` qubits; noiseless
+        cross-check, not a physical protocol.
 
     For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
 
@@ -645,12 +648,14 @@ def build_joint_ppm_circuit(
     Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
     full semantics):
 
-      * obs0 — Webster Eq. 1, the physical syndrome-based readout of
-        X̄_l ⊗ X̄_r (or Z̄_l ⊗ Z̄_r for basis=Z).
-      * obs1 — Direct data-qubit measurement on V_0 = V_0^(l) ∪ V_0^(r),
-        an implementation cross-check that must agree with obs0 in
-        noiseless runs (not a physical protocol — it destroys the
-        encoded state).
+      * obs0 — Single-round joint readout via Webster's identity
+        ∏_{v ∈ support_l ∪ support_r} A_v = X̄_l ⊗ X̄_r (or Z̄_l ⊗ Z̄_r for
+        basis=Z). See Webster, Smith, Cohen arXiv:2511.15989 §II.A. XOR of
+        the **last** QEC round's meas-check outcomes on both patches.
+        Detectors carry the FT load; following Cain et al.
+        arXiv:2603.28627 §III.A the final round is the readout point.
+      * obs1 — Direct destructive M on ``support_l ∪ support_r``; noiseless
+        cross-check, not a physical protocol.
 
     For LER / noisy runs, use ``keep_only_observable(circuit, keep_idx=0)``.
 
@@ -1025,12 +1030,12 @@ def _surgery_observable(
     """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
 
     obs0 — physical readout of the logical Pauli. The merged stabilizer group
-        satisfies the single-round identity Z̄ = ∏_{v ∈ support} A_v (Webster
-        et al. arXiv:2410.03628 §II.A and L2255 of the v4 PDF). We point
+        satisfies the single-round identity Z̄ = ∏_{v ∈ support} A_v (Webster,
+        Smith, Cohen arXiv:2511.15989 §II.A, gadget Eq. 1). We point
         ``OBSERVABLE_INCLUDE`` at the **last** QEC round's meas-check (S'_meas)
         outcomes — their XOR is the eigenvalue bit of Z̄ (or X̄ for basis=X).
         Detectors carry the FT load via round-to-round consistency; following
-        Cohen et al. arXiv:2407.18393 §3.5 the final round is the natural
+        Cain et al. arXiv:2603.28627 §III.A the final round is the natural
         readout point.
 
     obs1 — Direct stim measurement of the data qubits on ``support``. NOT a
