@@ -18,7 +18,7 @@ from qldpc.codes.common import CSSCode
 from .gadget import GadgetLayout
 
 
-def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
+def _exact_boundary_cheeger(incidence: galois.FieldArray) -> tuple[float, np.ndarray]:
     """Exact boundary Cheeger constant of F per Webster §II.A Definition 1.
 
     Helper / sanity-check tool. Used by ``boost_gadget_cheeger_combinatorial``
@@ -37,7 +37,7 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     |V| > 26.
 
     Args:
-        F: GF(2) restriction matrix of shape (|C|, |V|).
+        incidence: GF(2) restriction matrix of shape (|C|, |V|).
 
     Returns:
         (h, v_star_indicator) where v_star_indicator is a length-|V|
@@ -47,8 +47,8 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     Raises:
         ValueError: if |V| > 26 (exhaustive enumeration is infeasible).
     """
-    F_arr = np.asarray(F).astype(np.int8)
-    n_C, n_V = F_arr.shape
+    incidence_arr = np.asarray(incidence).astype(np.int8)
+    n_C, n_V = incidence_arr.shape
     if n_V < 2:
         return float("inf"), np.zeros(n_V, dtype=np.int8)
     if n_V > 26:
@@ -57,10 +57,10 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
             f"Use _spectral_cheeger_lower_bound for larger problems."
         )
 
-    # Bit-pack F columns: F_col_ints[i] is a Python int with bit r set iff
+    # Bit-pack F columns: incidence_col_ints[i] is a Python int with bit r set iff
     # F[r, i] = 1. Boundary as Python int allows O(1) XOR + popcount.
-    F_col_ints = [
-        int.from_bytes(np.packbits(F_arr[:, i][::-1]).tobytes()[::-1], "little")
+    incidence_col_ints = [
+        int.from_bytes(np.packbits(incidence_arr[:, i][::-1]).tobytes()[::-1], "little")
         for i in range(n_V)
     ]
     boundary_int = 0
@@ -73,7 +73,7 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     for k in range(1, total):
         bit = (k & -k).bit_length() - 1
         subset_mask ^= 1 << bit
-        boundary_int ^= F_col_ints[bit]
+        boundary_int ^= incidence_col_ints[bit]
         size = subset_mask.bit_count()
         if 1 <= size <= half:
             cut = boundary_int.bit_count()
@@ -88,7 +88,7 @@ def _exact_boundary_cheeger(F: galois.FieldArray) -> tuple[float, np.ndarray]:
     return best_h, v_star
 
 
-def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
+def _spectral_cheeger_lower_bound(incidence: galois.FieldArray) -> float:
     """Spectral lower bound on the boundary Cheeger constant of F.
 
     Returns ``lambda_2(F_float @ F_float.T) / 2.0``, where F_float =
@@ -97,15 +97,15 @@ def _spectral_cheeger_lower_bound(F: galois.FieldArray) -> float:
     ``|V_0| > 26`` makes the exact subset enumeration infeasible.
 
     Args:
-        F: GF(2) restriction matrix of shape (|C_0|, |V_0|).
+        incidence: GF(2) restriction matrix of shape (|C_0|, |V_0|).
 
     Returns:
         Non-negative float lower bound on h(F).
     """
-    F_float = np.asarray(F).astype(np.float64)
-    if F_float.shape[0] < 2:
+    incidence_float = np.asarray(incidence).astype(np.float64)
+    if incidence_float.shape[0] < 2:
         return 0.0
-    M = F_float @ F_float.T
+    M = incidence_float @ incidence_float.T
     eigenvalues = np.linalg.eigvalsh(M)
     lambda_2 = float(eigenvalues[1])
     return max(0.0, lambda_2 / 2.0)
@@ -123,15 +123,15 @@ def cheeger_constant(g: GadgetLayout) -> float:
 
     Use as a pre-flight check before deciding whether to call boost_gadget.
     """
-    F = galois.GF(2)(np.asarray(g.F).astype(int))
-    if F.shape[1] <= 26:
-        h, _ = _exact_boundary_cheeger(F)
+    incidence = galois.GF(2)(np.asarray(g.incidence).astype(int))
+    if incidence.shape[1] <= 26:
+        h, _ = _exact_boundary_cheeger(incidence)
         return h
-    return _spectral_cheeger_lower_bound(F)
+    return _spectral_cheeger_lower_bound(incidence)
 
 
-def _augment_F_with_random_edges(
-    F_base: np.ndarray,
+def _augment_incidence_with_random_edges(
+    incidence_base: np.ndarray,
     n_new_edges: int,
     rng: np.random.Generator,
 ) -> np.ndarray | None:
@@ -141,8 +141,8 @@ def _augment_F_with_random_edges(
     Returns None if a collision-free sample could not be drawn within the
     attempt budget.
     """
-    F = F_base.copy()
-    n_X = F.shape[1]
+    incidence = incidence_base.copy()
+    n_X = incidence.shape[1]
     if n_X < 2:
         return None
 
@@ -155,7 +155,7 @@ def _augment_F_with_random_edges(
                     pairs.add((int(ones[i]), int(ones[j])))
         return pairs
 
-    pairs = _existing_pairs(F)
+    pairs = _existing_pairs(incidence)
     new_rows: list[np.ndarray] = []
     for _ in range(n_new_edges):
         candidate = None
@@ -172,8 +172,8 @@ def _augment_F_with_random_edges(
         row[candidate[1]] = 1
         new_rows.append(row)
     if not new_rows:
-        return F
-    return np.vstack([F, np.stack(new_rows)])
+        return incidence
+    return np.vstack([incidence, np.stack(new_rows)])
 
 
 def boost_gadget_cheeger_combinatorial(
@@ -216,24 +216,24 @@ def boost_gadget_cheeger_combinatorial(
         raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
 
     rng = np.random.default_rng(seed)
-    F = np.asarray(g.F).astype(np.int_).copy()
-    n_orig_rows = F.shape[0]
-    n_V = F.shape[1]
+    incidence = np.asarray(g.incidence).astype(np.int_).copy()
+    n_orig_rows = incidence.shape[0]
+    n_V = incidence.shape[1]
     if n_V > 26:
         raise ValueError(
             f"|V_0| = {n_V} > 26; exact Cheeger enumeration infeasible. "
             f"Use boost_gadget_distance (BP+OSD) instead."
         )
     if n_V < 2:
-        # Nothing to boost; return identity GadgetLayout (no F_extra rows).
+        # Nothing to boost; return identity GadgetLayout (no incidence_extra rows).
         return build_gadget_augmented(
             g.code, g.x, np.zeros((0, n_V), dtype=np.uint8), basis=g.basis,
         )
 
     half = n_V // 2
-    F_col_ints = [
+    incidence_col_ints = [
         int.from_bytes(
-            np.packbits(F[:, i][::-1]).tobytes()[::-1], "little"
+            np.packbits(incidence[:, i][::-1]).tobytes()[::-1], "little"
         ) for i in range(n_V)
     ]
     total = 1 << n_V
@@ -245,7 +245,7 @@ def boost_gadget_cheeger_combinatorial(
     for k in range(1, total):
         bit = (k & -k).bit_length() - 1
         subset_mask ^= 1 << bit
-        boundary_int ^= F_col_ints[bit]
+        boundary_int ^= incidence_col_ints[bit]
         size = subset_mask.bit_count()
         if 1 <= size <= half:
             masks_buf.append(subset_mask)
@@ -288,7 +288,7 @@ def boost_gadget_cheeger_combinatorial(
 
         rng.shuffle(inside)
         rng.shuffle(outside)
-        pairs = _existing_pairs(F)
+        pairs = _existing_pairs(incidence)
         chosen = None
         for i in inside:
             for j in outside:
@@ -304,15 +304,15 @@ def boost_gadget_cheeger_combinatorial(
         new_row = np.zeros(n_V, dtype=np.int_)
         new_row[chosen[0]] = 1
         new_row[chosen[1]] = 1
-        F = np.vstack([F, new_row])
+        incidence = np.vstack([incidence, new_row])
         extra += 1
 
         bit_i = ((masks >> chosen[0]) & np.uint64(1)).astype(np.int32)
         bit_j = ((masks >> chosen[1]) & np.uint64(1)).astype(np.int32)
         cuts += (bit_i ^ bit_j)
 
-    F_extra = F[n_orig_rows:].astype(np.uint8)
-    return build_gadget_augmented(g.code, g.x, F_extra, basis=g.basis)
+    incidence_extra = incidence[n_orig_rows:].astype(np.uint8)
+    return build_gadget_augmented(g.code, g.x, incidence_extra, basis=g.basis)
 
 
 def boost_gadget_distance(
@@ -362,8 +362,8 @@ def boost_gadget_distance(
         raise ValueError(f"max_extra_qubits must be >= 0, got {max_extra_qubits}.")
 
     rng = np.random.default_rng(seed)
-    F_base = np.asarray(g.F).astype(np.int_)
-    n_V = F_base.shape[1]
+    incidence_base = np.asarray(g.incidence).astype(np.int_)
+    n_V = incidence_base.shape[1]
 
     def _passes_decoder(layout: GadgetLayout) -> bool:
         # Reconstruct the merged CSSCode from layout.HX_merged / HZ_merged
@@ -386,15 +386,15 @@ def boost_gadget_distance(
 
     for n_extra in range(1, max_extra_qubits + 1):
         for _trial in range(num_trials_per_step):
-            F_extra = _augment_F_with_random_edges(F_base, n_extra, rng)
-            if F_extra is None:
+            incidence_extra = _augment_incidence_with_random_edges(incidence_base, n_extra, rng)
+            if incidence_extra is None:
                 continue
-            # _augment_F_with_random_edges returns F_aug = F_base + extra rows;
+            # _augment_incidence_with_random_edges returns F_aug = incidence_base + extra rows;
             # extract just the new rows for build_gadget_augmented.
-            F_extra_rows = np.asarray(F_extra[F_base.shape[0]:]).astype(np.uint8)
+            incidence_extra_rows = np.asarray(incidence_extra[incidence_base.shape[0]:]).astype(np.uint8)
             try:
                 candidate = build_gadget_augmented(
-                    g.code, g.x, F_extra_rows, basis=g.basis,
+                    g.code, g.x, incidence_extra_rows, basis=g.basis,
                 )
             except Exception:
                 continue
@@ -424,7 +424,7 @@ def boost_gadget(
         **kwargs: forwarded to the underlying boost function.
 
     Returns:
-        A NEW GadgetLayout with boosted F, G, HX_merged, HZ_merged,
+        A NEW GadgetLayout with boosted incidence, G, HX_merged, HZ_merged,
         ancilla_qubits.
     """
     if method == "combinatorial":

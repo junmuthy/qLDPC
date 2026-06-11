@@ -29,7 +29,7 @@ def test_cheeger_constant_matches_boost_target():
     assert h1 >= 2.0 - 1e-9, f"boost to 2.0 produced h={h1}"
     # No-op contract: if h0 already meets target, boost adds no rows.
     g_noop = boost_gadget(g, method="combinatorial", target=h0, max_extra_qubits=30, seed=7)
-    assert g_noop.F.shape[0] == g.F.shape[0], "boost to current h should be a no-op"
+    assert g_noop.incidence.shape[0] == g.incidence.shape[0], "boost to current h should be a no-op"
 
 
 def test_boost_gadget_dispatches_to_two_methods():
@@ -57,7 +57,7 @@ def test_boost_gadget_seed_reproducible():
     g = build_gadget(code, x, basis=Pauli.X)
     a = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
     b = boost_gadget(g, method="combinatorial", target=1.0, seed=42)
-    assert np.array_equal(a.F, b.F)
+    assert np.array_equal(a.incidence, b.incidence)
     assert np.array_equal(a.HX_merged, b.HX_merged)
 
 

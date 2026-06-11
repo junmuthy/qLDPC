@@ -197,7 +197,7 @@ def _cellulate_port_subgraph(
             )
 
 
-def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, int], int]]:
+def _build_aux_graph_strict(incidence: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, int], int]]:
     """Build auxiliary graph from F; weight-2 rows become edges, hyperedges are skipped.
 
     Vertices: range(|V_0|) = range(F.shape[1]).
@@ -219,11 +219,11 @@ def _build_aux_graph_strict(F: np.ndarray) -> tuple[nx.Graph, dict[tuple[int, in
         ValueError: if any row of F has weight 1 (defensive — F · 1_{V_0} = 0
         mod 2 forbids odd weights for any valid logical x with H · x = 0).
     """
-    F_arr = np.asarray(F).astype(int)
+    incidence_arr = np.asarray(incidence).astype(int)
     G = nx.Graph()
-    G.add_nodes_from(range(F_arr.shape[1]))
+    G.add_nodes_from(range(incidence_arr.shape[1]))
     edge_index: dict[tuple[int, int], int] = {}
-    for i, row in enumerate(F_arr):
+    for i, row in enumerate(incidence_arr):
         eps = np.flatnonzero(row).tolist()
         if len(eps) == 0 or len(eps) >= 3:
             continue
@@ -265,7 +265,7 @@ def _connect_induced_subgraph(
         added.append((u, v))
 
 
-def _edges_to_F_extra(edges: list[tuple[int, int]], n_V0: int) -> np.ndarray:
+def _edges_to_incidence_extra(edges: list[tuple[int, int]], n_V0: int) -> np.ndarray:
     """Convert a list of weight-2 (u, v) edges into a (|edges|, n_V0) F_2 matrix."""
     out = np.zeros((len(edges), n_V0), dtype=np.uint8)
     for r, (u, v) in enumerate(edges):
@@ -278,7 +278,7 @@ def _run_skiptree_on_port_subgraph(
     G_aux_full: nx.Graph,
     port: tuple[int, ...],
     root_port_idx: int,
-    F_aug: np.ndarray,
+    incidence_aug: np.ndarray,
 ) -> tuple[np.ndarray, list[int]]:
     """Run SkipTree on the induced port subgraph; embed result back onto F_aug rows.
 
@@ -306,15 +306,15 @@ def _run_skiptree_on_port_subgraph(
     T_relab, P_relab = _skip_tree_fullrank(
         sub_tree, root=root_relab, edge_index_verts=edge_idx_tree,
     )
-    labels = [-1] * F_aug.shape[1]
+    labels = [-1] * incidence_aug.shape[1]
     for new_v in range(len(port)):
         orig_v = orig_of_new[new_v]
         nz = np.flatnonzero(P_relab[new_v])
         assert len(nz) == 1, f"vertex {orig_v} (relab {new_v}) has {len(nz)} labels"
         labels[orig_v] = int(nz[0])
-    T_full = np.zeros((T_relab.shape[0], F_aug.shape[0]), dtype=np.int_)
-    for r in range(F_aug.shape[0]):
-        cols = np.flatnonzero(F_aug[r])
+    T_full = np.zeros((T_relab.shape[0], incidence_aug.shape[0]), dtype=np.int_)
+    for r in range(incidence_aug.shape[0]):
+        cols = np.flatnonzero(incidence_aug[r])
         # Load-bearing skip: T_s gets zero columns on hyperedge rows (weight ≥ 3)
         # and on rows whose endpoints are outside the port subgraph. Paired with
         # _build_aux_graph_strict's matching skip; together they make hyperedge κ
@@ -356,8 +356,8 @@ def build_bridge(
     basis = g_l.basis
 
     # Step 1: auxiliary graphs
-    G_l_aux, _ = _build_aux_graph_strict(g_l.F)
-    G_r_aux, _ = _build_aux_graph_strict(g_r.F)
+    G_l_aux, _ = _build_aux_graph_strict(g_l.incidence)
+    G_r_aux, _ = _build_aux_graph_strict(g_r.incidence)
 
     # Step 2: port subsets + width
     port_l_all = tuple(port_subset_l) if port_subset_l is not None else tuple(range(len(g_l.support)))
@@ -386,11 +386,11 @@ def build_bridge(
 
     extras_l_edges = extras_l_conn + extras_l_cell
     extras_r_edges = extras_r_conn + extras_r_cell
-    extra_kappa_l = _edges_to_F_extra(extras_l_edges, len(g_l.support))
-    extra_kappa_r = _edges_to_F_extra(extras_r_edges, len(g_r.support))
+    extra_kappa_l = _edges_to_incidence_extra(extras_l_edges, len(g_l.support))
+    extra_kappa_r = _edges_to_incidence_extra(extras_r_edges, len(g_r.support))
 
     # Spec §2 lists step 7 last, but rebuilding the augmented gadgets here lets
-    # us thread g_l_aug.F as the column space for SkipTree (step 5). Reordering
+    # us thread g_l_aug.incidence as the column space for SkipTree (step 5). Reordering
     # is safe: F_aug.shape[0] is determined by extra_kappa_*, not by SkipTree.
     from .gadget import build_gadget_augmented
     g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_kappa_l, basis=basis)
@@ -398,10 +398,10 @@ def build_bridge(
 
     # Step 5: SkipTree on induced port subgraph; embed back into full F_aug rows
     T_l, label_l = _run_skiptree_on_port_subgraph(
-        G_l_aux, port_l, spanning_tree_root_l, g_l_aug.F,
+        G_l_aux, port_l, spanning_tree_root_l, g_l_aug.incidence,
     )
     T_r, label_r = _run_skiptree_on_port_subgraph(
-        G_r_aux, port_r, spanning_tree_root_r, g_r_aug.F,
+        G_r_aux, port_r, spanning_tree_root_r, g_r_aug.incidence,
     )
 
     return Bridge(

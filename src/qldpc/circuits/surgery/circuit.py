@@ -187,8 +187,8 @@ def _surgery_qubit_coordinates(
     # have added κ' ancillas during cellulation); use the bridge's augmented
     # gadgets as the source of truth.
     if joint is not None:
-        k_l = bridge.g_l_aug.F.shape[0]
-        k_r = bridge.g_r_aug.F.shape[0]
+        k_l = bridge.g_l_aug.incidence.shape[0]
+        k_r = bridge.g_r_aug.incidence.shape[0]
 
     n_data_total = n_l + n_r
     w = bridge.width if joint is not None else 0
@@ -420,7 +420,7 @@ def _stitch_intercode(g_l, g_r, bridge):
     M_co_r  = np.asarray(M_co_r_src).astype(np.int_)
 
     n_l, n_r = g_l.code.num_qudits, g_r.code.num_qudits
-    k_l, k_r = g_l_aug.F.shape[0], g_r_aug.F.shape[0]
+    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n_l + n_r + k_l + k_r + w
     r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
@@ -503,7 +503,7 @@ def _stitch_intracode(g_l, g_r, bridge):
     M_co_r  = np.asarray(M_co_r_src).astype(np.int_)
 
     n = g_l.code.num_qudits
-    k_l, k_r = g_l_aug.F.shape[0], g_r_aug.F.shape[0]
+    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n + k_l + k_r + w
     r_l, r_r = g_l_aug.G.shape[0], g_r_aug.G.shape[0]
@@ -664,8 +664,8 @@ def build_joint_ppm_circuit(
     g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
     n_l = g_l.code.num_qudits
     n_r = g_r.code.num_qudits if intercode else 0
-    k_l = g_l_aug.F.shape[0]
-    k_r = g_r_aug.F.shape[0]
+    k_l = g_l_aug.incidence.shape[0]
+    k_r = g_r_aug.incidence.shape[0]
     w = bridge.width
 
     if intercode:

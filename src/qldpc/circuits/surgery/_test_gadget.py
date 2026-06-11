@@ -26,13 +26,13 @@ def test_gadget_layout_is_frozen_dataclass():
     # frozen
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert fields == {
-        "code", "x", "support", "data_checks", "F", "G",
+        "code", "x", "support", "data_checks", "incidence", "G",
         "HX_merged", "HZ_merged", "ancilla_qubits", "basis",
     }
     # Verify actually frozen: mutation must raise
     inst = GadgetLayout(
         code=None, x=None, support=(), data_checks=(),
-        F=None, G=None, HX_merged=None, HZ_merged=None,
+        incidence=None, G=None, HX_merged=None, HZ_merged=None,
         ancilla_qubits=(), basis=Pauli.X,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -43,7 +43,7 @@ def test_step1_restriction_steane():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    support, data_checks, F = _step1_restriction(code, x)
+    support, data_checks, incidence = _step1_restriction(code, x)
     # V_0 = supp(x), sorted ascending
     assert support == tuple(int(i) for i in np.where(x)[0])
     assert list(support) == sorted(support)
@@ -54,26 +54,26 @@ def test_step1_restriction_steane():
     assert data_checks == tuple(touched)
     assert list(data_checks) == sorted(data_checks)
     # F = H_Z[C_0, V_0]
-    assert F.shape == (len(data_checks), len(support))
-    assert np.array_equal(F, HZ[np.ix_(data_checks, support)])
+    assert incidence.shape == (len(data_checks), len(support))
+    assert np.array_equal(incidence, HZ[np.ix_(data_checks, support)])
     # F @ 1_{V0} == 0 (Webster §II.A step 1 invariant)
     ones = np.ones(len(support), dtype=np.uint8)
-    assert np.array_equal((F @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
+    assert np.array_equal((incidence @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
 
 
 def test_step2_gauge_fix_basis_property():
     from qldpc.circuits.surgery.gadget import _step1_restriction, _step2_gauge_fix
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    _, _, F = _step1_restriction(code, x)
-    G = _step2_gauge_fix(F)
+    _, _, incidence = _step1_restriction(code, x)
+    G = _step2_gauge_fix(incidence)
     # Webster §II.A step 2: G F = 0 over GF(2)
-    assert G.shape[1] == F.shape[0]
-    GF = (G @ F) % 2
+    assert G.shape[1] == incidence.shape[0]
+    GF = (G @ incidence) % 2
     assert np.array_equal(GF, np.zeros_like(GF))
     # rank(G) = |C_0| - rank(F)
     import galois
-    r_expected = F.shape[0] - int(np.linalg.matrix_rank(galois.GF(2)(F.tolist())))
+    r_expected = incidence.shape[0] - int(np.linalg.matrix_rank(galois.GF(2)(incidence.tolist())))
     assert G.shape[0] == r_expected
 
 
@@ -81,13 +81,13 @@ def test_step2_gauge_fix_deterministic():
     """Same F twice → byte-identical G (non-trivial: rank-deficient F → non-empty G)."""
     from qldpc.circuits.surgery.gadget import _step2_gauge_fix
     # 3x3 matrix with rank 2 (row 0 + row 1 = row 2 over GF(2)), so G has 1 row.
-    F = np.array([[1, 0, 1], [0, 1, 1], [1, 1, 0]], dtype=np.uint8)
-    G1 = _step2_gauge_fix(F)
-    G2 = _step2_gauge_fix(F)
+    incidence = np.array([[1, 0, 1], [0, 1, 1], [1, 1, 0]], dtype=np.uint8)
+    G1 = _step2_gauge_fix(incidence)
+    G2 = _step2_gauge_fix(incidence)
     assert G1.shape == (1, 3), f"expected G shape (1,3), got {G1.shape}"
     assert np.array_equal(G1, G2)
     # And sanity-check the basis property holds on this F too.
-    assert np.array_equal((G1 @ F) % 2, np.zeros((1, F.shape[1]), dtype=np.uint8))
+    assert np.array_equal((G1 @ incidence) % 2, np.zeros((1, incidence.shape[1]), dtype=np.uint8))
 
 
 def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
@@ -97,9 +97,9 @@ def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
     )
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    support, data_checks, F = _step1_restriction(code, z, basis=Pauli.Z)
-    G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G, basis=Pauli.Z)
+    support, data_checks, incidence = _step1_restriction(code, z, basis=Pauli.Z)
+    G = _step2_gauge_fix(incidence)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, G, basis=Pauli.Z)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
     # For basis=Z: HX_merged grows by r rows (gauge-fix), HZ_merged by |V_0| rows (chi).
@@ -116,9 +116,9 @@ def test_step3_assemble_steane_css_commutes():
     )
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    support, data_checks, F = _step1_restriction(code, x)
-    G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G)
+    support, data_checks, incidence = _step1_restriction(code, x)
+    G = _step2_gauge_fix(incidence)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, G)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
     assert HX_m.shape == (mX + len(support), n + len(data_checks))
@@ -171,14 +171,14 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
     assert np.array_equal((HZ_raw @ x_logical) % 2,
                            np.zeros(2, dtype=np.uint8)), "x_logical not in ker(HZ)"
 
-    support, data_checks, F = _step1_restriction(code, x_logical)
+    support, data_checks, incidence = _step1_restriction(code, x_logical)
     # V0 = {0,1,2,3} (nV=4); HZ row0 touches {0,1}, HZ row1 touches {0,2} -> data_checks=(0,1) (nC=2)
     assert len(support) != len(data_checks), (
         f"nV={len(support)} == nC={len(data_checks)}: this test requires nV != nC to catch the bug"
     )
 
-    G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G)
+    G = _step2_gauge_fix(incidence)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, G)
 
     # 1. CSS commutation
     product = (HX_m @ HZ_m.T) % 2
@@ -219,7 +219,7 @@ def test_build_gadget_deterministic():
     g2 = build_gadget(code, x, basis=Pauli.X)
     assert g1.support == g2.support
     assert g1.data_checks == g2.data_checks
-    assert np.array_equal(g1.F, g2.F)
+    assert np.array_equal(g1.incidence, g2.incidence)
     assert np.array_equal(g1.G, g2.G)
     assert np.array_equal(g1.HX_merged, g2.HX_merged)
     assert np.array_equal(g1.HZ_merged, g2.HZ_merged)
@@ -288,7 +288,7 @@ def test_step1_restriction_basis_z_uses_HX():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    support, data_checks, F = _step1_restriction(code, z, basis=Pauli.Z)
+    support, data_checks, incidence = _step1_restriction(code, z, basis=Pauli.Z)
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     # V_0 = supp(z)
     assert support == tuple(int(i) for i in np.where(z)[0])
@@ -296,10 +296,10 @@ def test_step1_restriction_basis_z_uses_HX():
     touched = sorted({j for j in range(HX.shape[0]) for i in support if HX[j, i] == 1})
     assert data_checks == tuple(touched)
     # F = H_X[C_0, V_0]
-    assert np.array_equal(F, HX[np.ix_(data_checks, support)])
+    assert np.array_equal(incidence, HX[np.ix_(data_checks, support)])
     # Webster §II.A step 1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
     ones = np.ones(len(support), dtype=np.uint8)
-    assert np.array_equal((F @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
+    assert np.array_equal((incidence @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
 
 
 def test_build_gadget_z_basis_css_commutation():
@@ -383,7 +383,7 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         )
 
 
-def test_build_gadget_augmented_extends_F_and_recomputes_G():
+def test_build_gadget_augmented_extends_incidence_and_recomputes_gauge():
     """Augmenting with one weight-2 row adds a column to merged matrices and recomputes G."""
     from qldpc.circuits.surgery.gadget import build_gadget, build_gadget_augmented
     code = codes.SteaneCode()
@@ -391,17 +391,17 @@ def test_build_gadget_augmented_extends_F_and_recomputes_G():
     g = build_gadget(code, x, basis=Pauli.X)
     # Pick two ports in V_0; create one extra weight-2 row connecting them
     support_a, support_b = g.support[0], g.support[1]
-    extra_F = np.zeros((1, len(g.support)), dtype=np.uint8)
+    extra_incidence = np.zeros((1, len(g.support)), dtype=np.uint8)
     idx_a = g.support.index(support_a)
     idx_b = g.support.index(support_b)
-    extra_F[0, idx_a] = 1
-    extra_F[0, idx_b] = 1
-    g_aug = build_gadget_augmented(code, x, extra_F, basis=Pauli.X)
+    extra_incidence[0, idx_a] = 1
+    extra_incidence[0, idx_b] = 1
+    g_aug = build_gadget_augmented(code, x, extra_incidence, basis=Pauli.X)
 
-    # F_aug = [F | extra_F] vertically stacked
-    assert g_aug.F.shape == (g.F.shape[0] + 1, g.F.shape[1])
-    assert np.array_equal(g_aug.F[: g.F.shape[0]], g.F)
-    assert np.array_equal(g_aug.F[g.F.shape[0]:], extra_F)
+    # incidence_aug = [incidence | extra_incidence] vertically stacked
+    assert g_aug.incidence.shape == (g.incidence.shape[0] + 1, g.incidence.shape[1])
+    assert np.array_equal(g_aug.incidence[: g.incidence.shape[0]], g.incidence)
+    assert np.array_equal(g_aug.incidence[g.incidence.shape[0]:], extra_incidence)
     # HX_merged has one extra column (one extra κ qubit); same number of rows
     assert g_aug.HX_merged.shape == (g.HX_merged.shape[0], g.HX_merged.shape[1] + 1)
     # CSS commutation
@@ -476,8 +476,8 @@ def test_step2_gauge_fix_rows_linearly_independent():
         # Re-assert the existing G @ F == 0 invariant alongside.
         # (G is a basis of ker(F.T), i.e. G F = 0 over GF(2);
         # see gadget._step2_gauge_fix and existing test_step2_gauge_fix.)
-        F_mat = g.F.astype(np.uint8)
-        commute = (G.astype(np.uint8) @ F_mat) % 2
+        incidence_mat = g.incidence.astype(np.uint8)
+        commute = (G.astype(np.uint8) @ incidence_mat) % 2
         assert not commute.any(), (
             f"{label}: G @ F != 0 (gauge-fix output failed commutation)."
         )

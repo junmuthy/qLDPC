@@ -45,8 +45,8 @@ def test_skip_tree_fullrank_on_K4_matches_H_R():
 def test_build_aux_graph_weight2_rows_become_edges():
     """F rows of weight 2 → graph edges; vertex set = {0, ..., |V_0|-1}."""
     from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
-    F = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
-    G_nx, edge_idx = _build_aux_graph_strict(F)
+    incidence = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
+    G_nx, edge_idx = _build_aux_graph_strict(incidence)
     assert set(G_nx.nodes) == {0, 1, 2, 3}
     assert set(tuple(sorted(e)) for e in G_nx.edges) == {(0, 1), (1, 2), (2, 3)}
     assert edge_idx[(0, 1)] == 0
@@ -57,13 +57,13 @@ def test_build_aux_graph_weight2_rows_become_edges():
 def test_build_aux_graph_filters_hyperedges():
     """F rows of weight >= 3 (hyperedges) are silently skipped; weight-2 rows survive."""
     from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
-    F = np.array([
+    incidence = np.array([
         [1, 1, 0, 0, 0],  # weight-2 → edge (0,1)
         [1, 1, 1, 1, 0],  # weight-4 hyperedge → skipped
         [0, 0, 1, 1, 0],  # weight-2 → edge (2,3)
         [0, 0, 0, 1, 1],  # weight-2 → edge (3,4)
     ], dtype=np.uint8)
-    G_nx, edge_idx = _build_aux_graph_strict(F)
+    G_nx, edge_idx = _build_aux_graph_strict(incidence)
     assert set(G_nx.nodes) == {0, 1, 2, 3, 4}
     # Three weight-2 rows → three edges; hyperedge row contributes nothing
     assert G_nx.number_of_edges() == 3
@@ -80,9 +80,9 @@ def test_build_aux_graph_filters_hyperedges():
 def test_build_aux_graph_rejects_weight1_row():
     """F rows of weight 1 raise ValueError (dangling edge / no-op stabilizer)."""
     from qldpc.circuits.surgery.bridge import _build_aux_graph_strict
-    F = np.array([[1, 1, 0, 0], [0, 0, 1, 0]], dtype=np.uint8)
+    incidence = np.array([[1, 1, 0, 0], [0, 0, 1, 0]], dtype=np.uint8)
     with pytest.raises(ValueError, match=r"weight 1"):
-        _build_aux_graph_strict(F)
+        _build_aux_graph_strict(incidence)
 
 
 def test_connect_induced_subgraph_no_op_when_connected():
@@ -229,8 +229,8 @@ def test_build_bridge_smoke_steane_intracode():
     assert bridge.basis is Pauli.X
     assert len(bridge.port_l) == bridge.width
     assert len(bridge.port_r) == bridge.width
-    assert bridge.T_l.shape == (bridge.width - 1, bridge.g_l_aug.F.shape[0])
-    assert bridge.T_r.shape == (bridge.width - 1, bridge.g_r_aug.F.shape[0])
+    assert bridge.T_l.shape == (bridge.width - 1, bridge.g_l_aug.incidence.shape[0])
+    assert bridge.T_r.shape == (bridge.width - 1, bridge.g_r_aug.incidence.shape[0])
     assert bridge.H_R.shape == (bridge.width - 1, bridge.width)
 
 
@@ -249,7 +249,7 @@ def test_build_bridge_skiptree_invariant_holds():
         g_aug = getattr(bridge, f"g_{side}_aug")
         label = getattr(bridge, f"label_{side}")
         # G_aug = F_aug (incidence: rows = edges = κ qubits, cols = V_0 vertices)
-        G_aug = g_aug.F.astype(np.int_)
+        G_aug = g_aug.incidence.astype(np.int_)
         # P_s: |V_0^(s)| × w; P_s[v, k] = 1 iff v ∈ port AND label[v] == k
         P = np.zeros((G_aug.shape[1], bridge.width), dtype=np.int_)
         for v_idx, lab in enumerate(label):
@@ -296,7 +296,7 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle():
     g_l = build_gadget(code, z0, basis=Pauli.Z)
     g_r = build_gadget(code, z1, basis=Pauli.Z)
     # Confirm we are actually exercising Bug 1 (hyperedge in left gadget):
-    row_weights = np.asarray(g_l.F.sum(axis=1)).ravel().astype(int).tolist()
+    row_weights = np.asarray(g_l.incidence.sum(axis=1)).ravel().astype(int).tolist()
     assert max(row_weights) >= 4, "Test no longer triggers Bug 1 (no hyperedge)"
     # Build bridge (this used to raise NotImplementedError or RuntimeError)
     bridge = build_bridge(g_l, g_r)
@@ -356,7 +356,7 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster():
     bridge = build_bridge(g_l, g_r, cellulate_max_len=6)
     # Cellulation is now scoped to the port subgraph (where SkipTree runs).
     # Inspect cycles on the induced port subgraph, not the full graph.
-    G_aux, _ = _build_aux_graph_strict(bridge.g_l_aug.F)
+    G_aux, _ = _build_aux_graph_strict(bridge.g_l_aug.incidence)
     sub = G_aux.subgraph(bridge.port_l)
     cycles = nx.cycle_basis(sub)
     if cycles:
