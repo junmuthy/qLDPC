@@ -26,12 +26,12 @@ def test_gadget_layout_is_frozen_dataclass():
     # frozen
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert fields == {
-        "code", "x", "V0", "C0", "F", "G",
+        "code", "x", "support", "C0", "F", "G",
         "HX_merged", "HZ_merged", "kappa_qubits", "basis",
     }
     # Verify actually frozen: mutation must raise
     inst = GadgetLayout(
-        code=None, x=None, V0=(), C0=(),
+        code=None, x=None, support=(), C0=(),
         F=None, G=None, HX_merged=None, HZ_merged=None,
         kappa_qubits=(), basis=Pauli.X,
     )
@@ -43,21 +43,21 @@ def test_step1_restriction_steane():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    V0, C0, F = _step1_restriction(code, x)
+    support, C0, F = _step1_restriction(code, x)
     # V_0 = supp(x), sorted ascending
-    assert V0 == tuple(int(i) for i in np.where(x)[0])
-    assert list(V0) == sorted(V0)
+    assert support == tuple(int(i) for i in np.where(x)[0])
+    assert list(support) == sorted(support)
     # C_0 = Z-checks touching V_0, sorted ascending
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     touched = sorted({j for j in range(HZ.shape[0])
-                      for i in V0 if HZ[j, i] == 1})
+                      for i in support if HZ[j, i] == 1})
     assert C0 == tuple(touched)
     assert list(C0) == sorted(C0)
     # F = H_Z[C_0, V_0]
-    assert F.shape == (len(C0), len(V0))
-    assert np.array_equal(F, HZ[np.ix_(C0, V0)])
+    assert F.shape == (len(C0), len(support))
+    assert np.array_equal(F, HZ[np.ix_(C0, support)])
     # F @ 1_{V0} == 0 (Webster §II.A step 1 invariant)
-    ones = np.ones(len(V0), dtype=np.uint8)
+    ones = np.ones(len(support), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
 
 
@@ -97,14 +97,14 @@ def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
     )
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    V0, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    support, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G, basis=Pauli.Z)
+    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G, basis=Pauli.Z)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
     # For basis=Z: HX_merged grows by r rows (gauge-fix), HZ_merged by |V_0| rows (chi).
     assert HX_m.shape == (mX + G.shape[0], n + len(C0)), f"HX shape {HX_m.shape}"
-    assert HZ_m.shape == (mZ + len(V0), n + len(C0)), f"HZ shape {HZ_m.shape}"
+    assert HZ_m.shape == (mZ + len(support), n + len(C0)), f"HZ shape {HZ_m.shape}"
     # CSS commutation
     product = (HX_m @ HZ_m.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
@@ -116,12 +116,12 @@ def test_step3_assemble_steane_css_commutes():
     )
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    V0, C0, F = _step1_restriction(code, x)
+    support, C0, F = _step1_restriction(code, x)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G)
+    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
-    assert HX_m.shape == (mX + len(V0), n + len(C0))
+    assert HX_m.shape == (mX + len(support), n + len(C0))
     assert HZ_m.shape == (mZ + G.shape[0], n + len(C0))
     # Webster §II.A: H_X^merged @ H_Z^merged.T == 0 over GF(2) (CSS commutation)
     product = (HX_m @ HZ_m.T) % 2
@@ -171,14 +171,14 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
     assert np.array_equal((HZ_raw @ x_logical) % 2,
                            np.zeros(2, dtype=np.uint8)), "x_logical not in ker(HZ)"
 
-    V0, C0, F = _step1_restriction(code, x_logical)
+    support, C0, F = _step1_restriction(code, x_logical)
     # V0 = {0,1,2,3} (nV=4); HZ row0 touches {0,1}, HZ row1 touches {0,2} -> C0=(0,1) (nC=2)
-    assert len(V0) != len(C0), (
-        f"nV={len(V0)} == nC={len(C0)}: this test requires nV != nC to catch the bug"
+    assert len(support) != len(C0), (
+        f"nV={len(support)} == nC={len(C0)}: this test requires nV != nC to catch the bug"
     )
 
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G)
+    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G)
 
     # 1. CSS commutation
     product = (HX_m @ HZ_m.T) % 2
@@ -217,7 +217,7 @@ def test_build_gadget_deterministic():
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g1 = build_gadget(code, x, basis=Pauli.X)
     g2 = build_gadget(code, x, basis=Pauli.X)
-    assert g1.V0 == g2.V0
+    assert g1.support == g2.support
     assert g1.C0 == g2.C0
     assert np.array_equal(g1.F, g2.F)
     assert np.array_equal(g1.G, g2.G)
@@ -288,17 +288,17 @@ def test_step1_restriction_basis_z_uses_HX():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    V0, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    support, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     # V_0 = supp(z)
-    assert V0 == tuple(int(i) for i in np.where(z)[0])
+    assert support == tuple(int(i) for i in np.where(z)[0])
     # C_0 = X-checks touching V_0
-    touched = sorted({j for j in range(HX.shape[0]) for i in V0 if HX[j, i] == 1})
+    touched = sorted({j for j in range(HX.shape[0]) for i in support if HX[j, i] == 1})
     assert C0 == tuple(touched)
     # F = H_X[C_0, V_0]
-    assert np.array_equal(F, HX[np.ix_(C0, V0)])
+    assert np.array_equal(F, HX[np.ix_(C0, support)])
     # Webster §II.A step 1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
-    ones = np.ones(len(V0), dtype=np.uint8)
+    ones = np.ones(len(support), dtype=np.uint8)
     assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
 
 
@@ -376,7 +376,7 @@ def test_webster_table_i_z_basis_kappa_chi_r_exact():
         z = z_bar_1_operator(d)
         g = build_gadget(c, z, basis=Pauli.Z)
         kappa = len(g.kappa_qubits)
-        chi = len(g.V0)
+        chi = len(g.support)
         r = g.G.shape[0]
         assert kappa + chi + r == expected, (
             f"code {code_index}: Z-basis got κ+χ+r={kappa+chi+r}, expected {expected}"
@@ -390,10 +390,10 @@ def test_build_gadget_augmented_extends_F_and_recomputes_G():
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
     # Pick two ports in V_0; create one extra weight-2 row connecting them
-    v0_a, v0_b = g.V0[0], g.V0[1]
-    extra_F = np.zeros((1, len(g.V0)), dtype=np.uint8)
-    idx_a = g.V0.index(v0_a)
-    idx_b = g.V0.index(v0_b)
+    support_a, support_b = g.support[0], g.support[1]
+    extra_F = np.zeros((1, len(g.support)), dtype=np.uint8)
+    idx_a = g.support.index(support_a)
+    idx_b = g.support.index(support_b)
     extra_F[0, idx_a] = 1
     extra_F[0, idx_b] = 1
     g_aug = build_gadget_augmented(code, x, extra_F, basis=Pauli.X)

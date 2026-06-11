@@ -360,8 +360,8 @@ def build_bridge(
     G_r_aux, _ = _build_aux_graph_strict(g_r.F)
 
     # Step 2: port subsets + width
-    port_l_all = tuple(port_subset_l) if port_subset_l is not None else tuple(range(len(g_l.V0)))
-    port_r_all = tuple(port_subset_r) if port_subset_r is not None else tuple(range(len(g_r.V0)))
+    port_l_all = tuple(port_subset_l) if port_subset_l is not None else tuple(range(len(g_l.support)))
+    port_r_all = tuple(port_subset_r) if port_subset_r is not None else tuple(range(len(g_r.support)))
     width = min(len(port_l_all), len(port_r_all))
     if width < 2:
         raise ValueError(f"bridge width must be >= 2, got {width}")
@@ -386,8 +386,8 @@ def build_bridge(
 
     extras_l_edges = extras_l_conn + extras_l_cell
     extras_r_edges = extras_r_conn + extras_r_cell
-    extra_kappa_l = _edges_to_F_extra(extras_l_edges, len(g_l.V0))
-    extra_kappa_r = _edges_to_F_extra(extras_r_edges, len(g_r.V0))
+    extra_kappa_l = _edges_to_F_extra(extras_l_edges, len(g_l.support))
+    extra_kappa_r = _edges_to_F_extra(extras_r_edges, len(g_r.support))
 
     # Spec §2 lists step 7 last, but rebuilding the augmented gadgets here lets
     # us thread g_l_aug.F as the column space for SkipTree (step 5). Reordering

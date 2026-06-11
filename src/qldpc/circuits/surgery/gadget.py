@@ -23,7 +23,7 @@ GF2 = galois.GF(2)
 class GadgetLayout:
     code: CSSCode
     x: np.ndarray
-    V0: tuple[int, ...]
+    support: tuple[int, ...]
     C0: tuple[int, ...]
     F: np.ndarray
     G: np.ndarray
@@ -44,7 +44,7 @@ def _step1_restriction(
     x = np.asarray(x).astype(np.uint8)
     if x.shape != (code.num_qudits,):
         raise ValueError(f"x has shape {x.shape}, expected ({code.num_qudits},)")
-    V0 = tuple(int(i) for i in np.where(x)[0])
+    support = tuple(int(i) for i in np.where(x)[0])
     # Use the COMPLEMENTARY check matrix to the measured logical type
     H_complement = (
         np.asarray(code.matrix_z).astype(np.uint8)
@@ -52,14 +52,14 @@ def _step1_restriction(
         else np.asarray(code.matrix_x).astype(np.uint8)
     )
     C0 = tuple(
-        int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(V0)].any()
+        int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(support)].any()
     )
     F = (
-        H_complement[np.ix_(C0, V0)]
-        if C0 and V0
-        else np.zeros((len(C0), len(V0)), dtype=np.uint8)
+        H_complement[np.ix_(C0, support)]
+        if C0 and support
+        else np.zeros((len(C0), len(support)), dtype=np.uint8)
     )
-    return V0, C0, F.astype(np.uint8)
+    return support, C0, F.astype(np.uint8)
 
 
 def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
@@ -75,7 +75,7 @@ def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
 
 def _assemble_HX_L1(
     HX_data: np.ndarray,
-    v0_indices: np.ndarray,
+    support_indices: np.ndarray,
     F: np.ndarray,
 ) -> np.ndarray:
     """L=1 HX-side block assembly: [[HX_data, 0], [E_V0, F^T]] over GF(2).
@@ -87,7 +87,7 @@ def _assemble_HX_L1(
 
     Args:
         HX_data: original code's X-check matrix, shape (mX, n), uint8.
-        v0_indices: indices of V_0 within the n data qubits, shape (|V_0|,).
+        support_indices: indices of V_0 within the n data qubits, shape (|V_0|,).
         F: restriction matrix, shape (|C_0|, |V_0|), uint8.
 
     Returns:
@@ -98,14 +98,14 @@ def _assemble_HX_L1(
     n_merged = n + n_c0
     top = np.hstack([HX_data, np.zeros((mX, n_c0), dtype=np.uint8)]).astype(np.uint8)
     bot = np.zeros((n_v0, n_merged), dtype=np.uint8)
-    bot[np.arange(n_v0), np.asarray(v0_indices)] = 1
+    bot[np.arange(n_v0), np.asarray(support_indices)] = 1
     bot[:, n:] = F.T
     return np.vstack([top, bot]).astype(np.uint8)
 
 
 def _step3_assemble(
     code: CSSCode,
-    V0: tuple[int, ...],
+    support: tuple[int, ...],
     C0: tuple[int, ...],
     F: np.ndarray,
     G: np.ndarray,
@@ -121,7 +121,7 @@ def _step3_assemble(
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     n = code.num_qudits
     mX, mZ = HX.shape[0], HZ.shape[0]
-    nV, nC = len(V0), len(C0)
+    nV, nC = len(support), len(C0)
     r = G.shape[0]
 
     # F_tilde : (mZ_or_mX × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
@@ -134,18 +134,18 @@ def _step3_assemble(
             continue        # sentinel for extra-κ rows from build_gadget_augmented
         F_tilde[j, k] = 1
 
-    v0_arr = np.asarray(V0, dtype=np.int_)
+    support_arr = np.asarray(support, dtype=np.int_)
 
     if basis is Pauli.X:
         # χ rows extend HX_merged; G rows extend HZ_merged
-        HX_merged = _assemble_HX_L1(HX, v0_arr, F)
+        HX_merged = _assemble_HX_L1(HX, support_arr, F)
         HZ_merged = np.block([
             [HZ, F_tilde],
             [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
         ]).astype(np.uint8)
     else:
         # basis=Z (symmetric dual): χ rows extend HZ_merged; G rows extend HX_merged
-        HZ_merged = _assemble_HX_L1(HZ, v0_arr, F)
+        HZ_merged = _assemble_HX_L1(HZ, support_arr, F)
         HX_merged = np.block([
             [HX, F_tilde],
             [np.zeros((r, n), dtype=np.uint8), G.astype(np.uint8)],
@@ -174,12 +174,12 @@ def build_gadget(
     else:
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
 
-    V0, C0, F = _step1_restriction(code, x, basis=basis)
+    support, C0, F = _step1_restriction(code, x, basis=basis)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, V0, C0, F, G, basis=basis)
+    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G, basis=basis)
     kappa_qubits = tuple(range(code.num_qudits, code.num_qudits + len(C0)))
     return GadgetLayout(
-        code=code, x=x, V0=V0, C0=C0, F=F, G=G,
+        code=code, x=x, support=support, C0=C0, F=F, G=G,
         HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
         basis=basis,
     )
@@ -207,11 +207,11 @@ def build_gadget_augmented(
     the new κ qubits; the new κ indices come after the original ones.
     """
     x = np.asarray(x).astype(np.uint8)
-    V0, C0, F = _step1_restriction(code, x, basis=basis)
+    support, C0, F = _step1_restriction(code, x, basis=basis)
     F_extra = np.asarray(F_extra).astype(np.uint8)
-    if F_extra.shape[1] != len(V0):
+    if F_extra.shape[1] != len(support):
         raise ValueError(
-            f"F_extra has {F_extra.shape[1]} columns; expected {len(V0)} (= |V_0|)"
+            f"F_extra has {F_extra.shape[1]} columns; expected {len(support)} (= |V_0|)"
         )
     if F_extra.size and not np.all(F_extra.sum(axis=1) == 2):
         bad = np.flatnonzero(F_extra.sum(axis=1) != 2).tolist()
@@ -227,11 +227,11 @@ def build_gadget_augmented(
     n_extra = F_extra.shape[0]
     C0_aug = tuple(C0) + tuple([-1] * n_extra)
     HX_aug, HZ_aug = _step3_assemble(
-        code, V0, C0_aug, F_aug, G_aug, basis=basis,
+        code, support, C0_aug, F_aug, G_aug, basis=basis,
     )
     kappa_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(C0_aug)))
     return GadgetLayout(
-        code=code, x=x, V0=V0, C0=C0_aug, F=F_aug, G=G_aug,
+        code=code, x=x, support=support, C0=C0_aug, F=F_aug, G=G_aug,
         HX_merged=HX_aug, HZ_merged=HZ_aug, kappa_qubits=kappa_qubits_aug,
         basis=basis,
     )

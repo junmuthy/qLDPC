@@ -225,7 +225,7 @@ def test_build_bridge_smoke_steane_intracode():
     g_l = build_gadget(code, x1, basis=Pauli.X)
     g_r = build_gadget(code, x2, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    assert bridge.width == min(len(g_l.V0), len(g_r.V0))
+    assert bridge.width == min(len(g_l.support), len(g_r.support))
     assert bridge.basis is Pauli.X
     assert len(bridge.port_l) == bridge.width
     assert len(bridge.port_r) == bridge.width

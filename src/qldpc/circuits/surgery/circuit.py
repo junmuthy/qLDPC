@@ -162,7 +162,7 @@ def _surgery_qubit_coordinates(
     n_l = g_l.code.num_qudits
     m_X_l = g_l.code.matrix_x.shape[0]
     m_Z_l = g_l.code.matrix_z.shape[0]
-    chi_l = len(g_l.V0)
+    chi_l = len(g_l.support)
     G_l = g_l.G.shape[0]
     k_l = len(g_l.kappa_qubits)
 
@@ -171,12 +171,12 @@ def _surgery_qubit_coordinates(
         n_r = g_r.code.num_qudits
         m_X_r = g_r.code.matrix_x.shape[0]
         m_Z_r = g_r.code.matrix_z.shape[0]
-        chi_r = len(g_r.V0)
+        chi_r = len(g_r.support)
         G_r = g_r.G.shape[0]
     elif joint is not None:  # intracode: data shared, ancillas separate per gadget
         n_r = 0
         m_X_r = m_Z_r = 0  # data checks not duplicated for intracode
-        chi_r = len(g_r.V0)
+        chi_r = len(g_r.support)
         G_r = g_r.G.shape[0]
     else:
         n_r = 0
@@ -279,7 +279,7 @@ def _check_lane_index_map(
     if joint is None:
         m_X_total = gadget.code.matrix_x.shape[0]
         m_Z_total = gadget.code.matrix_z.shape[0]
-        chi_total = len(gadget.V0)
+        chi_total = len(gadget.support)
         G_total = gadget.G.shape[0]
     else:
         g_r, bridge, intercode = joint
@@ -288,7 +288,7 @@ def _check_lane_index_map(
         if intercode:
             m_X_total += g_r.code.matrix_x.shape[0]
             m_Z_total += g_r.code.matrix_z.shape[0]
-        chi_total = len(gadget.V0) + len(g_r.V0)
+        chi_total = len(gadget.support) + len(g_r.support)
         G_total = gadget.G.shape[0] + g_r.G.shape[0]
 
     result: dict[int, tuple[int, int]] = {}
@@ -371,7 +371,7 @@ def build_single_ppm_circuit(
         measurement_record=measurement_record,
     )
 
-    m_X, m_Z, n_V = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0], len(gadget.V0)
+    m_X, m_Z, n_V = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0], len(gadget.support)
     if gadget.basis is Pauli.X:
         chi_check_ids = tuple(qubit_ids.checks_x[m_X : m_X + n_V])
     else:
@@ -381,7 +381,7 @@ def build_single_ppm_circuit(
         gadget,
         chi_check_ids=chi_check_ids,
         data_ids=data_ids,
-        v0_indices=gadget.V0,
+        support_indices=gadget.support,
         num_rounds=rounds,
         measurement_record=measurement_record,
     )
@@ -433,7 +433,7 @@ def _stitch_intercode(g_l, g_r, bridge):
 
     # Build M_chi: data χ-carrier rows (left & right) + χ rows + adapter Π labels.
     M_chi = np.zeros(
-        (m_chi_l_data + m_chi_r_data + len(g_l.V0) + len(g_r.V0), n_merged),
+        (m_chi_l_data + m_chi_r_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_chi[: m_chi_l_data, cl_data] = M_chi_l[: m_chi_l_data, : n_l]
@@ -441,16 +441,16 @@ def _stitch_intercode(g_l, g_r, bridge):
     chi_l_rows = M_chi_l[m_chi_l_data :, :]
     chi_r_rows = M_chi_r[m_chi_r_data :, :]
     chi_start = m_chi_l_data + m_chi_r_data
-    M_chi[chi_start : chi_start + len(g_l.V0), cl_data] = chi_l_rows[:, : n_l]
-    M_chi[chi_start : chi_start + len(g_l.V0), cl_kappa] = chi_l_rows[:, n_l :]
-    M_chi[chi_start + len(g_l.V0) :, cr_data] = chi_r_rows[:, : n_r]
-    M_chi[chi_start + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n_r :]
+    M_chi[chi_start : chi_start + len(g_l.support), cl_data] = chi_l_rows[:, : n_l]
+    M_chi[chi_start : chi_start + len(g_l.support), cl_kappa] = chi_l_rows[:, n_l :]
+    M_chi[chi_start + len(g_l.support) :, cr_data] = chi_r_rows[:, : n_r]
+    M_chi[chi_start + len(g_l.support) :, cr_kappa] = chi_r_rows[:, n_r :]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_chi[chi_start + v_idx, c_adapter.start + lab] = 1
     for v_idx, lab in enumerate(bridge.label_r):
         if lab >= 0:
-            M_chi[chi_start + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
+            M_chi[chi_start + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
     # Build M_co: co-carrier data rows (with κ extension) + G_aug + new cycle.
     M_co = np.zeros(
@@ -515,22 +515,22 @@ def _stitch_intracode(g_l, g_r, bridge):
 
     # Build M_chi: shared data check rows + χ rows (both sides into shared data).
     M_chi = np.zeros(
-        (m_chi_data + len(g_l.V0) + len(g_r.V0), n_merged),
+        (m_chi_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_chi[: m_chi_data, c_data] = M_chi_l[: m_chi_data, : n]  # shared
     chi_l_rows = M_chi_l[m_chi_data :, :]
     chi_r_rows = M_chi_r[m_chi_data :, :]
-    M_chi[m_chi_data : m_chi_data + len(g_l.V0), c_data]  = chi_l_rows[:, : n]
-    M_chi[m_chi_data : m_chi_data + len(g_l.V0), cl_kappa] = chi_l_rows[:, n :]
-    M_chi[m_chi_data + len(g_l.V0) :, c_data]  = chi_r_rows[:, : n]
-    M_chi[m_chi_data + len(g_l.V0) :, cr_kappa] = chi_r_rows[:, n :]
+    M_chi[m_chi_data : m_chi_data + len(g_l.support), c_data]  = chi_l_rows[:, : n]
+    M_chi[m_chi_data : m_chi_data + len(g_l.support), cl_kappa] = chi_l_rows[:, n :]
+    M_chi[m_chi_data + len(g_l.support) :, c_data]  = chi_r_rows[:, : n]
+    M_chi[m_chi_data + len(g_l.support) :, cr_kappa] = chi_r_rows[:, n :]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_chi[m_chi_data + v_idx, c_adapter.start + lab] = 1
     for v_idx, lab in enumerate(bridge.label_r):
         if lab >= 0:
-            M_chi[m_chi_data + len(g_l.V0) + v_idx, c_adapter.start + lab] = 1
+            M_chi[m_chi_data + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
     # Build M_co: shared data co-carrier rows with κ extension on BOTH sides,
     # then G_l, G_r, then new cycle.
@@ -670,10 +670,10 @@ def build_joint_ppm_circuit(
 
     if intercode:
         data_ids = qubit_ids.data[: n_l + n_r]
-        v0_combined = tuple(g_l.V0) + tuple(n_l + i for i in g_r.V0)
+        support_combined = tuple(g_l.support) + tuple(n_l + i for i in g_r.support)
     else:
         data_ids = qubit_ids.data[: n_l]
-        v0_combined = tuple(g_l.V0) + tuple(g_r.V0)
+        support_combined = tuple(g_l.support) + tuple(g_r.support)
     kappa_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
     bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
     assert len(bridge_ids) == w
@@ -710,8 +710,8 @@ def build_joint_ppm_circuit(
         check_ids = qubit_ids.checks_z
         m_l = g_l.code.matrix_z.shape[0]
         m_r = g_r.code.matrix_z.shape[0] if intercode else 0
-    n_V_l = len(g_l.V0)
-    n_V_r = len(g_r.V0)
+    n_V_l = len(g_l.support)
+    n_V_r = len(g_r.support)
     chi_l_offset = m_l + m_r
     chi_r_offset = chi_l_offset + n_V_l
     chi_l_ids = tuple(check_ids[chi_l_offset : chi_l_offset + n_V_l])
@@ -722,7 +722,7 @@ def build_joint_ppm_circuit(
         g_l,
         chi_check_ids=chi_check_ids,
         data_ids=data_ids,
-        v0_indices=v0_combined,
+        support_indices=support_combined,
         num_rounds=rounds,
         measurement_record=measurement_record,
     )
@@ -1014,7 +1014,7 @@ def _surgery_observable(
     *,
     chi_check_ids: tuple[int, ...],
     data_ids: tuple[int, ...],
-    v0_indices: tuple[int, ...],
+    support_indices: tuple[int, ...],
     num_rounds: int,
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
@@ -1046,7 +1046,7 @@ def _surgery_observable(
     ]
     circuit.append("OBSERVABLE_INCLUDE", chi_targets, 0)
     data_targets = [
-        measurement_record.get_target_rec(data_ids[i]) for i in v0_indices
+        measurement_record.get_target_rec(data_ids[i]) for i in support_indices
     ]
     circuit.append("OBSERVABLE_INCLUDE", data_targets, 1)
     return circuit
