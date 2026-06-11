@@ -24,7 +24,7 @@ class GadgetLayout:
     code: CSSCode
     x: np.ndarray
     support: tuple[int, ...]
-    C0: tuple[int, ...]
+    data_checks: tuple[int, ...]
     F: np.ndarray
     G: np.ndarray
     HX_merged: np.ndarray
@@ -51,15 +51,15 @@ def _step1_restriction(
         if basis is Pauli.X
         else np.asarray(code.matrix_x).astype(np.uint8)
     )
-    C0 = tuple(
+    data_checks = tuple(
         int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(support)].any()
     )
     F = (
-        H_complement[np.ix_(C0, support)]
-        if C0 and support
-        else np.zeros((len(C0), len(support)), dtype=np.uint8)
+        H_complement[np.ix_(data_checks, support)]
+        if data_checks and support
+        else np.zeros((len(data_checks), len(support)), dtype=np.uint8)
     )
-    return support, C0, F.astype(np.uint8)
+    return support, data_checks, F.astype(np.uint8)
 
 
 def _step2_gauge_fix(F: np.ndarray) -> np.ndarray:
@@ -106,7 +106,7 @@ def _assemble_HX_L1(
 def _step3_assemble(
     code: CSSCode,
     support: tuple[int, ...],
-    C0: tuple[int, ...],
+    data_checks: tuple[int, ...],
     F: np.ndarray,
     G: np.ndarray,
     *,
@@ -121,7 +121,7 @@ def _step3_assemble(
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     n = code.num_qudits
     mX, mZ = HX.shape[0], HZ.shape[0]
-    nV, nC = len(support), len(C0)
+    nV, nC = len(support), len(data_checks)
     r = G.shape[0]
 
     # F_tilde : (mZ_or_mX × nC) selection matrix — F_tilde[j, k] = 1 iff j == C_0[k]
@@ -129,7 +129,7 @@ def _step3_assemble(
         F_tilde = np.zeros((mZ, nC), dtype=np.uint8)
     else:
         F_tilde = np.zeros((mX, nC), dtype=np.uint8)
-    for k, j in enumerate(C0):
+    for k, j in enumerate(data_checks):
         if j < 0:
             continue        # sentinel for extra-κ rows from build_gadget_augmented
         F_tilde[j, k] = 1
@@ -174,12 +174,12 @@ def build_gadget(
     else:
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
 
-    support, C0, F = _step1_restriction(code, x, basis=basis)
+    support, data_checks, F = _step1_restriction(code, x, basis=basis)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G, basis=basis)
-    kappa_qubits = tuple(range(code.num_qudits, code.num_qudits + len(C0)))
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G, basis=basis)
+    kappa_qubits = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
     return GadgetLayout(
-        code=code, x=x, support=support, C0=C0, F=F, G=G,
+        code=code, x=x, support=support, data_checks=data_checks, F=F, G=G,
         HX_merged=HX_m, HZ_merged=HZ_m, kappa_qubits=kappa_qubits,
         basis=basis,
     )
@@ -203,11 +203,11 @@ def build_gadget_augmented(
        The extra columns of tilde_F are all zero (no original check sits on the
        new κ qubits).
 
-    The returned ``GadgetLayout.C0`` and ``kappa_qubits`` are extended to cover
+    The returned ``GadgetLayout.data_checks`` and ``kappa_qubits`` are extended to cover
     the new κ qubits; the new κ indices come after the original ones.
     """
     x = np.asarray(x).astype(np.uint8)
-    support, C0, F = _step1_restriction(code, x, basis=basis)
+    support, data_checks, F = _step1_restriction(code, x, basis=basis)
     F_extra = np.asarray(F_extra).astype(np.uint8)
     if F_extra.shape[1] != len(support):
         raise ValueError(
@@ -225,13 +225,13 @@ def build_gadget_augmented(
     # Trick: pass C_0_aug = C_0 + (-1, -1, ...) sentinels which fall outside [0, mZ),
     # so the tilde_F loop sets nothing for those positions.
     n_extra = F_extra.shape[0]
-    C0_aug = tuple(C0) + tuple([-1] * n_extra)
+    data_checks_aug = tuple(data_checks) + tuple([-1] * n_extra)
     HX_aug, HZ_aug = _step3_assemble(
-        code, support, C0_aug, F_aug, G_aug, basis=basis,
+        code, support, data_checks_aug, F_aug, G_aug, basis=basis,
     )
-    kappa_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(C0_aug)))
+    kappa_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))
     return GadgetLayout(
-        code=code, x=x, support=support, C0=C0_aug, F=F_aug, G=G_aug,
+        code=code, x=x, support=support, data_checks=data_checks_aug, F=F_aug, G=G_aug,
         HX_merged=HX_aug, HZ_merged=HZ_aug, kappa_qubits=kappa_qubits_aug,
         basis=basis,
     )

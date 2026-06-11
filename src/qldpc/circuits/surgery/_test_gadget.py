@@ -26,12 +26,12 @@ def test_gadget_layout_is_frozen_dataclass():
     # frozen
     fields = {f.name for f in dataclasses.fields(GadgetLayout)}
     assert fields == {
-        "code", "x", "support", "C0", "F", "G",
+        "code", "x", "support", "data_checks", "F", "G",
         "HX_merged", "HZ_merged", "kappa_qubits", "basis",
     }
     # Verify actually frozen: mutation must raise
     inst = GadgetLayout(
-        code=None, x=None, support=(), C0=(),
+        code=None, x=None, support=(), data_checks=(),
         F=None, G=None, HX_merged=None, HZ_merged=None,
         kappa_qubits=(), basis=Pauli.X,
     )
@@ -43,7 +43,7 @@ def test_step1_restriction_steane():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    support, C0, F = _step1_restriction(code, x)
+    support, data_checks, F = _step1_restriction(code, x)
     # V_0 = supp(x), sorted ascending
     assert support == tuple(int(i) for i in np.where(x)[0])
     assert list(support) == sorted(support)
@@ -51,14 +51,14 @@ def test_step1_restriction_steane():
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
     touched = sorted({j for j in range(HZ.shape[0])
                       for i in support if HZ[j, i] == 1})
-    assert C0 == tuple(touched)
-    assert list(C0) == sorted(C0)
+    assert data_checks == tuple(touched)
+    assert list(data_checks) == sorted(data_checks)
     # F = H_Z[C_0, V_0]
-    assert F.shape == (len(C0), len(support))
-    assert np.array_equal(F, HZ[np.ix_(C0, support)])
+    assert F.shape == (len(data_checks), len(support))
+    assert np.array_equal(F, HZ[np.ix_(data_checks, support)])
     # F @ 1_{V0} == 0 (Webster §II.A step 1 invariant)
     ones = np.ones(len(support), dtype=np.uint8)
-    assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
+    assert np.array_equal((F @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
 
 
 def test_step2_gauge_fix_basis_property():
@@ -97,14 +97,14 @@ def test_step3_assemble_basis_z_places_chi_in_HZ_merged_and_G_in_HX_merged():
     )
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    support, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    support, data_checks, F = _step1_restriction(code, z, basis=Pauli.Z)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G, basis=Pauli.Z)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G, basis=Pauli.Z)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
     # For basis=Z: HX_merged grows by r rows (gauge-fix), HZ_merged by |V_0| rows (chi).
-    assert HX_m.shape == (mX + G.shape[0], n + len(C0)), f"HX shape {HX_m.shape}"
-    assert HZ_m.shape == (mZ + len(support), n + len(C0)), f"HZ shape {HZ_m.shape}"
+    assert HX_m.shape == (mX + G.shape[0], n + len(data_checks)), f"HX shape {HX_m.shape}"
+    assert HZ_m.shape == (mZ + len(support), n + len(data_checks)), f"HZ shape {HZ_m.shape}"
     # CSS commutation
     product = (HX_m @ HZ_m.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
@@ -116,13 +116,13 @@ def test_step3_assemble_steane_css_commutes():
     )
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    support, C0, F = _step1_restriction(code, x)
+    support, data_checks, F = _step1_restriction(code, x)
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G)
 
     n, mX, mZ = code.num_qudits, code.matrix_x.shape[0], code.matrix_z.shape[0]
-    assert HX_m.shape == (mX + len(support), n + len(C0))
-    assert HZ_m.shape == (mZ + G.shape[0], n + len(C0))
+    assert HX_m.shape == (mX + len(support), n + len(data_checks))
+    assert HZ_m.shape == (mZ + G.shape[0], n + len(data_checks))
     # Webster §II.A: H_X^merged @ H_Z^merged.T == 0 over GF(2) (CSS commutation)
     product = (HX_m @ HZ_m.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
@@ -171,14 +171,14 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
     assert np.array_equal((HZ_raw @ x_logical) % 2,
                            np.zeros(2, dtype=np.uint8)), "x_logical not in ker(HZ)"
 
-    support, C0, F = _step1_restriction(code, x_logical)
-    # V0 = {0,1,2,3} (nV=4); HZ row0 touches {0,1}, HZ row1 touches {0,2} -> C0=(0,1) (nC=2)
-    assert len(support) != len(C0), (
-        f"nV={len(support)} == nC={len(C0)}: this test requires nV != nC to catch the bug"
+    support, data_checks, F = _step1_restriction(code, x_logical)
+    # V0 = {0,1,2,3} (nV=4); HZ row0 touches {0,1}, HZ row1 touches {0,2} -> data_checks=(0,1) (nC=2)
+    assert len(support) != len(data_checks), (
+        f"nV={len(support)} == nC={len(data_checks)}: this test requires nV != nC to catch the bug"
     )
 
     G = _step2_gauge_fix(F)
-    HX_m, HZ_m = _step3_assemble(code, support, C0, F, G)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, F, G)
 
     # 1. CSS commutation
     product = (HX_m @ HZ_m.T) % 2
@@ -191,7 +191,7 @@ def test_step3_assemble_csscode_with_distinct_nV_nC():
     n = code.num_qudits
     mZ = HZ_raw.shape[0]
     HZ_kappa_block = HZ_m[:mZ, n:]
-    for k, j in enumerate(C0):
+    for k, j in enumerate(data_checks):
         row_sum = int(HZ_kappa_block[j].sum())
         assert row_sum == 1, (
             f"row j={j} of HZ kappa-block should have exactly 1 one (indicator form), "
@@ -208,7 +208,7 @@ def test_build_gadget_steane_returns_valid_layout():
     assert g.code is code
     assert np.array_equal(g.x, x)
     # κ qubits indexed contiguously after data qubits
-    assert g.kappa_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.C0)))
+    assert g.kappa_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.data_checks)))
 
 
 def test_build_gadget_deterministic():
@@ -218,7 +218,7 @@ def test_build_gadget_deterministic():
     g1 = build_gadget(code, x, basis=Pauli.X)
     g2 = build_gadget(code, x, basis=Pauli.X)
     assert g1.support == g2.support
-    assert g1.C0 == g2.C0
+    assert g1.data_checks == g2.data_checks
     assert np.array_equal(g1.F, g2.F)
     assert np.array_equal(g1.G, g2.G)
     assert np.array_equal(g1.HX_merged, g2.HX_merged)
@@ -288,18 +288,18 @@ def test_step1_restriction_basis_z_uses_HX():
     from qldpc.circuits.surgery.gadget import _step1_restriction
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    support, C0, F = _step1_restriction(code, z, basis=Pauli.Z)
+    support, data_checks, F = _step1_restriction(code, z, basis=Pauli.Z)
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     # V_0 = supp(z)
     assert support == tuple(int(i) for i in np.where(z)[0])
     # C_0 = X-checks touching V_0
     touched = sorted({j for j in range(HX.shape[0]) for i in support if HX[j, i] == 1})
-    assert C0 == tuple(touched)
+    assert data_checks == tuple(touched)
     # F = H_X[C_0, V_0]
-    assert np.array_equal(F, HX[np.ix_(C0, support)])
+    assert np.array_equal(F, HX[np.ix_(data_checks, support)])
     # Webster §II.A step 1 invariant: F @ 1_{V0} = 0 (since H_X @ z = 0 for a logical Z)
     ones = np.ones(len(support), dtype=np.uint8)
-    assert np.array_equal((F @ ones) % 2, np.zeros(len(C0), dtype=np.uint8))
+    assert np.array_equal((F @ ones) % 2, np.zeros(len(data_checks), dtype=np.uint8))
 
 
 def test_build_gadget_z_basis_css_commutation():
