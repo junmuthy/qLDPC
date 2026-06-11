@@ -419,7 +419,7 @@ def test_step2_gauge_fix_rows_linearly_independent():
     ker(F.T)) but not that G has full row rank.
 
     A degenerate F could let the gauge fix return redundant rows,
-    inflating g.G.shape[0] without changing the actual gauge structure.
+    inflating g.gauge.shape[0] without changing the actual gauge structure.
     The Cain Table III bb_18 G=20 reproduction would catch the final
     count but not the underlying rank degeneracy.
     """

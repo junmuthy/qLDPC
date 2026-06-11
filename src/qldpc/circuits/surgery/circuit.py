@@ -129,21 +129,26 @@ def _surgery_qubit_coordinates(
 ) -> stim.Circuit:
     """Emit QUBIT_COORDS in surgery's 6/7-lane semantic layout.
 
+    Cain mapping: V_0 → support; κ ancillas → ancilla qubits (Q');
+    χ ancillas → S'_meas ancillas (= χ rows); G ancillas → S'_comp ancillas (= G rows).
+
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
                                 slot; we split them across y=0/1/6 here).
       y=1  ancilla qubits (Q')
       y=2  data H_X ancillas   (checks_x[:m_X])
-      y=3  χ ancillas          (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      y=3  S'_meas ancillas (= χ rows)
+                               (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
       y=4  data H_Z ancillas   (checks_z[:m_Z])
-      y=5  G ancillas          (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
+      y=5  S'_comp ancillas (= G rows)
+                               (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
       y=6  bridge data + bridge cycle ancillas (joint PPM only)
 
     For basis=X, y is monotonic in qubit ID order (ids 0..6→y=0, 7..9→y=1,
     10..12→y=2, 13..15→y=3, 16..18→y=4, 19→y=5), so QUBIT_COORDS lines in
     the stringified circuit dump appear in increasing y order. basis=Z
     breaks monotonicity because χ and G swap matrix slots, but the lane
-    numbers remain stable: χ always y=3, G always y=5.
+    numbers remain stable: S'_meas always y=3, S'_comp always y=5.
 
     `joint=None` → single PPM. Otherwise pass (g_r, bridge, intercode).
     """
@@ -742,12 +747,13 @@ def _classify_reliable_round1_checks_joint(
 ) -> tuple[int, ...]:
     """Joint-code variant: reliable checks across both gadgets + new cycle rows.
 
-    basis=X (data |+⟩, κ + bridge |0⟩):
-        H_X rows = [data H_X^(l), data H_X^(r), χ^(l), χ^(r)]
-        H_Z rows = [data H_Z^(l) ext, data H_Z^(r) ext, G^(l)_aug, G^(r)_aug, new cycle-Z]
+    basis=X (data |+⟩, ancilla + bridge |0⟩):
+        H_X rows = [data S_X^(l), data S_X^(r), S'_meas^(l), S'_meas^(r)]
+        H_Z rows = [data S_Z^(l) ext, data S_Z^(r) ext, S'_comp^(l)_aug,
+                    S'_comp^(r)_aug, new cycle-Z]
 
-      Reliable X: data H_X rows of both gadgets.
-      Reliable Z: G_aug rows + new cycle-Z rows (all act on κ ∪ bridge, all |0⟩).
+      Reliable X: data S_X rows of both gadgets.
+      Reliable Z: S'_comp_aug rows + new cycle-Z rows (all act on ancilla ∪ bridge, all |0⟩).
 
     basis=Z is the X↔Z dual.
     """
@@ -756,11 +762,11 @@ def _classify_reliable_round1_checks_joint(
     m_Z_l = g_l.code.matrix_z.shape[0]
     m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
     if g_l.basis is Pauli.X:
-        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]   # data H_X^(l/r)
-        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]   # G_aug + new cycle-Z
+        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]   # data S_X^(l/r)
+        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]   # S'_comp_aug + new cycle-Z
     else:
-        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]   # G_aug + new cycle-X
-        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]   # data H_Z^(l/r)
+        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]   # S'_comp_aug + new cycle-X
+        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]   # data S_Z^(l/r)
     return tuple(reliable_x) + tuple(reliable_z)
 
 
@@ -875,11 +881,11 @@ def _classify_reliable_round1_checks(
     """Check ancillas with deterministic round-1 syndrome given surgery init state."""
     m_X, m_Z = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0]
     if gadget.basis is Pauli.X:
-        reliable_x = qubit_ids.checks_x[:m_X]   # data H_X rows (det. +1)
-        reliable_z = qubit_ids.checks_z[m_Z:]    # gauge-fix G rows (det. +1)
+        reliable_x = qubit_ids.checks_x[:m_X]   # data S_X rows (det. +1)
+        reliable_z = qubit_ids.checks_z[m_Z:]    # gauge rows (= S'_comp) (det. +1)
     else:
-        reliable_x = qubit_ids.checks_x[m_X:]   # gauge-fix G rows
-        reliable_z = qubit_ids.checks_z[:m_Z]    # data H_Z rows
+        reliable_x = qubit_ids.checks_x[m_X:]   # gauge rows (= S'_comp)
+        reliable_z = qubit_ids.checks_z[:m_Z]    # data S_Z rows
 
     return tuple(reliable_x) + tuple(reliable_z)
 
@@ -892,11 +898,11 @@ def _surgery_state_prep(
     *,
     data_init: str | None = None,
 ) -> stim.Circuit:
-    """Init data/κ/bridge qubits at the start of a surgery PPM circuit.
+    """Init data/ancilla/bridge qubits at the start of a surgery PPM circuit.
 
     Default (``data_init=None``):
-      basis=X → data |+⟩ (RX), κ + bridge |0⟩ (R)
-      basis=Z → data |0⟩ (R),  κ + bridge |+⟩ (RX)
+      basis=X → data |+⟩ (RX), ancilla + bridge |0⟩ (R)
+      basis=Z → data |0⟩ (R),  ancilla + bridge |+⟩ (RX)
 
     Optional ``data_init`` overrides per-data-qubit initial state. Each
     character selects a state for the data qubit at the same position:
@@ -907,7 +913,7 @@ def _surgery_state_prep(
       "-" → |-⟩  (RX + post-init Z)
 
     A length-1 string broadcasts to all data qubits; otherwise length must
-    equal ``len(data_ids)``.  κ + bridge init is independent of ``data_init``
+    equal ``len(data_ids)``.  ancilla + bridge init is independent of ``data_init``
     and always follows the protocol default (basis-complement +1 eigenstate).
     """
     if data_init is None:
@@ -1021,8 +1027,8 @@ def _surgery_observable(
 ) -> stim.Circuit:
     """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
 
-    obs0 — Webster Eq. 1: XOR of meas-basis check measurement records across
-        all rounds. This is the **physical readout** of the logical Pauli —
+    obs0 — Webster Eq. 1: XOR of meas-basis check (S'_meas) measurement records
+        across all rounds. This is the **physical readout** of the logical Pauli —
         the protocol you would run on real hardware to learn the logical
         eigenvalue from intermediate-round syndromes only.
 

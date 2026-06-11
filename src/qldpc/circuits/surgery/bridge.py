@@ -20,6 +20,8 @@ from .gadget import GadgetLayout
 class Bridge:
     """Universal adapter between two GadgetLayouts (Swaroop et al. arXiv:2410.03628 §IV / §VII).
 
+    Cain mapping: V_0 → support; F → incidence; κ → ancilla.
+
     Attributes match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
     """
     width: int                                  # w = |𝒜| (adapter qubits)
@@ -343,6 +345,8 @@ def build_bridge(
     cellulate_max_len: int = 6,
 ) -> Bridge:
     """Universal-adapter bridge between two gadgets (Swaroop et al. arXiv:2410.03628 §IV).
+
+    Cain mapping: V_0^(l) → support^(l); F → incidence; extra_kappa → extra_ancilla.
 
     See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
     7-step recipe. ``spanning_tree_root_s`` is the index INTO the port tuple of
