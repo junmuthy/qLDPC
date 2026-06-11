@@ -1421,7 +1421,7 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
     """Inject X_ERROR(1.0) on data qubit ``error_qubit`` between state
     prep and the first QEC round of the Steane basis=Z PPM. Assert
     exactly the round-1 Z-stab detectors whose support contains
-    ``error_qubit`` fire.
+    ``error_qubit`` fire (by row index, not just count).
 
     Why X_ERROR (not data_init):
     * Stim's detector sampler reports ``actual XOR tableau-predicted``.
@@ -1439,6 +1439,9 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
     * CX target/control swap, wrong measurement basis, or EdgeColoring
       delaying a check to a later round all break this exact-match
       pattern loudly.
+    * The assertion checks the FIRED SET against the expected set of
+      Z-stab row indices (not just the count) — a bug that swaps rows
+      while preserving cardinality is caught.
     """
     import stim
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
@@ -1451,27 +1454,27 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
     )
 
     # Splice X_ERROR(1.0) at the boundary between state prep and QEC.
-    # The prep block contains only R, RX, X, Z, and QUBIT_COORDS
-    # instructions; the QEC block starts with the first measurement /
-    # multi-qubit gate. Insert X_ERROR just before the first such op.
+    # _surgery_state_prep emits only R, RX, X, Z instructions (closed
+    # set) before the QEC cycle begins. Scan for the LAST such op and
+    # insert immediately after — this is robust to future QEC ops
+    # (MPP, XCX, etc.) that an open-set heuristic would misclassify.
     lines = str(clean_circuit).splitlines()
-    qec_start_ops = ("CX", "CZ", "H", "S", "M", "MX", "MZ", "MR", "MRX")
-    boundary_idx = None
+    prep_ops = ("R", "RX", "X", "Z")
+    last_prep_idx = -1
     for i, ln in enumerate(lines):
         s = ln.strip()
         if not s or s.startswith("#"):
             continue
         op = s.split()[0].split("(")[0]
-        if any(op == k or op.startswith(k + " ") for k in qec_start_ops):
-            boundary_idx = i
-            break
-    assert boundary_idx is not None, (
-        "could not locate prep/QEC boundary in Steane PPM circuit"
+        if op in prep_ops:
+            last_prep_idx = i
+    assert last_prep_idx >= 0, (
+        "could not locate any prep op (R/RX/X/Z) in Steane PPM circuit"
     )
     injected_lines = (
-        lines[:boundary_idx]
+        lines[: last_prep_idx + 1]
         + [f"X_ERROR(1.0) {error_qubit}"]
-        + lines[boundary_idx:]
+        + lines[last_prep_idx + 1 :]
     )
     injected_circuit = stim.Circuit("\n".join(injected_lines))
 
@@ -1481,32 +1484,57 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
     )
     events = detection_events[0]
 
-    # Identify Z-side detectors via the clean reference: detectors whose
-    # outcome is deterministic-0 across many shots are the ones measuring
-    # Z-stab parities on a Z-basis-eigenstate input.
+    # Identify ROUND-1 reliable Z-side detectors via the clean reference:
+    # deterministic-0 detectors emitted in the round-1 slab (time-coord
+    # 0, before SHIFT_COORDS). Steane basis=Z rounds=1 emits 6 such
+    # detectors total — 3 reliable round-1 Z-checks (time=0) and 3
+    # final-readout cross-checks (time=1, after SHIFT_COORDS). We want
+    # only the round-1 set: those are the ones flipped by X errors
+    # injected before the first CZ extraction (the post-SHIFT detectors
+    # check (round-1 syndrome) XOR (data-derived syndrome), which is
+    # invariant under prep-time X errors and therefore stays at 0).
+    #
+    # The round-1 reliable detectors are emitted in data-H_Z row order
+    # (set by _classify_reliable_round1_checks iterating
+    # qubit_ids.checks_z[:m_Z]), so deterministic_zero_round1[j]
+    # corresponds to H_Z row j.
     clean_sampler = clean_circuit.compile_detector_sampler()
     clean_events, _ = clean_sampler.sample(
         shots=256, separate_observables=True,
     )
-    deterministic_zero = np.where(clean_events.sum(axis=0) == 0)[0]
-
-    # Steane Z-stabs touching error_qubit
-    HZ = np.asarray(code.matrix_z).astype(int)
-    z_stabs_touching = set(np.where(HZ[:, error_qubit] == 1)[0].tolist())
-
-    # Sanity: at least m_Z deterministic-zero detectors should exist.
-    n_reliable_z = HZ.shape[0]  # 3 for Steane
-    assert len(deterministic_zero) >= n_reliable_z, (
-        f"expected >= {n_reliable_z} deterministic-zero detectors on "
-        f"clean Steane basis=Z PPM, got {len(deterministic_zero)}"
+    all_det_zero = np.where(clean_events.sum(axis=0) == 0)[0]
+    det_coords = clean_circuit.get_detector_coordinates()
+    deterministic_zero = np.array(
+        [d for d in all_det_zero if det_coords[d][2] == 0.0],
+        dtype=int,
     )
 
-    fired_on_z_side = int(events[deterministic_zero].sum())
-    expected_fired = len(z_stabs_touching)
-    assert fired_on_z_side == expected_fired, (
-        f"X_ERROR on qubit {error_qubit}: expected {expected_fired} "
-        f"Z-side detectors to fire (one per Z-stab containing the qubit), "
-        f"got {fired_on_z_side}. This is the syndrome-extraction wiring "
-        f"regression: CX swap, wrong measurement basis, or EdgeColoring "
-        f"schedule bug."
+    HZ = np.asarray(code.matrix_z).astype(int)
+    n_reliable_z = HZ.shape[0]  # 3 for Steane
+    assert len(deterministic_zero) == n_reliable_z, (
+        f"expected exactly {n_reliable_z} round-1 deterministic-zero "
+        f"detectors on clean Steane basis=Z PPM (rounds=1), got "
+        f"{len(deterministic_zero)} — reliable-check emission order may "
+        f"have changed"
+    )
+
+    # Steane Z-stabs touching error_qubit (row indices)
+    z_stabs_touching = set(
+        int(j) for j in np.where(HZ[:, error_qubit] == 1)[0]
+    )
+    # Map each round-1 deterministic-zero detector position (sorted by
+    # emission order) to its corresponding Z-stab row index. The fired
+    # set is the set of row indices whose detector fired.
+    fired_z_stab_rows = {
+        j for j in range(len(deterministic_zero))
+        if events[deterministic_zero[j]]
+    }
+    assert fired_z_stab_rows == z_stabs_touching, (
+        f"X_ERROR on qubit {error_qubit}: expected Z-stab rows "
+        f"{sorted(z_stabs_touching)} to fire, got "
+        f"{sorted(fired_z_stab_rows)}. This is the syndrome-extraction "
+        f"wiring regression: CX swap, wrong measurement basis, "
+        f"EdgeColoring schedule bug, or a stabilizer row that was "
+        f"reordered/replaced. The set comparison catches bugs that "
+        f"swap detector contents while preserving cardinality."
     )
