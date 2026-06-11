@@ -1538,3 +1538,63 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
         f"reordered/replaced. The set comparison catches bugs that "
         f"swap detector contents while preserving cardinality."
     )
+
+
+def test_joint_code_dimension_steane_x_steane_equals_one():
+    """Intercode Steane × Steane joint PPM gives joint_code.dimension == 1.
+
+    Formula: k_l + k_r − 1 because Z̄_l ⊗ Z̄_r becomes a stabilizer of
+    the joint code after surgery. For k_l = k_r = 1, that's 1.
+
+    Catches a stitching bug in _stitch_intercode that drops or
+    duplicates a stabilizer row — CSS commutation would still hold
+    but the joint code's logical dimension would shift.
+    """
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+    _, joint_code = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=3, noise_model=None,
+    )
+    expected = c1.dimension + c2.dimension - 1  # 1 + 1 - 1 = 1
+    assert joint_code.dimension == expected, (
+        f"Steane × Steane intercode joint_code.dimension = "
+        f"{joint_code.dimension}, expected {expected}"
+    )
+
+
+def test_joint_code_dimension_webster_x_steane_equals_ten():
+    """Intercode Webster GB code 0 × Steane joint PPM gives dim == k_l + k_r − 1 = 10.
+
+    Webster GB code 0 is [[62, 10, _]]; k_l = 10. Steane is k_r = 1.
+    Expected: 10 + 1 − 1 = 10.
+
+    The k_l > 1 case exposes the −1 reduction in the formula. A
+    stitching bug that fails to add the Z̄_l ⊗ Z̄_r constraint would
+    surface as dim = 11.
+    """
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.bridge import build_bridge
+    data = load_webster_seed_set(0)
+    webster = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
+    z_webster = _webster_x_bar_operator(data, "Z_bar_1", pauli_type="Z")
+    steane = codes.SteaneCode()
+    z_steane = np.asarray(steane.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_l = build_gadget(webster, z_webster, basis=Pauli.Z)
+    g_r = build_gadget(steane, z_steane, basis=Pauli.Z)
+    bridge = build_bridge(g_l, g_r)
+    _, joint_code = build_joint_ppm_circuit(
+        g_l, g_r, bridge, rounds=3, noise_model=None,
+    )
+    expected = webster.dimension + steane.dimension - 1  # 10 + 1 - 1 = 10
+    assert joint_code.dimension == expected, (
+        f"Webster × Steane intercode joint_code.dimension = "
+        f"{joint_code.dimension}, expected {expected}"
+    )
