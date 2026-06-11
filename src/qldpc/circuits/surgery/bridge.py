@@ -28,8 +28,8 @@ class Bridge:
     port_r: tuple[int, ...]                     # 𝒫_r* ⊆ V_0^(r), length w
     label_l: tuple[int, ...]                    # label_l[i] = SkipTree label of V_0^(l)[i]; -1 if i ∉ 𝒫_l*
     label_r: tuple[int, ...]
-    extra_kappa_l: np.ndarray                   # (e_l, |V_0^(l)|) F_2; weight-2 rows added
-    extra_kappa_r: np.ndarray
+    extra_ancilla_l: np.ndarray                 # (e_l, |support^(l)|) F_2; weight-2 rows added
+    extra_ancilla_r: np.ndarray
     T_l: np.ndarray                             # (w-1, |C_0^(l)| + e_l) F_2 (3,2)-sparse
     T_r: np.ndarray
     H_R: np.ndarray                             # (w-1, w) canonical rep code parity
@@ -386,15 +386,15 @@ def build_bridge(
 
     extras_l_edges = extras_l_conn + extras_l_cell
     extras_r_edges = extras_r_conn + extras_r_cell
-    extra_kappa_l = _edges_to_incidence_extra(extras_l_edges, len(g_l.support))
-    extra_kappa_r = _edges_to_incidence_extra(extras_r_edges, len(g_r.support))
+    extra_ancilla_l = _edges_to_incidence_extra(extras_l_edges, len(g_l.support))
+    extra_ancilla_r = _edges_to_incidence_extra(extras_r_edges, len(g_r.support))
 
     # Spec §2 lists step 7 last, but rebuilding the augmented gadgets here lets
     # us thread g_l_aug.incidence as the column space for SkipTree (step 5). Reordering
-    # is safe: F_aug.shape[0] is determined by extra_kappa_*, not by SkipTree.
+    # is safe: F_aug.shape[0] is determined by extra_ancilla_*, not by SkipTree.
     from .gadget import build_gadget_augmented
-    g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_kappa_l, basis=basis)
-    g_r_aug = build_gadget_augmented(g_r.code, g_r.x, extra_kappa_r, basis=basis)
+    g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_ancilla_l, basis=basis)
+    g_r_aug = build_gadget_augmented(g_r.code, g_r.x, extra_ancilla_r, basis=basis)
 
     # Step 5: SkipTree on induced port subgraph; embed back into full F_aug rows
     T_l, label_l = _run_skiptree_on_port_subgraph(
@@ -411,8 +411,8 @@ def build_bridge(
         port_r=port_r,
         label_l=tuple(label_l),
         label_r=tuple(label_r),
-        extra_kappa_l=extra_kappa_l.astype(np.uint8),
-        extra_kappa_r=extra_kappa_r.astype(np.uint8),
+        extra_ancilla_l=extra_ancilla_l.astype(np.uint8),
+        extra_ancilla_r=extra_ancilla_r.astype(np.uint8),
         T_l=T_l,
         T_r=T_r,
         H_R=_canonical_H_R(width).astype(np.int_),

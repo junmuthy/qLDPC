@@ -209,7 +209,7 @@ def test_bridge_dataclass_fields_universal_adapter():
         "width", "basis",
         "port_l", "port_r",
         "label_l", "label_r",
-        "extra_kappa_l", "extra_kappa_r",
+        "extra_ancilla_l", "extra_ancilla_r",
         "T_l", "T_r", "H_R",
         "g_l_aug", "g_r_aug",
     }
