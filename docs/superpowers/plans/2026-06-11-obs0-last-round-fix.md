@@ -26,6 +26,12 @@ No new files. No module split. Same test file holds both new and modified tests.
 
 ---
 
+## Sampler API note (read before Tasks 1-3)
+
+These tests use `circuit.compile_sampler()` (raw measurement records) followed by manual XOR of the `OBSERVABLE_INCLUDE` target records — the same pattern as `test_joint_ppm_data_init_truth_table` at `_test_circuit.py:823`. **Do NOT use `circuit.compile_detector_sampler().sample(..., separate_observables=True)`** for these tests: that returns observable *flips* from the noiseless reference, so in any noiseless run the observable is 0 regardless of the underlying logical parity. That would make Tasks 1-3 unable to detect the obs0 bug (the bug is precisely that stim's noiseless prediction of obs0 = 0 doesn't match the logical eigenvalue).
+
+`compile_sampler` returns the raw measurement bits; manually XOR'ing the indices named by an `OBSERVABLE_INCLUDE` rec target list yields the actual `Z̄` (or `X̄`) eigenvalue bit in noiseless runs, which is what we need to assert against.
+
 ## Task 1: Add failing joint-PPM even-rounds truth-table test
 
 **Files:**
@@ -41,7 +47,9 @@ def test_joint_ppm_even_rounds_truth_table():
 
     Regression test for the bug where _surgery_observable XOR'd χ syndromes
     across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of using a
-    single round's product (Webster L2255: Z̄ = ∏_v A_v).
+    single round's product (Webster L2255: Z̄ = ∏_v A_v). Uses
+    ``compile_sampler`` + manual XOR so we read the raw observable bit,
+    not stim's noiseless-flip from its (possibly wrong) prediction.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -51,9 +59,8 @@ def test_joint_ppm_even_rounds_truth_table():
     g_l = build_gadget(code, x, basis=Pauli.X)
     g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    n = code.num_qudits
     # basis=X, so we sweep ("+", "+"), ("-", "+"), ("+", "-"), ("-", "-").
-    # In basis=X, "-" on data flips X̄ to -1; X̄_l X̄_r = product.
+    # "-" on data flips X̄ to -1; X̄_l X̄_r = product → parity bit.
     cases = [
         (("+", "+"), 0),
         (("-", "+"), 1),
@@ -65,15 +72,21 @@ def test_joint_ppm_even_rounds_truth_table():
             g_l, g_r, bridge, rounds=2, noise_model=None,
             data_init=data_init,
         )
-        sampler = circuit.compile_detector_sampler()
-        _, obs = sampler.sample(shots=16, separate_observables=True)
-        # obs0 must encode the joint X̄_l X̄_r eigenvalue per shot.
-        assert (obs[:, 0] == expected).all(), (
-            f"data_init={data_init!r}: obs0 has {(obs[:, 0] != expected).sum()}/"
+        raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
+        n_meas = raw.shape[1]
+        obs_lines = [
+            ln for ln in str(circuit).splitlines()
+            if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+        assert (obs0 == expected).all(), (
+            f"data_init={data_init!r}: obs0 has {(obs0 != expected).sum()}/"
             f"16 shots disagreeing with expected parity bit {expected}"
         )
-        # obs1 (destructive cross-check) must agree with obs0 per shot.
-        assert (obs[:, 0] == obs[:, 1]).all(), (
+        assert (obs0 == obs1).all(), (
             f"data_init={data_init!r}: obs0 != obs1 in noiseless run"
         )
 ```
@@ -82,7 +95,7 @@ def test_joint_ppm_even_rounds_truth_table():
 
 Run: `uv run pytest src/qldpc/circuits/surgery/_test_circuit.py::test_joint_ppm_even_rounds_truth_table -v`
 
-Expected: **FAIL** on the `(-,+)` or `(+,-)` case with old code (obs0 is identically 0 for even rounds, but `expected == 1`). The assertion message should mention "16/16 shots disagreeing with expected parity bit 1".
+Expected: **FAIL** on the `(-,+)` or `(+,-)` case with old code (raw obs0 cancels to 0 for R=2 even, but `expected == 1`). The assertion message should mention "16/16 shots disagreeing with expected parity bit 1".
 
 - [ ] **Step 3: Commit the failing test**
 
@@ -100,7 +113,7 @@ git commit -m "test(surgery): joint-PPM even-rounds truth-table (failing, regres
 
 - [ ] **Step 1: Write the failing test**
 
-Append immediately after `test_joint_ppm_even_rounds_truth_table`:
+Append immediately after `test_joint_ppm_even_rounds_truth_table`. Same sampler pattern as Task 1 (compile_sampler + manual XOR).
 
 ```python
 def test_single_ppm_even_rounds_truth_table():
@@ -109,6 +122,7 @@ def test_single_ppm_even_rounds_truth_table():
     Same regression as test_joint_ppm_even_rounds_truth_table but for the
     single-patch PPM construction. Sweeps "+" and "-" data inits in basis=X
     and "0", "1" in basis=Z to expose the cumulative-XOR bug at even rounds.
+    Uses compile_sampler + manual XOR for the same reason as Task 1.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit, logical_state_init
@@ -126,14 +140,22 @@ def test_single_ppm_even_rounds_truth_table():
             circuit = build_single_ppm_circuit(
                 g, rounds=2, noise_model=None, data_init=data_init,
             )
-            sampler = circuit.compile_detector_sampler()
-            _, obs = sampler.sample(shots=16, separate_observables=True)
-            assert (obs[:, 0] == expected).all(), (
+            raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
+            n_meas = raw.shape[1]
+            obs_lines = [
+                ln for ln in str(circuit).splitlines()
+                if ln.startswith("OBSERVABLE_INCLUDE")
+            ]
+            offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+            offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+            obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+            obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+            assert (obs0 == expected).all(), (
                 f"basis={basis!r} state={state!r}: obs0 has "
-                f"{(obs[:, 0] != expected).sum()}/16 shots disagreeing with "
+                f"{(obs0 != expected).sum()}/16 shots disagreeing with "
                 f"expected parity bit {expected}"
             )
-            assert (obs[:, 0] == obs[:, 1]).all(), (
+            assert (obs0 == obs1).all(), (
                 f"basis={basis!r} state={state!r}: obs0 != obs1 in noiseless run"
             )
 ```
@@ -160,16 +182,18 @@ git commit -m "test(surgery): single-PPM even-rounds truth-table (failing, regre
 
 - [ ] **Step 1: Replace test body**
 
-Replace lines 690-705 with:
+Replace lines 690-705 with (compile_sampler + manual XOR, same reason as Tasks 1-2):
 
 ```python
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
     """Cross-check obs0 == obs1 per shot across all 4 parity inits.
 
-    Previously asserted only ``obs.sum() == 0`` for a single |+⟩^n init,
-    which was vacuous: parity = +1 trivially gave 0 even with the broken
-    XOR-over-rounds obs0. Now sweeps non-trivial parity inits so the bug
-    is exposed if it ever returns.
+    Previously asserted only ``obs.sum() == 0`` (via compile_detector_sampler)
+    for a single |+⟩^n init, which was vacuous: noiseless flips are 0
+    regardless of obs0's correctness, and parity=+1 trivially gave the
+    expected 0. Now uses compile_sampler + raw XOR so noiseless obs0 and
+    obs1 are the actual eigenvalue bits, and sweeps non-trivial parity inits
+    so a regression in obs0 is caught.
     """
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -183,11 +207,19 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
         circuit, _ = build_joint_ppm_circuit(
             g_l, g_r, bridge, rounds=2, data_init=data_init,
         )
-        sampler = circuit.compile_detector_sampler()
-        _, obs = sampler.sample(shots=8, separate_observables=True)
-        assert (obs[:, 0] == obs[:, 1]).all(), (
+        raw = circuit.compile_sampler().sample(shots=8).astype(np.uint8)
+        n_meas = raw.shape[1]
+        obs_lines = [
+            ln for ln in str(circuit).splitlines()
+            if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
+        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
+        assert (obs0 == obs1).all(), (
             f"data_init={data_init!r}: obs0 disagrees with obs1 on "
-            f"{(obs[:, 0] != obs[:, 1]).sum()}/8 noiseless shots"
+            f"{(obs0 != obs1).sum()}/8 noiseless shots"
         )
 ```
 
@@ -195,7 +227,7 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero():
 
 Run: `uv run pytest src/qldpc/circuits/surgery/_test_circuit.py::test_build_joint_ppm_circuit_intercode_noiseless_observables_zero -v`
 
-Expected: **FAIL** on `("-", "+")` or `("+", "-")` case because obs0 (old code) is 0 but obs1 is 1 (cross-check correctly reads the -1 eigenvalue).
+Expected: **FAIL** on `("-", "+")` or `("+", "-")` case because raw obs0 (old code) is 0 but raw obs1 is 1 (cross-check correctly reads the -1 eigenvalue).
 
 - [ ] **Step 3: Commit the strengthened test**
 
