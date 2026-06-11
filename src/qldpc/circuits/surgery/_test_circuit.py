@@ -260,7 +260,7 @@ def test_surgery_observable_emits_two_observable_include():
     meas_check_ids = tuple(range(100, 100 + len(g.support)))   # placeholder ids
     data_ids = tuple(range(n_data))
     meas_rec = MeasurementRecord()
-    # Simulate 2 rounds of chi-check measurements
+    # Simulate 2 rounds of meas-check measurements
     for _ in range(2):
         meas_rec.append({cid: i for i, cid in enumerate(meas_check_ids)})
     # Simulate final data measurement
