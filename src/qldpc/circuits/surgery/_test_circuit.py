@@ -56,7 +56,7 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire():
 
 def test_classify_reliable_round1_checks_basis_x():
     """For basis=X: reliable round-1 checks are data H_X (first m_X X-checks)
-    plus gauge-fix G (last r Z-checks)."""
+    plus gauge-fix G (last n_comp_checks Z-checks)."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
     from qldpc.circuits.bookkeeping import QubitIDs
@@ -88,7 +88,7 @@ def test_classify_reliable_round1_checks_basis_x():
 
 def test_classify_reliable_round1_checks_basis_z():
     """For basis=Z: reliable round-1 checks are data H_Z (first m_Z Z-checks)
-    plus gauge-fix G (last r X-checks)."""
+    plus gauge-fix G (last n_comp_checks X-checks)."""
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
     from qldpc.circuits.bookkeeping import QubitIDs
