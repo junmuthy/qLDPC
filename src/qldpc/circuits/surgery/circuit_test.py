@@ -1392,7 +1392,7 @@ def test_multi_round_invariance_steane_basis_z(rounds, state):
     Webster, Smith, Cohen arXiv:2511.15989 §II.A gives the single-round
     identity Z̄ = ∏_{v ∈ support} A_v on the merged stabilizer group: the XOR
     of one round's meas-check outcomes equals the eigenvalue bit of Z̄. Cain
-    et al. arXiv:2603.28627 §III.A selects the final QEC round as the readout
+    et al. arXiv:2603.28627 §B.1 selects the final QEC round as the readout
     point; detectors carry the FT load round-to-round.
 
     Therefore obs0 = int(state) for every R ≥ 1:
