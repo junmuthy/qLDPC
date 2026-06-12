@@ -8,10 +8,10 @@ import pytest
 from qldpc import codes
 from qldpc.objects import Pauli
 
-from ._test_helpers import (
+from ._webster_fixture import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
-    _webster_x_bar_1_operator,
+    _webster_x_bar_operator,
 )
 
 
@@ -42,7 +42,7 @@ def test_boost_gadget_dispatches_to_two_methods():
     # used by boost_gadget_distance to hang searching for nonexistent logicals.
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x = _webster_x_bar_1_operator(data)
+    x = _webster_x_bar_operator(data)
     g = build_gadget(code, x, basis=Pauli.X)
     for method in ("combinatorial", "distance"):
         out = boost_gadget(g, method=method, target=1.0, seed=42)
@@ -70,7 +70,7 @@ def test_boost_gadget_preserves_css_commutation(method):
     # Webster code 0 — Steane causes distance-boost decoder to hang on k=0 merged.
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x = _webster_x_bar_1_operator(data)
+    x = _webster_x_bar_operator(data)
     g = build_gadget(code, x, basis=Pauli.X)
     boosted = boost_gadget(g, method=method, target=1.0, seed=0)
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2

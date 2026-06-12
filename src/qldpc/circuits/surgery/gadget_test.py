@@ -10,10 +10,9 @@ import pytest
 from qldpc import codes
 from qldpc.objects import Pauli
 
-from ._test_helpers import (
+from ._webster_fixture import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
-    _webster_x_bar_1_operator,
     _webster_x_bar_operator,
 )
 
@@ -262,7 +261,7 @@ def test_webster_table_i_ancilla_meas_comp_exact(code_index, n_anc):
     )
     data = load_webster_seed_set(code_index)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x1 = _webster_x_bar_1_operator(data)
+    x1 = _webster_x_bar_operator(data)
     g1 = build_gadget(code, x1, basis=Pauli.X)
     n_ancilla = len(g1.ancilla_qubits)
     n_meas_checks = int(g1.x.sum())  # |support|

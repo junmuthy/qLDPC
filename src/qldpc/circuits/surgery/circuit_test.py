@@ -9,7 +9,7 @@ import stim
 from qldpc import codes
 from qldpc.objects import Pauli
 
-from ._test_helpers import (
+from ._webster_fixture import (
     load_webster_seed_set,
     build_generalised_bicycle_code,
     _webster_x_bar_operator,
