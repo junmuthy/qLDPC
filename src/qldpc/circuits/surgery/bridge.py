@@ -22,11 +22,17 @@ class Bridge:
 
     Cain mapping: V_0 → support; F → incidence; κ → ancilla.
 
-    Attributes match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
+    Same-basis fields match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
+    Mixed-basis fields (Y_stab, merge_qubits, obs0_xor_map, x_leftover_indices,
+    z_leftover_indices) implement the Webster–Smith–Cohen arXiv:2511.15989 §II.B.2
+    cross-merge for joint Pauli-product measurement of different-basis logicals
+    (e.g. Z̄_l ⊗ X̄_r). They default to None / () for same-basis bridges and
+    are populated only by build_bridge's mixed-basis dispatch path.
     """
 
     width: int  # w = |𝒜| (adapter qubits)
-    basis: PauliXZ  # X or Z (symmetric dual)
+    basis_l: PauliXZ  # X or Z on the left gadget (Webster–Smith–Cohen mixed-basis)
+    basis_r: PauliXZ  # X or Z on the right gadget
     port_l: tuple[int, ...]  # 𝒫_l* ⊆ V_0^(l), length w
     port_r: tuple[int, ...]  # 𝒫_r* ⊆ V_0^(r), length w
     label_l: tuple[int, ...]  # label_l[i] = SkipTree label of V_0^(l)[i]; -1 if i ∉ 𝒫_l*
@@ -38,6 +44,27 @@ class Bridge:
     H_R: np.ndarray  # (w-1, w) canonical rep code parity
     g_l_aug: GadgetLayout  # gadget rebuilt over F_aug^(l)
     g_r_aug: GadgetLayout
+    # Mixed-basis fields (Webster–Smith–Cohen arXiv:2511.15989 §II.B.2).
+    # None / empty for same-basis bridges.
+    Y_stab: np.ndarray | None = None  # (n_Y, 2*n_merged) symplectic Y-rows
+    merge_qubits: tuple[int, ...] = ()  # bridge qubit indices touched by cross-merge
+    obs0_xor_map: tuple[int, ...] = ()  # Y_stab row indices XORed into obs0
+    x_leftover_indices: tuple[int, ...] = ()  # X-cycle row indices not cross-merged
+    z_leftover_indices: tuple[int, ...] = ()  # Z-cycle row indices not cross-merged
+
+    @property
+    def basis(self) -> PauliXZ:
+        """Backward-compat single-basis accessor.
+
+        Returns the shared basis when basis_l == basis_r. Raises AttributeError
+        for mixed-basis bridges — callers must explicitly use basis_l / basis_r.
+        """
+        if self.basis_l is not self.basis_r:
+            raise AttributeError(
+                "mixed-basis Bridge has no single .basis attribute; "
+                f"use bridge.basis_l ({self.basis_l!r}) / bridge.basis_r ({self.basis_r!r})"
+            )
+        return self.basis_l
 
 
 def _skip_tree(
@@ -438,7 +465,8 @@ def build_bridge(
 
     return Bridge(
         width=width,
-        basis=basis,
+        basis_l=basis,
+        basis_r=basis,
         port_l=port_l,
         port_r=port_r,
         label_l=tuple(label_l),

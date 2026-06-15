@@ -223,7 +223,11 @@ def test_cellulate_port_subgraph_skips_non_port_cycle() -> None:
 
 
 def test_bridge_dataclass_fields_universal_adapter() -> None:
-    """Bridge dataclass exposes the universal-adapter fields (Swaroop et al. arXiv:2410.03628 §IV)."""
+    """Bridge dataclass exposes the universal-adapter fields + mixed-basis fields.
+
+    basis_l/basis_r replace the old single basis field (Webster–Smith–Cohen
+    arXiv:2511.15989 §II.B.2 mixed-basis joint PPM).
+    """
     import dataclasses
 
     from qldpc.circuits.surgery.bridge import Bridge
@@ -231,7 +235,8 @@ def test_bridge_dataclass_fields_universal_adapter() -> None:
     fields = {f.name for f in dataclasses.fields(Bridge)}
     assert fields == {
         "width",
-        "basis",
+        "basis_l",
+        "basis_r",
         "port_l",
         "port_r",
         "label_l",
@@ -243,7 +248,86 @@ def test_bridge_dataclass_fields_universal_adapter() -> None:
         "H_R",
         "g_l_aug",
         "g_r_aug",
+        "Y_stab",
+        "merge_qubits",
+        "obs0_xor_map",
+        "x_leftover_indices",
+        "z_leftover_indices",
     }
+
+
+def test_bridge_basis_property_returns_single_basis_when_same() -> None:
+    """`.basis` returns the shared basis when basis_l == basis_r (backward compat)."""
+    from qldpc.circuits.surgery.bridge import Bridge
+
+    bridge = Bridge(
+        width=2,
+        basis_l=Pauli.X,
+        basis_r=Pauli.X,
+        port_l=(0, 1),
+        port_r=(0, 1),
+        label_l=(0, 1),
+        label_r=(0, 1),
+        extra_ancilla_l=np.zeros((0, 2), dtype=np.uint8),
+        extra_ancilla_r=np.zeros((0, 2), dtype=np.uint8),
+        T_l=np.zeros((1, 1), dtype=np.int_),
+        T_r=np.zeros((1, 1), dtype=np.int_),
+        H_R=np.array([[1, 1]], dtype=np.int_),
+        g_l_aug=None,  # opaque to this test
+        g_r_aug=None,
+    )
+    assert bridge.basis is Pauli.X
+
+
+def test_bridge_basis_property_raises_when_mixed() -> None:
+    """`.basis` raises AttributeError when basis_l != basis_r."""
+    from qldpc.circuits.surgery.bridge import Bridge
+
+    bridge = Bridge(
+        width=2,
+        basis_l=Pauli.X,
+        basis_r=Pauli.Z,
+        port_l=(0, 1),
+        port_r=(0, 1),
+        label_l=(0, 1),
+        label_r=(0, 1),
+        extra_ancilla_l=np.zeros((0, 2), dtype=np.uint8),
+        extra_ancilla_r=np.zeros((0, 2), dtype=np.uint8),
+        T_l=np.zeros((1, 1), dtype=np.int_),
+        T_r=np.zeros((1, 1), dtype=np.int_),
+        H_R=np.array([[1, 1]], dtype=np.int_),
+        g_l_aug=None,
+        g_r_aug=None,
+    )
+    with pytest.raises(AttributeError, match=r"mixed-basis|basis_l|basis_r"):
+        _ = bridge.basis
+
+
+def test_bridge_mixed_basis_fields_default_to_none_or_empty() -> None:
+    """Y_stab defaults to None; merge_qubits/obs0_xor_map/leftover tuples default to ()."""
+    from qldpc.circuits.surgery.bridge import Bridge
+
+    bridge = Bridge(
+        width=2,
+        basis_l=Pauli.X,
+        basis_r=Pauli.X,
+        port_l=(0, 1),
+        port_r=(0, 1),
+        label_l=(0, 1),
+        label_r=(0, 1),
+        extra_ancilla_l=np.zeros((0, 2), dtype=np.uint8),
+        extra_ancilla_r=np.zeros((0, 2), dtype=np.uint8),
+        T_l=np.zeros((1, 1), dtype=np.int_),
+        T_r=np.zeros((1, 1), dtype=np.int_),
+        H_R=np.array([[1, 1]], dtype=np.int_),
+        g_l_aug=None,
+        g_r_aug=None,
+    )
+    assert bridge.Y_stab is None
+    assert bridge.merge_qubits == ()
+    assert bridge.obs0_xor_map == ()
+    assert bridge.x_leftover_indices == ()
+    assert bridge.z_leftover_indices == ()
 
 
 def test_build_bridge_smoke_steane_intracode() -> None:
