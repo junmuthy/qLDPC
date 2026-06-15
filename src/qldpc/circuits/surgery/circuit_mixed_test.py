@@ -13,14 +13,27 @@ acceptance bar for the mixed-basis pipeline:
     successfully — the syndrome graph for the pure-X / pure-Z stabilizer
     block is well-formed.
 
-Full truth-table verification (obs0 sign for all four |ψ_l⟩ ⊗ |ψ_r⟩
-computational eigenstates) is deferred to Task 6 (obs0 formula
-extension), and is not exercised here.
+obs0 is NOT emitted in Tier 1: the canonical Cross–He–Rall–Yoder /
+Cowtan–He–Williamson–Yoder formula
+``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` is provably correct as an
+operator product (= X̄_l ⊗ Z̄_r ⊗ Z^|B|) but the per-round measurement
+schedule in ``EdgeColoring.get_circuit`` (all X-stab CX gates fire before
+any Z-stab CZ gates) randomizes the adapter Z eigenvalue between χ_l /
+bridge_gauge and χ_r within the same round, so the running XOR is
+non-deterministic. Stim's ``detector_error_model()`` correctly rejects
+that observable; see ``_build_joint_ppm_circuit_mixed_basis`` docstring
+for the full Tier 2 fix options.
+
+The full truth-table verification (obs0 sign for all four |ψ_l⟩ ⊗ |ψ_r⟩
+joint eigenstates) is captured below as ``xfail`` — see
+``test_mixed_basis_joint_truth_table_x_l_z_r`` for the design-spec
+limitation.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import stim
 
 from qldpc import codes
@@ -43,11 +56,23 @@ def _build_steane_mixed_pair():
 
 
 def test_mixed_basis_joint_ppm_circuit_builds() -> None:
-    """build_joint_ppm_circuit succeeds for mixed-basis input (no CSSCode assertion error)."""
+    """build_joint_ppm_circuit succeeds for mixed-basis input (no CSSCode assertion error).
+
+    Uses ``data_init=("+", "0")`` which IS a true +1 eigenstate of X̄_l ⊗ Z̄_r
+    (X̄_l|+⟩=+|+⟩, Z̄_r|0⟩=+|0⟩). The earlier ``("0", "+")`` choice was
+    incorrect: |0⟩ is not an X̄_l eigenstate when basis_l=X measures X̄_l,
+    so χ_l outcomes would not encode any well-defined X̄_l eigenvalue.
+
+    Tier 1: obs0 is intentionally not emitted (see
+    ``_build_joint_ppm_circuit_mixed_basis`` docstring) — the canonical
+    Cross–He–Rall–Yoder formula
+    ``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` is non-deterministic on
+    the cross-eigenstate init under the current EdgeColoring schedule.
+    """
     from qldpc.circuits.surgery import build_joint_ppm_circuit
 
     g_l, g_r, bridge = _build_steane_mixed_pair()
-    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, data_init=("0", "+"))
+    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, data_init=("+", "0"))
     assert isinstance(circuit, stim.Circuit)
 
 
@@ -56,6 +81,49 @@ def test_mixed_basis_circuit_compiles_to_dem() -> None:
     from qldpc.circuits.surgery import build_joint_ppm_circuit
 
     g_l, g_r, bridge = _build_steane_mixed_pair()
-    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, data_init=("0", "+"))
+    circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, data_init=("+", "0"))
     dem = circuit.detector_error_model()
     assert dem is not None
+
+
+@pytest.mark.xfail(
+    reason=(
+        "obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges) is non-deterministic "
+        "shot-to-shot under the EdgeColoring syndrome schedule even though the "
+        "operator product equals X̄_l ⊗ Z̄_r ⊗ Z^|B| (a logical, with Z^|B|=+1 "
+        "on |0⟩^|B| bridge init). The X-stab CX gates of χ_l / bridge_gauges "
+        "fire BEFORE the Z-stab CZ gates of χ_r in each round, randomizing the "
+        "adapter Z eigenvalue before χ_r captures it. Tier 2 fix: either "
+        "reorder Z-CZ before X-CX in the syndrome cycle, or include leftover "
+        "X/Z cycle correction terms (Lemma 2 of the design spec, "
+        "docs/superpowers/specs/2026-06-15-mixed-basis-joint-ppm-design.md §9). "
+        "Stim's compile_detector_sampler ALSO yields 0 here regardless of "
+        "init — its reference sample biases non-deterministic collapses to +Z, "
+        "so the observable flip is always 0 in noiseless runs; the truth table "
+        "cannot be probed via the LER-sweep API even if obs0 were deterministic."
+    ),
+    strict=True,
+)
+def test_mixed_basis_joint_truth_table_x_l_z_r() -> None:
+    """All four joint eigenstates of X̄_l ⊗ Z̄_r give correct obs0 sign noiselessly.
+
+    For basis_l=X (measures X̄_l) and basis_r=Z (measures Z̄_r):
+      ("+", "0"): X̄|+⟩=+, Z̄|0⟩=+, product=+1 → obs0=0
+      ("−", "0"): X̄|−⟩=−, Z̄|0⟩=+, product=−1 → obs0=1
+      ("+", "1"): X̄|+⟩=+, Z̄|1⟩=−, product=−1 → obs0=1
+      ("−", "1"): X̄|−⟩=−, Z̄|1⟩=−, product=+1 → obs0=0
+    """
+    from qldpc.circuits.surgery import build_joint_ppm_circuit, keep_only_observable
+
+    g_l, g_r, bridge = _build_steane_mixed_pair()
+
+    cases = [(("+", "0"), 0), (("-", "0"), 1), (("+", "1"), 1), (("-", "1"), 0)]
+    for init, expected in cases:
+        circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, data_init=init)
+        circuit = keep_only_observable(circuit, keep_idx=0)
+        sampler = circuit.compile_detector_sampler()
+        _, obs = sampler.sample(shots=256, separate_observables=True)
+        assert obs.shape[1] == 1, f"expected 1 observable, got {obs.shape[1]}"
+        assert (obs[:, 0] == expected).all(), (
+            f"init={init} expected obs0={expected}, got mean {obs[:, 0].mean():.3f}"
+        )

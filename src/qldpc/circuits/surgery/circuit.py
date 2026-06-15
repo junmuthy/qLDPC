@@ -1503,40 +1503,52 @@ def _build_joint_ppm_circuit_mixed_basis(
         basis_r_list = x_row_idx if bridge.basis_r is Pauli.X else z_row_idx
         chi_r_orig = basis_r_list[offset : offset + n_V_r]
 
-    meas_check_ids = tuple(
-        row_to_check[i] for i in chi_l_orig
-    ) + tuple(
-        row_to_check[i] for i in chi_r_orig
-    )
+    # χ_l and χ_r meas-check ancilla IDs (basis_l-type and basis_r-type seed
+    # operators respectively).
+    chi_l_check_ids = tuple(row_to_check[i] for i in chi_l_orig)
+    chi_r_check_ids = tuple(row_to_check[i] for i in chi_r_orig)
 
-    # TODO(Tier 2 / Task 6): The mixed-basis obs0 formula per
-    # Webster-Smith-Cohen arXiv:2511.15989 §II.B.2 is
-    #   obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r)
-    #        ⊕ ⊕_{remaining X-cycle outcomes}
-    #        ⊕ ⊕_{remaining Z-cycle outcomes}.
-    # The bare ⊕ m(χ_l) ⊕ ⊕ m(χ_r) term is non-deterministic across rounds
-    # because χ_l anti-commutes with χ_r on shared adapter qubits (the
-    # subsystem-code gauge structure of Cross-He-Rall-Yoder
-    # arXiv:2407.18393 Theorem 20). The cycle-XOR terms restore
-    # determinism; implementing the full formula requires propagating the
-    # leftover x/z cycle indices from the merge bookkeeping through to
-    # the measurement record — deferred to Task 6.
+    # Bridge-gauge ancilla IDs. Per ``_stitch_to_joint_code_mixed`` these are
+    # the trailing w pure-X rows of the X-block (single X on each adapter
+    # qubit). These would appear in the full obs0 formula to absorb the
+    # X^|B| stray support of ∏ χ_l on the adapter qubits.
+    bridge_gauge_orig = x_row_idx[-w:] if w else []
+    bridge_gauge_check_ids = tuple(row_to_check[i] for i in bridge_gauge_orig)
+
+    # obs0 (canonical Cross-He-Rall-Yoder / Cowtan-He-Williamson-Yoder form):
+    #   obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)
     #
-    # For Tier 1 acceptance we emit ONLY obs1 (the noiseless cross-check
-    # observable from destructive data readout) on the support_l ∪
-    # support_r combined data; this is the correct logical observable
-    # X̄_l ⊗ Z̄_r at readout time. obs0 (the syndrome-based readout) is
-    # left empty for mixed-basis until the full Webster-Smith-Cohen
-    # formula is wired up.
+    # Per Cross, He, Rall, Yoder arXiv:2407.18393 Theorem 20 (Appendix A.2)
+    # and Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5, the Pauli
+    # PRODUCT of these rows equals X̄_l ⊗ Z̄_r ⊗ Z^|B| on the adapter
+    # (the X-on-adapter stray from ∏ χ_l cancels with ∏ bridge_gauges; the
+    # Z-on-adapter stray from ∏ χ_r remains and equals +1 on the |0⟩^|B|
+    # adapter init).
     #
-    # Note: meas_check_ids is computed above to validate the χ-row layout;
-    # it is intentionally unused here. obs1 (direct destructive readout of
-    # support_l ∪ support_r) is ALSO non-deterministic for the standard
-    # data_init=("0", "+") cross-eigenstate (X̄_l|0⟩ is random, Z̄_r|+⟩ is
-    # random), so omitted from the Tier 1 pipeline as well. Both observables
-    # are wired up properly in Task 6 once the cycle-XOR correction terms
-    # are propagated through the bookkeeping.
-    del meas_check_ids
+    # IMPORTANT TIER 1 LIMITATION: the bridge-gauge measurements (X-type,
+    # scheduled in the X-stab CX half of each EdgeColoring round) randomize
+    # the adapter Z eigenvalue BEFORE the χ_r (Z-type) measurements of the
+    # same round. Consequently the obs0 XOR is non-deterministic
+    # shot-to-shot on the cross-eigenstate init even though the operator
+    # product is in the stabilizer center. Stim's
+    # ``detector_error_model()`` correctly rejects this as
+    # "non-deterministic observable".
+    #
+    # For Tier 1 acceptance we therefore DO NOT emit obs0 here — the
+    # circuit compiles to a DEM with 0 observables. The χ check IDs and
+    # bridge-gauge check IDs are still computed and recorded below as
+    # ``_obs0_chi_l_check_ids`` / ``_obs0_chi_r_check_ids`` /
+    # ``_obs0_bridge_gauge_check_ids`` (currently unused; held for
+    # downstream consumers that want to compute the XOR manually outside
+    # the Stim DEM, e.g. for hand-verified sanity checks). Tier 2 fixes:
+    # either (a) reorder Z-stab CZ before X-stab CX within the round so
+    # χ_r captures the adapter Z eigenvalue before bridge_gauges randomize
+    # it, or (b) include leftover X/Z cycle correction terms (Lemma 2 of
+    # the design spec, docs/superpowers/specs/
+    # 2026-06-15-mixed-basis-joint-ppm-design.md §9).
+    _obs0_chi_l_check_ids = chi_l_check_ids  # noqa: F841 (recorded for Tier 2)
+    _obs0_chi_r_check_ids = chi_r_check_ids  # noqa: F841 (recorded for Tier 2)
+    _obs0_bridge_gauge_check_ids = bridge_gauge_check_ids  # noqa: F841 (recorded for Tier 2)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
