@@ -403,6 +403,42 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster() -> None:
         )
 
 
+def test_cellulate_max_len_defaults_to_max_basis_stabilizer_weight() -> None:
+    """Default cellulate_max_len = max H_basis row weight (not a hardcoded 6).
+
+    Surface code d=5 has weight-4 H_X and H_Z stabilizers, so the default cap
+    must be 4. Passing the same code with an explicit cap=4 must reproduce the
+    same port-subgraph cycle structure as the default.
+    """
+    import networkx as nx
+
+    from qldpc.circuits.surgery.bridge import _build_aux_graph_strict, build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    sc = codes.SurfaceCode(5)
+    x = np.asarray(sc.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(sc, x, basis=Pauli.X)
+    g_r = build_gadget(sc, x, basis=Pauli.X)
+
+    HX = np.asarray(sc.matrix_x).astype(int)
+    expected_cap = int(HX.sum(axis=1).max())
+    assert expected_cap == 4, f"surface d=5 has weight-4 X-stabilizers, got {expected_cap}"
+
+    bridge_default = build_bridge(g_l, g_r)
+    bridge_explicit = build_bridge(g_l, g_r, cellulate_max_len=expected_cap)
+
+    # Both runs produce the same extra ancilla shape (cellulation count matches).
+    assert bridge_default.extra_ancilla_l.shape == bridge_explicit.extra_ancilla_l.shape
+    assert bridge_default.extra_ancilla_r.shape == bridge_explicit.extra_ancilla_r.shape
+
+    # Port-subgraph basis cycles all <= expected_cap.
+    G_aux, _ = _build_aux_graph_strict(bridge_default.g_l_aug.incidence)
+    sub = G_aux.subgraph(bridge_default.port_l)
+    cycles = nx.cycle_basis(sub)
+    if cycles:
+        assert max(len(c) for c in cycles) <= expected_cap
+
+
 def test_canonical_H_R_rejects_w_below_2() -> None:
     """_canonical_H_R(w=1) raises (rep-code needs w >= 2)."""
     from qldpc.circuits.surgery.bridge import _canonical_H_R

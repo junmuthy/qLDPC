@@ -337,6 +337,14 @@ def _run_skiptree_on_port_subgraph(
     return T_full.astype(np.int_), labels
 
 
+def _max_basis_stabilizer_weight(code, basis: PauliXZ) -> int:
+    """Max row weight of the underlying code's stabilizers on the gadget's basis side."""
+    from qldpc.objects import Pauli
+
+    H = code.matrix_z if basis is Pauli.Z else code.matrix_x
+    return int(np.asarray(H).astype(int).sum(axis=1).max())
+
+
 def build_bridge(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -345,7 +353,7 @@ def build_bridge(
     port_subset_r: tuple[int, ...] | None = None,
     spanning_tree_root_l: int = 0,
     spanning_tree_root_r: int = 0,
-    cellulate_max_len: int = 6,
+    cellulate_max_len: int | None = None,
 ) -> Bridge:
     """Universal-adapter bridge between two gadgets (Swaroop et al. arXiv:2410.03628 §IV).
 
@@ -354,12 +362,23 @@ def build_bridge(
     See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
     7-step recipe. ``spanning_tree_root_s`` is the index INTO the port tuple of
     the SkipTree root vertex on side s.
+
+    ``cellulate_max_len`` caps port-subgraph basis cycle length. When ``None``
+    (default), it is set to ``max`` of the basis-side stabilizer row weights of
+    the two codes — cellulating tighter than that would force chords on natural
+    stabilizer-induced cycles; looser would leave basis cycles longer than any
+    original stabilizer and weaken the Swaroop Theorem 12 distance argument.
     """
     if g_l.basis is not g_r.basis:
         raise ValueError(
             f"build_bridge requires g_l.basis == g_r.basis, got {g_l.basis!r} vs {g_r.basis!r}"
         )
     basis = g_l.basis
+    if cellulate_max_len is None:
+        cellulate_max_len = max(
+            _max_basis_stabilizer_weight(g_l.code, basis),
+            _max_basis_stabilizer_weight(g_r.code, basis),
+        )
 
     # Step 1: auxiliary graphs
     G_l_aux, _ = _build_aux_graph_strict(g_l.incidence)
