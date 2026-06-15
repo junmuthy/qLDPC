@@ -128,15 +128,22 @@ def test_stitch_mixed_basis_populates_bridge_fields() -> None:
 
 @pytest.mark.xfail(
     reason=(
-        "Lemma 1 (design spec §9) proof has a gap when leftover X-pivots touch "
-        "later merge qubits: Y_q.X[q'] = 1 with Y_q'.Z[q'] = 1 → anticommute. "
-        "The merge.py forward-only pair-merge does not generally produce "
-        "pairwise-commuting Y stabs for the mixed-basis stitch construction. "
-        "Resolving this requires either (a) a smarter pivot selection at the "
-        "stitch level (canonical χ-row pivots), (b) full Gaussian elimination "
-        "(RREF) on bridge cols before merge, or (c) augmenting merge.py with a "
-        "back-substitution pass. Deferred to a follow-up task; tracked in the "
-        "Task 4 report."
+        "Cross-side cycle-row anticommutation. After fixing merge.py with "
+        "single-adapter-col pivot selection, the Y rows pairwise commute "
+        "(Lemma 1a verified by merge_test.py). However, in the current bridge "
+        "construction both sides contribute cycle rows that share the same "
+        "H_R block on c_adapter but carry DUAL Pauli types: cycle_l acts as Z "
+        "(dual of basis_l=X), cycle_r acts as X (dual of basis_r=Z). For "
+        "rows c1≠c2 of H_R that overlap on some adapter col q, "
+        "⟨cycle_l[c1], cycle_r[c2]⟩_s = (H_R · H_R^T)[c1, c2] mod 2 ≠ 0. "
+        "For the Steane example, H_R = [[1,1,0],[0,1,1]] gives "
+        "H_R·H_R^T mod 2 = [[0,1],[1,0]] — two anti-commuting pairs. "
+        "This is upstream of merge.py and requires reworking the mixed-basis "
+        "cycle-row construction (likely: combine cycle_l and cycle_r into a "
+        "single Y-type cycle block sharing one H_R, or use Gaussian "
+        "elimination on H_R so it has commuting cross-rows). Deferred to a "
+        "follow-up task — Lemma 1b (cycle commutation) gap noted in this "
+        "task's final report."
     )
 )
 def test_stitch_mixed_basis_stabs_commute_symplectically() -> None:

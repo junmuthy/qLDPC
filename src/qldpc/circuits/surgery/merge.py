@@ -1,11 +1,15 @@
 """Webster–Smith–Cohen (arXiv:2511.15989 §II.B.2) mixed-basis merge.
 
-Pure GF(2) row arithmetic on assembled (H_X, H_Z) matrices. Pair-merges
-X-checks on each shared bridge qubit, pair-merges Z-checks, then
-cross-merges the surviving X / Z leftover pair into a single Y-type
-stabilizer row. The merged code is non-CSS but supports joint
-Pauli-product measurement of operators of different Pauli type
-(e.g. Z̄_l ⊗ X̄_r).
+Pure GF(2) operations on (H_X, H_Z). At each merge qubit q, identifies the
+χ-style row whose support on the adapter columns is EXACTLY {q} as the
+leftover X (and similarly Z). If both exist, cross-merges them into a single
+Y-type symplectic row. Other rows — including SkipTree cycle rows with
+weight-2 adapter support — are LEFT UNCHANGED.
+
+The single-{q} adapter-col criterion is the structural signature of the
+χ-rows from Webster's gadget construction (§II.A step 2): χ_v has adapter
+support = {label(v)}. Cycle rows have weight-2 adapter support and would
+break ⟨Y_q, cycle⟩ commutation if XOR'd into during pair-merge.
 """
 
 from __future__ import annotations
@@ -13,63 +17,29 @@ from __future__ import annotations
 import numpy as np
 
 
-def _merge_at_qubit(
-    H_X: np.ndarray,
-    H_Z: np.ndarray,
+def _find_single_adapter_row(
+    H: np.ndarray,
     q: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, int | None, int | None]:
-    """In-place GF(2) row ops for one bridge qubit.
-
-    Returns
-    -------
-    (H_X_out, H_Z_out, Y_row, leftover_x_idx, leftover_z_idx)
-        H_X_out / H_Z_out: matrices after pair-merge (and row deletion if
-            cross-merged).
-        Y_row: symplectic row (length 2*n) if both X and Z conflicts present;
-            else None.
-        leftover_x_idx / leftover_z_idx: index of the leftover (pivot) row in
-            the PRE-DELETION ``H_X`` / ``H_Z``. Always reported when a
-            conflict was present at qubit ``q`` — even when ``Y_row`` is
-            emitted and that row is then deleted. The caller needs the index
-            in the pre-deletion frame to maintain its own bookkeeping of
-            surviving leftover indices across successive ``np.delete`` calls.
-    """
-    n = H_X.shape[1]
-    x_rows = np.flatnonzero(H_X[:, q])
-    leftover_x: int | None = None
-    if x_rows.size >= 1:
-        pivot = int(x_rows[0])
-        for r in x_rows[1:]:
-            H_X[int(r)] = (H_X[int(r)] + H_X[pivot]) % 2
-        leftover_x = pivot
-
-    z_rows = np.flatnonzero(H_Z[:, q])
-    leftover_z: int | None = None
-    if z_rows.size >= 1:
-        pivot = int(z_rows[0])
-        for r in z_rows[1:]:
-            H_Z[int(r)] = (H_Z[int(r)] + H_Z[pivot]) % 2
-        leftover_z = pivot
-
-    Y_row: np.ndarray | None = None
-    if leftover_x is not None and leftover_z is not None:
-        Y_row = np.zeros(2 * n, dtype=np.uint8)
-        Y_row[:n] = H_X[leftover_x]
-        Y_row[n:] = H_Z[leftover_z]
-        # Remove both leftover rows; their product becomes the Y stabilizer.
-        # NOTE: ``leftover_x`` / ``leftover_z`` are intentionally NOT nulled —
-        # the caller must know which row indices were just deleted so it can
-        # shift its leftover-row bookkeeping accordingly.
-        H_X = np.delete(H_X, leftover_x, axis=0)
-        H_Z = np.delete(H_Z, leftover_z, axis=0)
-
-    return H_X, H_Z, Y_row, leftover_x, leftover_z
+    adapter_set: frozenset[int],
+    excluded: set[int],
+) -> int | None:
+    """Return the first row index r (not in ``excluded``) whose adapter support
+    equals exactly ``{q}``, or ``None``."""
+    for r in range(H.shape[0]):
+        if r in excluded:
+            continue
+        # Adapter support of row r
+        supp = {c for c in adapter_set if H[r, c] == 1}
+        if supp == {q}:
+            return r
+    return None
 
 
 def apply_mixed_basis_merge(
     H_X: np.ndarray,
     H_Z: np.ndarray,
     merge_qubits: tuple[int, ...],
+    adapter_cols: tuple[int, ...] = (),
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -78,92 +48,59 @@ def apply_mixed_basis_merge(
     list[int],
     list[int],
 ]:
-    """Apply Webster–Smith–Cohen (arXiv:2511.15989 §II.B.2) merge.
+    """Webster–Smith–Cohen arXiv:2511.15989 §II.B.2 cross-merge.
+
+    See module docstring for the algorithm. Caller's ``H_X`` / ``H_Z`` are not
+    mutated.
 
     Parameters
     ----------
     H_X, H_Z
-        Tentative X-stab / Z-stab matrices of the same-basis merged code,
-        shape ``(N_X, n_merged)`` and ``(N_Z, n_merged)`` over GF(2).
+        ``(rows, n_merged)`` GF(2) stabilizer matrices.
     merge_qubits
-        Bridge qubit column indices to merge at. Sorted ascending internally
-        for determinism.
+        Adapter columns to attempt cross-merge at. Sorted ascending internally.
+    adapter_cols
+        Full set of adapter-column indices, used to compute the single-``{q}``
+        adapter-col pivot criterion.
 
     Returns
     -------
     H_X_out, H_Z_out
-        Modified stabilizer matrices (rows possibly removed where cross-merged).
+        Modified matrices (rows removed where cross-merged).
     Y_stab
-        ``(n_Y, 2*n_merged)`` symplectic Y-stab matrix, or ``None`` if no
-        cross-merge occurred.
+        ``(n_Y, 2*n_merged)`` symplectic Y rows, or ``None``.
     obs0_y_indices
-        Row indices into ``Y_stab`` whose outcomes XOR into obs0 (per Lemma 2
-        of the design spec). All cross-merged qubits contribute; equals
-        ``list(range(n_Y))``.
-    x_leftover_indices
-        Row indices into ``H_X_out`` of X-cycle pivots that survived pair-merge
-        without a Z partner (i.e. their qubit had X conflict but no Z conflict).
-        Contribute to obs0 per Lemma 2 §9.
-    z_leftover_indices
-        Symmetric on the Z side.
-
-    Caller's ``H_X``, ``H_Z`` arrays are not mutated (internal copies are made).
-
-    Notes
-    -----
-    Iteration order: ascending qubit index. Per Lemma 1 of the design spec,
-    after Step A at qubit q no other X-row touches q, so subsequent merges
-    at q' > q are independent of order on the X-side; symmetric for Z.
+        ``list(range(n_Y))`` — all Y rows contribute to obs0 per Lemma 2.
+    x_leftover_indices, z_leftover_indices
+        Always ``[]``. Returned for backward compatibility with the previous
+        algorithm's interface; the new algorithm does not produce surviving
+        leftovers (no pair-merge of multi-adapter rows is performed).
     """
     Hx = H_X.copy().astype(np.uint8)
     Hz = H_Z.copy().astype(np.uint8)
+    adapter_set = frozenset(int(c) for c in adapter_cols)
     Y_rows: list[np.ndarray] = []
     obs0_y: list[int] = []
-    # Track leftover row indices in the *current* (post-deletion) matrices.
-    # We refresh from scratch after each merge step.
-    x_leftover_set: set[int] = set()
-    z_leftover_set: set[int] = set()
+    rows_to_delete_x: set[int] = set()
+    rows_to_delete_z: set[int] = set()
+
+    n = Hx.shape[1]
 
     for q in sorted(int(q) for q in merge_qubits):
-        Hx_before_rows = Hx.shape[0]
-        Hz_before_rows = Hz.shape[0]
-        Hx, Hz, Y_row, lx, lz = _merge_at_qubit(Hx, Hz, q)
+        x_pivot = _find_single_adapter_row(Hx, q, adapter_set, rows_to_delete_x)
+        z_pivot = _find_single_adapter_row(Hz, q, adapter_set, rows_to_delete_z)
+        if x_pivot is None or z_pivot is None:
+            continue
+        Y_row = np.zeros(2 * n, dtype=np.uint8)
+        Y_row[:n] = Hx[x_pivot]
+        Y_row[n:] = Hz[z_pivot]
+        obs0_y.append(len(Y_rows))
+        Y_rows.append(Y_row)
+        rows_to_delete_x.add(x_pivot)
+        rows_to_delete_z.add(z_pivot)
 
-        if Y_row is not None:
-            obs0_y.append(len(Y_rows))
-            Y_rows.append(Y_row)
-            # Cross-merged rows are removed entirely. ``lx`` / ``lz`` are the
-            # PRE-DELETION row indices that were just consumed. Update the
-            # tracked leftover sets to the post-deletion frame:
-            #   - drop any element equal to the deleted row
-            #   - decrement any element strictly greater than the deleted row
-            assert lx is not None and lz is not None
-            assert Hx.shape[0] == Hx_before_rows - 1
-            assert Hz.shape[0] == Hz_before_rows - 1
-            new_x_leftover: set[int] = set()
-            for old_idx in x_leftover_set:
-                if old_idx == lx:
-                    continue
-                new_x_leftover.add(old_idx - 1 if old_idx > lx else old_idx)
-            x_leftover_set = new_x_leftover
-            new_z_leftover: set[int] = set()
-            for old_idx in z_leftover_set:
-                if old_idx == lz:
-                    continue
-                new_z_leftover.add(old_idx - 1 if old_idx > lz else old_idx)
-            z_leftover_set = new_z_leftover
-        else:
-            if lx is not None:
-                x_leftover_set.add(lx)
-            if lz is not None:
-                z_leftover_set.add(lz)
+    Hx_out = np.delete(Hx, sorted(rows_to_delete_x), axis=0)
+    Hz_out = np.delete(Hz, sorted(rows_to_delete_z), axis=0)
 
     Y_stab = np.array(Y_rows, dtype=np.uint8) if Y_rows else None
-    return (
-        Hx,
-        Hz,
-        Y_stab,
-        obs0_y,
-        sorted(x_leftover_set),
-        sorted(z_leftover_set),
-    )
+    return Hx_out, Hz_out, Y_stab, obs0_y, [], []

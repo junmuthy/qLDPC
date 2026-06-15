@@ -831,11 +831,12 @@ def _stitch_to_joint_code_mixed(
     H_X = np.vstack([HX_l, HX_r, HX_cycle]).astype(np.uint8)
     H_Z = np.vstack([HZ_l, HZ_r, HZ_cycle]).astype(np.uint8)
 
-    bridge_cols = (
-        list(range(slices["cl_ancilla"].start, slices["cl_ancilla"].stop))
-        + list(range(slices["cr_ancilla"].start, slices["cr_ancilla"].stop))
-        + list(range(slices["c_adapter"].start, slices["c_adapter"].stop))
-    )
+    # Webster–Smith–Cohen arXiv:2511.15989 §II.B.2: cross-merge happens on the
+    # adapter columns only (the χ-style seed-operator rows have single-{q}
+    # adapter-col support by construction; κ_l / κ_r columns play no role in
+    # the cross-merge pivot selection).
+    adapter_cols = tuple(range(slices["c_adapter"].start, slices["c_adapter"].stop))
+    bridge_cols = list(adapter_cols)
     x_support = np.asarray(H_X[:, bridge_cols].any(axis=0)).astype(bool)
     z_support = np.asarray(H_Z[:, bridge_cols].any(axis=0)).astype(bool)
     merge_qubits = tuple(
@@ -845,7 +846,7 @@ def _stitch_to_joint_code_mixed(
     )
 
     H_X_out, H_Z_out, Y_stab, obs0_y_idx, x_left, z_left = apply_mixed_basis_merge(
-        H_X, H_Z, merge_qubits
+        H_X, H_Z, merge_qubits, adapter_cols=adapter_cols,
     )
 
     n = n_merged
