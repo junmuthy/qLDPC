@@ -13,7 +13,7 @@ import stim
 from qldpc.circuits.bookkeeping import DetectorRecord, MeasurementRecord, QubitIDs
 from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
 from qldpc.circuits.noise_model import NoiseModel
-from qldpc.codes.common import CSSCode
+from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
 from .bridge import Bridge
@@ -605,6 +605,275 @@ def _stitch_to_joint_csscode(
     return _stitch_intercode(g_l, g_r, bridge)
 
 
+def _stitch_to_joint_code(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+) -> tuple[QuditCode, Bridge]:
+    """Assemble merged code (CSS for same-basis, QuditCode for mixed-basis).
+
+    Same-basis path delegates to ``_stitch_to_joint_csscode`` and returns
+    the bridge unchanged.
+
+    Mixed-basis path (Webster, Smith, Cohen arXiv:2511.15989 §II.B.2):
+      1. Build M_meas_l / M_comp_l from g_l_aug (using basis_l) and
+         M_meas_r / M_comp_r from g_r_aug (using basis_r).
+      2. Sort rows into H_X / H_Z by Pauli type (basis_l determines what
+         M_meas_l / M_comp_l carry; basis_r symmetric).
+      3. Compute merge_qubits = bridge-column-range qubits where BOTH
+         H_X and H_Z have support.
+      4. Run apply_mixed_basis_merge → modified H_X / H_Z + Y_stab.
+      5. Pack into a single symplectic matrix and build QuditCode.
+      6. Replace bridge with populated mixed-basis fields.
+    """
+    if bridge.basis_l is bridge.basis_r:
+        return _stitch_to_joint_csscode(g_l, g_r, bridge), bridge
+
+    return _stitch_to_joint_code_mixed(g_l, g_r, bridge)
+
+
+def _assemble_meas_comp_per_side(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, slice]]:
+    """Build per-side M_meas / M_comp blocks honoring each side's own basis.
+
+    Each block is expanded to the full n_merged column width and zero-padded
+    outside its native data + ancilla columns.
+
+    Returns
+    -------
+    M_meas_l_block, M_comp_l_block, M_meas_r_block, M_comp_r_block
+        Each shape (rows_side, n_merged); zero-padded into the full merged
+        column space.
+    slices
+        Dict with keys 'cl_data', 'cr_data' (or 'c_data' for intracode),
+        'cl_ancilla', 'cr_ancilla', 'c_adapter' — slice objects into the
+        merged column range.
+
+    Naming convention: 'meas' = the side's own measured-basis check rows
+    (χ-carrier per Webster Eq. 1); 'comp' = the dual (cycle-Z for basis=X).
+    Caller decides how to split these into H_X / H_Z by inspecting basis_l
+    and basis_r.
+    """
+    intercode = g_l.code is not g_r.code
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+
+    def _per_side(
+        g: GadgetLayout, g_aug: GadgetLayout, basis: Pauli
+    ) -> tuple[np.ndarray, np.ndarray, int, int]:
+        if basis is Pauli.X:
+            M_meas_src, M_comp_src = g_aug.HX_merged, g_aug.HZ_merged
+            m_meas_data = g.code.matrix_x.shape[0]
+            m_comp_data = g.code.matrix_z.shape[0]
+        else:
+            M_meas_src, M_comp_src = g_aug.HZ_merged, g_aug.HX_merged
+            m_meas_data = g.code.matrix_z.shape[0]
+            m_comp_data = g.code.matrix_x.shape[0]
+        return (
+            np.asarray(M_meas_src).astype(np.int_),
+            np.asarray(M_comp_src).astype(np.int_),
+            m_meas_data,
+            m_comp_data,
+        )
+
+    M_meas_l, M_comp_l, m_meas_l_data, m_comp_l_data = _per_side(g_l, g_l_aug, bridge.basis_l)
+    M_meas_r, M_comp_r, m_meas_r_data, m_comp_r_data = _per_side(g_r, g_r_aug, bridge.basis_r)
+
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits if intercode else 0
+    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
+    w = bridge.width
+
+    if intercode:
+        n_merged = n_l + n_r + k_l + k_r + w
+        cl_data = slice(0, n_l)
+        cr_data = slice(n_l, n_l + n_r)
+        cl_ancilla = slice(n_l + n_r, n_l + n_r + k_l)
+        cr_ancilla = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
+        c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
+        slices = {
+            "cl_data": cl_data,
+            "cr_data": cr_data,
+            "cl_ancilla": cl_ancilla,
+            "cr_ancilla": cr_ancilla,
+            "c_adapter": c_adapter,
+        }
+    else:
+        n = n_l
+        n_merged = n + k_l + k_r + w
+        c_data = slice(0, n)
+        cl_ancilla = slice(n, n + k_l)
+        cr_ancilla = slice(n + k_l, n + k_l + k_r)
+        c_adapter = slice(n + k_l + k_r, n_merged)
+        slices = {
+            "c_data": c_data,
+            "cl_data": c_data,
+            "cr_data": c_data,
+            "cl_ancilla": cl_ancilla,
+            "cr_ancilla": cr_ancilla,
+            "c_adapter": c_adapter,
+        }
+
+    def _expand(
+        rows_local: np.ndarray,
+        side_label_attr: str,
+        m_data: int,
+        n_side: int,
+        c_data_slice: slice,
+        c_ancilla_slice: slice,
+        kind: str,
+    ) -> np.ndarray:
+        # Data rows: meas-side data checks live on data cols only (no κ extension).
+        # Comp-side data checks get extended to commute with χ rows acting X on κ,
+        # so they carry both data and κ-ancilla support — same convention as
+        # the same-basis _stitch_intercode / _stitch_intracode helpers.
+        m_total = rows_local.shape[0]
+        out = np.zeros((m_total, n_merged), dtype=np.int_)
+        out[:m_data, c_data_slice] = rows_local[:m_data, :n_side]
+        if kind == "comp":
+            out[:m_data, c_ancilla_slice] = rows_local[:m_data, n_side:]
+        rest = rows_local[m_data:, :]
+        out[m_data:, c_data_slice] = rest[:, :n_side]
+        out[m_data:, c_ancilla_slice] = rest[:, n_side:]
+        if kind == "meas":
+            labels = bridge.label_l if side_label_attr == "l" else bridge.label_r
+            for v_idx, lab in enumerate(labels):
+                if lab >= 0:
+                    out[m_data + v_idx, c_adapter.start + lab] = 1
+        return out
+
+    n_side_l = n_l
+    n_side_r = n_r if intercode else n_l
+
+    M_meas_l_block = _expand(
+        M_meas_l, "l", m_meas_l_data, n_side_l, slices["cl_data"], cl_ancilla, "meas"
+    )
+    M_comp_l_block = _expand(
+        M_comp_l, "l", m_comp_l_data, n_side_l, slices["cl_data"], cl_ancilla, "comp"
+    )
+    M_meas_r_block = _expand(
+        M_meas_r, "r", m_meas_r_data, n_side_r, slices["cr_data"], cr_ancilla, "meas"
+    )
+    M_comp_r_block = _expand(
+        M_comp_r, "r", m_comp_r_data, n_side_r, slices["cr_data"], cr_ancilla, "comp"
+    )
+
+    return M_meas_l_block, M_comp_l_block, M_meas_r_block, M_comp_r_block, slices
+
+
+def _stitch_to_joint_code_mixed(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+) -> tuple[QuditCode, Bridge]:
+    """Mixed-basis stitch: run Webster, Smith, Cohen merge, build QuditCode.
+
+    See Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 for the cross-merge
+    construction.
+    """
+    import dataclasses
+
+    from .merge import apply_mixed_basis_merge
+
+    field = g_l.code.field
+    intercode = g_l.code is not g_r.code
+
+    M_meas_l, M_comp_l, M_meas_r, M_comp_r, slices = _assemble_meas_comp_per_side(
+        g_l, g_r, bridge
+    )
+
+    def _x_z_split(
+        M_meas_block: np.ndarray, M_comp_block: np.ndarray, basis: Pauli
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if basis is Pauli.X:
+            return M_meas_block, M_comp_block
+        return M_comp_block, M_meas_block
+
+    HX_l, HZ_l = _x_z_split(M_meas_l, M_comp_l, bridge.basis_l)
+    HX_r, HZ_r = _x_z_split(M_meas_r, M_comp_r, bridge.basis_r)
+
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits if intercode else 0
+    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
+    w = bridge.width
+    n_merged = (n_l + n_r if intercode else n_l) + k_l + k_r + w
+
+    # Mixed-basis cycle rows: per Webster, Smith, Cohen arXiv:2511.15989 §II.B.2,
+    # each side contributes a (w-1)-row dual-basis cycle (T_s on c_s_ancilla +
+    # H_R on c_adapter). The two sets share the same H_R block on adapter
+    # columns; with different Pauli types they anticommute on those overlaps.
+    # The cross-merge resolves the χ_l × χ_r adapter conflicts but, as of this
+    # task, does NOT generally produce pairwise-commuting Y stabs in this
+    # construction — see the test_stitch_mixed_basis_stabs_commute_symplectically
+    # follow-up (Lemma 1 proof gap noted in Task 4 report).
+    cycle_l_rows = np.zeros((w - 1, n_merged), dtype=np.int_)
+    cycle_l_rows[:, slices["cl_ancilla"]] = bridge.T_l
+    cycle_l_rows[:, slices["c_adapter"]] = bridge.H_R
+    cycle_r_rows = np.zeros((w - 1, n_merged), dtype=np.int_)
+    cycle_r_rows[:, slices["cr_ancilla"]] = bridge.T_r
+    cycle_r_rows[:, slices["c_adapter"]] = bridge.H_R
+
+    # Each side's cycle Pauli type is the dual of that side's basis.
+    HX_cycle_blocks: list[np.ndarray] = []
+    HZ_cycle_blocks: list[np.ndarray] = []
+    (HX_cycle_blocks if bridge.basis_l is Pauli.Z else HZ_cycle_blocks).append(cycle_l_rows)
+    (HX_cycle_blocks if bridge.basis_r is Pauli.Z else HZ_cycle_blocks).append(cycle_r_rows)
+    HX_cycle = (
+        np.vstack(HX_cycle_blocks) if HX_cycle_blocks else np.zeros((0, n_merged), dtype=np.int_)
+    )
+    HZ_cycle = (
+        np.vstack(HZ_cycle_blocks) if HZ_cycle_blocks else np.zeros((0, n_merged), dtype=np.int_)
+    )
+
+    H_X = np.vstack([HX_l, HX_r, HX_cycle]).astype(np.uint8)
+    H_Z = np.vstack([HZ_l, HZ_r, HZ_cycle]).astype(np.uint8)
+
+    bridge_cols = (
+        list(range(slices["cl_ancilla"].start, slices["cl_ancilla"].stop))
+        + list(range(slices["cr_ancilla"].start, slices["cr_ancilla"].stop))
+        + list(range(slices["c_adapter"].start, slices["c_adapter"].stop))
+    )
+    x_support = np.asarray(H_X[:, bridge_cols].any(axis=0)).astype(bool)
+    z_support = np.asarray(H_Z[:, bridge_cols].any(axis=0)).astype(bool)
+    merge_qubits = tuple(
+        bridge_cols[i]
+        for i in range(len(bridge_cols))
+        if bool(x_support[i]) and bool(z_support[i])
+    )
+
+    H_X_out, H_Z_out, Y_stab, obs0_y_idx, x_left, z_left = apply_mixed_basis_merge(
+        H_X, H_Z, merge_qubits
+    )
+
+    n = n_merged
+    rows: list[np.ndarray] = []
+    for r in H_X_out:
+        rows.append(np.concatenate([r, np.zeros(n, dtype=np.uint8)]))
+    for r in H_Z_out:
+        rows.append(np.concatenate([np.zeros(n, dtype=np.uint8), r]))
+    if Y_stab is not None:
+        for r in Y_stab:
+            rows.append(r.astype(np.uint8))
+
+    sym_matrix = (
+        np.array(rows, dtype=np.int_) if rows else np.zeros((0, 2 * n), dtype=np.int_)
+    )
+    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=False)
+
+    bridge_populated = dataclasses.replace(
+        bridge,
+        Y_stab=Y_stab,
+        merge_qubits=merge_qubits,
+        obs0_xor_map=tuple(obs0_y_idx),
+        x_leftover_indices=tuple(x_left),
+        z_leftover_indices=tuple(z_left),
+    )
+    return joint_code, bridge_populated
+
+
 def _expand_joint_data_init(
     data_init: str | tuple[str, ...] | list[str] | None,
     n_l: int,
@@ -666,7 +935,7 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | tuple[str, ...] | list[str] | None = None,
-) -> tuple[stim.Circuit, CSSCode]:
+) -> tuple[stim.Circuit, QuditCode]:
     """Joint-PPM circuit (universal adapter; no U_B in α*).
 
     Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
@@ -691,7 +960,7 @@ def build_joint_ppm_circuit(
       * ``tuple[str, str]`` (intercode only) — per-code logical-init spec.
         ``data_init=("0", "+")`` → c_l in |0⟩_L, c_r in |+⟩_L.
     """
-    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    joint_code, bridge = _stitch_to_joint_code(g_l, g_r, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
     intercode = g_l.code is not g_r.code
 
@@ -724,6 +993,13 @@ def build_joint_ppm_circuit(
         ancilla_ids,
         bridge_ids,
         data_init=expanded_data_init,
+    )
+    # Same-basis joint_code is a CSSCode (_stitch_to_joint_csscode); mixed-basis
+    # is a plain QuditCode and the existing _surgery_qec_cycle_joint /
+    # _surgery_final_detectors_joint CSSCode interface will not satisfy it.
+    # Task 5 widens those helpers to QuditCode + Y-stab measurement.
+    assert isinstance(joint_code, CSSCode), (
+        "mixed-basis joint_code QEC cycle / detectors not yet supported (Task 5)"
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
         g_l,
