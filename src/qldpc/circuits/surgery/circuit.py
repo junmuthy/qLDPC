@@ -801,35 +801,15 @@ def _stitch_to_joint_code_mixed(
     w = bridge.width
     n_merged = (n_l + n_r if intercode else n_l) + k_l + k_r + w
 
-    # Mixed-basis cycle rows: per Webster, Smith, Cohen arXiv:2511.15989 §II.B.2,
-    # each side contributes a (w-1)-row dual-basis cycle (T_s on c_s_ancilla +
-    # H_R on c_adapter). The two sets share the same H_R block on adapter
-    # columns; with different Pauli types they anticommute on those overlaps.
-    # The cross-merge resolves the χ_l × χ_r adapter conflicts but, as of this
-    # task, does NOT generally produce pairwise-commuting Y stabs in this
-    # construction — see the test_stitch_mixed_basis_stabs_commute_symplectically
-    # follow-up (Lemma 1 proof gap noted in Task 4 report).
-    cycle_l_rows = np.zeros((w - 1, n_merged), dtype=np.int_)
-    cycle_l_rows[:, slices["cl_ancilla"]] = bridge.T_l
-    cycle_l_rows[:, slices["c_adapter"]] = bridge.H_R
-    cycle_r_rows = np.zeros((w - 1, n_merged), dtype=np.int_)
-    cycle_r_rows[:, slices["cr_ancilla"]] = bridge.T_r
-    cycle_r_rows[:, slices["c_adapter"]] = bridge.H_R
-
-    # Each side's cycle Pauli type is the dual of that side's basis.
-    HX_cycle_blocks: list[np.ndarray] = []
-    HZ_cycle_blocks: list[np.ndarray] = []
-    (HX_cycle_blocks if bridge.basis_l is Pauli.Z else HZ_cycle_blocks).append(cycle_l_rows)
-    (HX_cycle_blocks if bridge.basis_r is Pauli.Z else HZ_cycle_blocks).append(cycle_r_rows)
-    HX_cycle = (
-        np.vstack(HX_cycle_blocks) if HX_cycle_blocks else np.zeros((0, n_merged), dtype=np.int_)
-    )
-    HZ_cycle = (
-        np.vstack(HZ_cycle_blocks) if HZ_cycle_blocks else np.zeros((0, n_merged), dtype=np.int_)
-    )
-
-    H_X = np.vstack([HX_l, HX_r, HX_cycle]).astype(np.uint8)
-    H_Z = np.vstack([HZ_l, HZ_r, HZ_cycle]).astype(np.uint8)
+    # Webster–Smith–Cohen arXiv:2511.15989 §II.B.2: mixed-basis joint PPM
+    # does NOT use SkipTree rep-code cycle rows. The Y_q stabilizers from
+    # cross-merging χ_l + χ_r already encode the joint product
+    # ∏ Y_q = ∏ χ_l · ∏ χ_r = Z̄_l ⊗ X̄_r and fix all w adapter qubits.
+    # Adding same-basis-style cycle rows on both duals (cycle_l Z-type +
+    # cycle_r X-type) introduces ⟨cycle_l[c1], cycle_r[c2]⟩_s = (H_R H_R^T)[c1, c2]
+    # ≠ 0 anti-commutation, breaking the stabilizer property.
+    H_X = np.vstack([HX_l, HX_r]).astype(np.uint8)
+    H_Z = np.vstack([HZ_l, HZ_r]).astype(np.uint8)
 
     # Webster–Smith–Cohen arXiv:2511.15989 §II.B.2: cross-merge happens on the
     # adapter columns only (the χ-style seed-operator rows have single-{q}

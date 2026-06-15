@@ -126,26 +126,6 @@ def test_stitch_mixed_basis_populates_bridge_fields() -> None:
     assert len(bridge_populated.obs0_xor_map) == bridge_populated.Y_stab.shape[0]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Cross-side cycle-row anticommutation. After fixing merge.py with "
-        "single-adapter-col pivot selection, the Y rows pairwise commute "
-        "(Lemma 1a verified by merge_test.py). However, in the current bridge "
-        "construction both sides contribute cycle rows that share the same "
-        "H_R block on c_adapter but carry DUAL Pauli types: cycle_l acts as Z "
-        "(dual of basis_l=X), cycle_r acts as X (dual of basis_r=Z). For "
-        "rows c1≠c2 of H_R that overlap on some adapter col q, "
-        "⟨cycle_l[c1], cycle_r[c2]⟩_s = (H_R · H_R^T)[c1, c2] mod 2 ≠ 0. "
-        "For the Steane example, H_R = [[1,1,0],[0,1,1]] gives "
-        "H_R·H_R^T mod 2 = [[0,1],[1,0]] — two anti-commuting pairs. "
-        "This is upstream of merge.py and requires reworking the mixed-basis "
-        "cycle-row construction (likely: combine cycle_l and cycle_r into a "
-        "single Y-type cycle block sharing one H_R, or use Gaussian "
-        "elimination on H_R so it has commuting cross-rows). Deferred to a "
-        "follow-up task — Lemma 1b (cycle commutation) gap noted in this "
-        "task's final report."
-    )
-)
 def test_stitch_mixed_basis_stabs_commute_symplectically() -> None:
     """Lemma 1: merged-code stabilizers pairwise commute under symplectic inner product."""
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -167,6 +147,48 @@ def test_stitch_mixed_basis_stabs_commute_symplectically() -> None:
     # ⟨A,B⟩_s = A_x · B_z + A_z · B_x  ; assemble and check
     comm = (Hx @ Hz.T + Hz @ Hx.T) % 2
     assert not comm.any(), "merged-code stabilizers anticommute"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Mixed-basis intercode joint code retains extra logical dofs beyond "
+        "k_l + k_r - 1. After dropping SkipTree cycle rows per "
+        "Webster–Smith–Cohen arXiv:2511.15989 §II.B.2 (fixing Lemma 1 "
+        "commutation), the joint code has dim = 6 instead of 1 for "
+        "Steane × Steane (X, Z). Even pre-fix (with anticommuting cycle "
+        "rows present) dim was 4 — so this is not just about missing cycle "
+        "rows but a deeper structural issue with the per-side gauge / "
+        "κ-augmentation accounting: matrix_x of g_r_aug (basis=Z) carries "
+        "κ-extension that isn't matched by analogous constraints on the "
+        "left side (basis=X gives r_l=1 gauge row, basis=Z gives r_r=0). "
+        "The intracode (g_l.code is g_r.code) case correctly gives dim = 1 "
+        "(verified separately) because shared data avoids this asymmetric "
+        "augmentation. Resolution requires either (a) adding extra "
+        "cross-side joint stabilizers (e.g. Z̄_l ⊗ X̄_r as an explicit "
+        "stab row), or (b) re-deriving the κ-ancilla extension for the "
+        "mixed-basis case so right-side matrix_x rows are gauge-compatible. "
+        "Tracked as a follow-up; Lemma 1 (commutation) is the gating "
+        "correctness requirement and now passes."
+    )
+)
+def test_stitch_mixed_basis_dimension_equals_k_l_plus_k_r_minus_one() -> None:
+    """Mixed-basis joint code dim = k_l + k_r - 1 (one logical fixed by joint Z̄_l X̄_r)."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_code
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    x = np.asarray(code_l.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    z = np.asarray(code_r.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, x, basis=Pauli.X)
+    g_r = build_gadget(code_r, z, basis=Pauli.Z)
+    bridge = build_bridge(g_l, g_r)
+    joint_code, _ = _stitch_to_joint_code(g_l, g_r, bridge)
+    expected_dim = code_l.dimension + code_r.dimension - 1
+    assert joint_code.dimension == expected_dim, (
+        f"expected dim {expected_dim}, got {joint_code.dimension}"
+    )
 
 
 def test_stitch_same_basis_still_returns_csscode() -> None:
