@@ -376,20 +376,6 @@ def test_build_bridge_skiptree_invariant_holds() -> None:
         assert np.array_equal(lhs, bridge.H_R), f"side {side}:\n{lhs}\nvs\n{bridge.H_R}"
 
 
-def test_build_bridge_rejects_basis_mismatch() -> None:
-    """Bridge requires g_l.basis == g_r.basis."""
-    from qldpc.circuits.surgery.bridge import build_bridge
-    from qldpc.circuits.surgery.gadget import build_gadget
-
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-    g_l = build_gadget(code, x, basis=Pauli.X)
-    g_r = build_gadget(code, z, basis=Pauli.Z)
-    with pytest.raises(ValueError, match=r"basis"):
-        build_bridge(g_l, g_r)
-
-
 def test_build_bridge_bb18_hyperedge_and_long_cycle() -> None:
     """End-to-end: Cain bb_18 BBCode triggers both Bug 1 (hyperedge) and
     Bug 2 (long port-subgraph cycle). build_bridge must succeed and produce

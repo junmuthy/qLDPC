@@ -386,25 +386,32 @@ def build_bridge(
 
     Cain mapping: V_0^(l) → support^(l); F → incidence; extra_kappa → extra_ancilla.
 
+    When ``g_l.basis == g_r.basis``, returns a same-basis CSS bridge (legacy
+    behavior). When ``g_l.basis != g_r.basis``, returns a mixed-basis bridge
+    (basis_l ≠ basis_r) with mixed-basis fields (Y_stab, obs0_xor_map, ...)
+    left UNPOPULATED — the Webster–Smith–Cohen (arXiv:2511.15989 §II.B.2)
+    cross-merge populates them during ``_stitch_to_joint_code`` (see
+    circuits/surgery/circuit.py), at which point the resulting Bridge instance
+    has the merged-code data attached.
+
     See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
     7-step recipe. ``spanning_tree_root_s`` is the index INTO the port tuple of
     the SkipTree root vertex on side s.
 
     ``cellulate_max_len`` caps port-subgraph basis cycle length. When ``None``
     (default), it is set to ``max`` of the basis-side stabilizer row weights of
-    the two codes — cellulating tighter than that would force chords on natural
-    stabilizer-induced cycles; looser would leave basis cycles longer than any
-    original stabilizer and weaken the Swaroop Theorem 12 distance argument.
+    the two codes — each side measured against its own basis.
     """
-    if g_l.basis is not g_r.basis:
-        raise ValueError(
-            f"build_bridge requires g_l.basis == g_r.basis, got {g_l.basis!r} vs {g_r.basis!r}"
-        )
-    basis = g_l.basis
+    basis_l = g_l.basis
+    basis_r = g_r.basis
+    # Cellulation cap defaults to the worse-case basis-stabilizer weight across
+    # both sides, irrespective of mixed-basis. The cap shapes the rep-code cycle
+    # length in the merged code and is basis-agnostic for the structural distance
+    # argument (Swaroop Theorem 12). Use each side's native basis.
     if cellulate_max_len is None:
         cellulate_max_len = max(
-            _max_basis_stabilizer_weight(g_l.code, basis),
-            _max_basis_stabilizer_weight(g_r.code, basis),
+            _max_basis_stabilizer_weight(g_l.code, basis_l),
+            _max_basis_stabilizer_weight(g_r.code, basis_r),
         )
 
     # Step 1: auxiliary graphs
@@ -441,13 +448,10 @@ def build_bridge(
     extra_ancilla_l = _edges_to_incidence_extra(extras_l_edges, len(g_l.support))
     extra_ancilla_r = _edges_to_incidence_extra(extras_r_edges, len(g_r.support))
 
-    # Spec §2 lists step 7 last, but rebuilding the augmented gadgets here lets
-    # us thread g_l_aug.incidence as the column space for SkipTree (step 5). Reordering
-    # is safe: F_aug.shape[0] is determined by extra_ancilla_*, not by SkipTree.
     from .gadget import build_gadget_augmented
 
-    g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_ancilla_l, basis=basis)
-    g_r_aug = build_gadget_augmented(g_r.code, g_r.x, extra_ancilla_r, basis=basis)
+    g_l_aug = build_gadget_augmented(g_l.code, g_l.x, extra_ancilla_l, basis=basis_l)
+    g_r_aug = build_gadget_augmented(g_r.code, g_r.x, extra_ancilla_r, basis=basis_r)
 
     # Step 5: SkipTree on induced port subgraph; embed back into full F_aug rows
     T_l, label_l = _run_skiptree_on_port_subgraph(
@@ -465,8 +469,8 @@ def build_bridge(
 
     return Bridge(
         width=width,
-        basis_l=basis,
-        basis_r=basis,
+        basis_l=basis_l,
+        basis_r=basis_r,
         port_l=port_l,
         port_r=port_r,
         label_l=tuple(label_l),
@@ -478,4 +482,6 @@ def build_bridge(
         H_R=_canonical_H_R(width).astype(np.int_),
         g_l_aug=g_l_aug,
         g_r_aug=g_r_aug,
+        # Mixed-basis fields: populated by _stitch_to_joint_code when basis_l != basis_r.
+        # Left as defaults (None / ()) here for both same-basis and mixed-basis bridges.
     )
