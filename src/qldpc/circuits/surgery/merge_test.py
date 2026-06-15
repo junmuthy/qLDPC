@@ -199,6 +199,87 @@ def test_merge_iteration_order_deterministic_ascending() -> None:
     assert res_a[3] == res_b[3]
 
 
+def test_merge_leftover_indices_account_for_row_deletion() -> None:
+    """Regression: after a cross-merge deletes a row from H_X / H_Z, any
+    previously-tracked leftover row index must be (a) dropped if it equals
+    the deleted index, or (b) decremented if it sits above it.
+
+    Scenario A — drop:
+      q=0: X-only conflict at row 0 → x_leftover_set = {0}.
+      q=1: X+Z cross-merge whose X-pivot is also row 0 → row 0 deleted.
+      Expected: x_left == [] (the formerly-leftover row was consumed).
+
+    Scenario B — decrement:
+      q=0: X-only conflict at row 1 → x_leftover_set = {1}.
+      q=1: X+Z cross-merge whose X-pivot is row 0 → row 0 deleted.
+      Expected: x_left == [0], pointing to the surviving row that used to be
+      at index 1 in the pre-delete H_X.
+    """
+    # Scenario A: leftover index equals deleted index.
+    H_X_a = np.array(
+        [
+            [1, 1, 0],  # X at q0 and q1 (becomes pivot for both merges)
+            [0, 0, 1],  # untouched by either merge
+        ],
+        dtype=np.uint8,
+    )
+    H_Z_a = np.array(
+        [
+            [0, 1, 1],  # Z at q1 only (no q0)
+        ],
+        dtype=np.uint8,
+    )
+    H_X2, H_Z2, Y, _obs0, x_left, z_left = apply_mixed_basis_merge(
+        H_X_a, H_Z_a, (0, 1)
+    )
+    # Y row produced by the q=1 cross-merge.
+    assert Y is not None and Y.shape == (1, 6)
+    # Row 0 of H_X was consumed → only original row 1 survives at new index 0.
+    assert H_X2.shape == (1, 3)
+    assert np.array_equal(H_X2[0], np.array([0, 0, 1], dtype=np.uint8))
+    # Row 0 of H_Z was consumed → empty.
+    assert H_Z2.shape == (0, 3)
+    # Previously-leftover row 0 is gone; nothing left.
+    assert x_left == [], (
+        f"Scenario A: expected x_left=[], got {x_left}; stale index points at "
+        f"row content {H_X2[x_left[0]] if x_left else 'N/A'}"
+    )
+    assert z_left == []
+
+    # Scenario B: leftover index above deleted index → must decrement.
+    H_X_b = np.array(
+        [
+            [0, 1, 0],  # touches q1 only (becomes q=1 X-pivot, will be deleted)
+            [1, 0, 1],  # touches q0 only (becomes q=0 leftover at row index 1)
+        ],
+        dtype=np.uint8,
+    )
+    H_Z_b = np.array(
+        [
+            [0, 1, 1],  # touches q1, used as q=1 Z-pivot
+        ],
+        dtype=np.uint8,
+    )
+    H_X2, H_Z2, Y, _obs0, x_left, z_left = apply_mixed_basis_merge(
+        H_X_b, H_Z_b, (0, 1)
+    )
+    assert Y is not None and Y.shape == (1, 6)
+    # H_X row 0 deleted by cross-merge → surviving row (was index 1) at index 0.
+    assert H_X2.shape == (1, 3)
+    assert np.array_equal(H_X2[0], np.array([1, 0, 1], dtype=np.uint8))
+    # x_leftover should now point at new index 0 (the surviving X-leftover row).
+    assert x_left == [0], (
+        f"Scenario B: expected x_left=[0], got {x_left}; "
+        f"surviving H_X rows = {H_X2.tolist()}"
+    )
+    # Verify the row at the reported leftover index is actually the row that
+    # carried the q=0 X-leftover support — i.e. has support at q0.
+    assert H_X2[x_left[0], 0] == 1, (
+        "x_left index does not point at a row supporting q0 (the conflict qubit)"
+    )
+    assert z_left == []
+
+
 def test_merge_does_not_mutate_inputs() -> None:
     """Caller's H_X / H_Z arrays must be unchanged after apply_mixed_basis_merge."""
     H_X = np.array([[1, 1, 0]], dtype=np.uint8)

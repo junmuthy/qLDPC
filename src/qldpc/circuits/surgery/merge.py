@@ -27,10 +27,12 @@ def _merge_at_qubit(
             cross-merged).
         Y_row: symplectic row (length 2*n) if both X and Z conflicts present;
             else None.
-        leftover_x_idx / leftover_z_idx: index of the leftover row IN THE
-            ORIGINAL INPUT MATRICES (before deletion) — only meaningful for
-            tracking; consumed internally and not returned by
-            ``apply_mixed_basis_merge``.
+        leftover_x_idx / leftover_z_idx: index of the leftover (pivot) row in
+            the PRE-DELETION ``H_X`` / ``H_Z``. Always reported when a
+            conflict was present at qubit ``q`` — even when ``Y_row`` is
+            emitted and that row is then deleted. The caller needs the index
+            in the pre-deletion frame to maintain its own bookkeeping of
+            surviving leftover indices across successive ``np.delete`` calls.
     """
     n = H_X.shape[1]
     x_rows = np.flatnonzero(H_X[:, q])
@@ -55,9 +57,11 @@ def _merge_at_qubit(
         Y_row[:n] = H_X[leftover_x]
         Y_row[n:] = H_Z[leftover_z]
         # Remove both leftover rows; their product becomes the Y stabilizer.
+        # NOTE: ``leftover_x`` / ``leftover_z`` are intentionally NOT nulled —
+        # the caller must know which row indices were just deleted so it can
+        # shift its leftover-row bookkeeping accordingly.
         H_X = np.delete(H_X, leftover_x, axis=0)
         H_Z = np.delete(H_Z, leftover_z, axis=0)
-        leftover_x = leftover_z = None  # consumed
 
     return H_X, H_Z, Y_row, leftover_x, leftover_z
 
@@ -128,21 +132,25 @@ def apply_mixed_basis_merge(
         if Y_row is not None:
             obs0_y.append(len(Y_rows))
             Y_rows.append(Y_row)
-            # Cross-merged rows are removed entirely — drop them from leftover
-            # tracking. Higher-indexed survivors shift down by one on each delete.
+            # Cross-merged rows are removed entirely. ``lx`` / ``lz`` are the
+            # PRE-DELETION row indices that were just consumed. Update the
+            # tracked leftover sets to the post-deletion frame:
+            #   - drop any element equal to the deleted row
+            #   - decrement any element strictly greater than the deleted row
+            assert lx is not None and lz is not None
             assert Hx.shape[0] == Hx_before_rows - 1
             assert Hz.shape[0] == Hz_before_rows - 1
             new_x_leftover: set[int] = set()
             for old_idx in x_leftover_set:
                 if old_idx == lx:
-                    continue  # this row was the one consumed (won't trigger; lx already None here)
-                new_x_leftover.add(old_idx)
+                    continue
+                new_x_leftover.add(old_idx - 1 if old_idx > lx else old_idx)
             x_leftover_set = new_x_leftover
             new_z_leftover: set[int] = set()
             for old_idx in z_leftover_set:
                 if old_idx == lz:
                     continue
-                new_z_leftover.add(old_idx)
+                new_z_leftover.add(old_idx - 1 if old_idx > lz else old_idx)
             z_leftover_set = new_z_leftover
         else:
             if lx is not None:
