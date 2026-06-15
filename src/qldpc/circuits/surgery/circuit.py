@@ -610,21 +610,18 @@ def _stitch_to_joint_code(
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> tuple[QuditCode, Bridge]:
-    """Assemble merged code (CSS for same-basis, QuditCode for mixed-basis).
+    """Assemble merged code (CSSCode for same-basis, QuditCode subsystem for mixed-basis).
 
     Same-basis path delegates to ``_stitch_to_joint_csscode`` and returns
     the bridge unchanged.
 
-    Mixed-basis path (Webster, Smith, Cohen arXiv:2511.15989 §II.B.2):
-      1. Build M_meas_l / M_comp_l from g_l_aug (using basis_l) and
-         M_meas_r / M_comp_r from g_r_aug (using basis_r).
-      2. Sort rows into H_X / H_Z by Pauli type (basis_l determines what
-         M_meas_l / M_comp_l carry; basis_r symmetric).
-      3. Compute merge_qubits = bridge-column-range qubits where BOTH
-         H_X and H_Z have support.
-      4. Run apply_mixed_basis_merge → modified H_X / H_Z + Y_stab.
-      5. Pack into a single symplectic matrix and build QuditCode.
-      6. Replace bridge with populated mixed-basis fields.
+    Mixed-basis path (Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2
+    Theorem 20 proof; Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5)
+    delegates to ``_stitch_to_joint_code_mixed`` which assembles a SUBSYSTEM
+    code: the per-side χ_l (basis_l-type) and χ_r (basis_r-type) seed-operator
+    rows remain as separate gauge generators whose pairwise anti-commutation
+    on shared adapter qubits is structural and expected. The stabilizer
+    center is computed automatically by ``QuditCode(is_subsystem_code=True)``.
     """
     if bridge.basis_l is bridge.basis_r:
         return _stitch_to_joint_csscode(g_l, g_r, bridge), bridge
@@ -768,14 +765,49 @@ def _stitch_to_joint_code_mixed(
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> tuple[QuditCode, Bridge]:
-    """Mixed-basis stitch: run Webster, Smith, Cohen merge, build QuditCode.
+    """Mixed-basis stitch: assemble subsystem code per Cross et al. Theorem 20.
 
-    See Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 for the cross-merge
-    construction.
+    The merged code for an inter-code mixed-basis joint Pauli measurement
+    (e.g. X̄_l ⊗ Z̄_r) is a SUBSYSTEM code, not a stabilizer code:
+
+      * Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2 (proof of
+        Theorem 20) derives the dimension count via gauge generators that
+        anti-commute on the shared bridge qubits.
+      * Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5 specializes the
+        same construction to the lattice-surgery setting we implement here.
+
+    χ_l (the basis_l-type seed-operator rows) and χ_r (basis_r-type)
+    REMAIN as separate gauge operators — their pairwise anti-commutation
+    on shared adapter qubits is structural and expected. The actual
+    stabilizer group is the CENTER of the gauge group; qLDPC computes it
+    automatically via ``QuditCode(..., is_subsystem_code=True)`` and the
+    Lemma 1 commutation test is REMOVED from the test suite (subsystem
+    gauges by definition need not commute).
+
+    Construction (inter-code Steane × Steane, k_l = k_r = 1, |B| = 3):
+
+      1. Per-side blocks from ``_assemble_meas_comp_per_side``: HX_l, HZ_l
+         (basis_l determines which is the meas-side χ-carrier), and HX_r,
+         HZ_r symmetrically.
+      2. Same-basis-style cycle rows on BOTH duals: cycle_l of comp_l-type
+         with support T_l on cl_ancilla + H_R on adapter; cycle_r of
+         comp_r-type symmetric. These anti-commute pairwise on the adapter
+         (⟨cycle_l, cycle_r⟩_s = (H_R H_R^T)[i, j]) — fine in a subsystem
+         code.
+      3. |B| = w "bridge gauge" rows, one per adapter column q: pure single-
+         qubit X on adapter[q]. These complete the gauge group: without
+         them the construction has dim = k_l + k_r + |B| - 2; with them
+         the |B| adapter qubits' contribution is cancelled and dim drops
+         to k_l + k_r - 1 (matches Cross et al. Theorem 20 dimension
+         analysis).
+
+    The "+1 q_1 connector" check from Cross et al. Appendix A.2 turns out
+    NOT to be needed for the cases we tested (Steane × Steane gives dim = 1
+    without it). If a future code shows dim too high, add a mixed-Pauli
+    connector row (Z on κ_l[0], X on κ_r[0]); empirically the bridge
+    gauges absorb the needed final dim reduction on their own.
     """
     import dataclasses
-
-    from .merge import apply_mixed_basis_merge
 
     field = g_l.code.field
     intercode = g_l.code is not g_r.code
@@ -801,56 +833,71 @@ def _stitch_to_joint_code_mixed(
     w = bridge.width
     n_merged = (n_l + n_r if intercode else n_l) + k_l + k_r + w
 
-    # Webster–Smith–Cohen arXiv:2511.15989 §II.B.2: mixed-basis joint PPM
-    # does NOT use SkipTree rep-code cycle rows. The Y_q stabilizers from
-    # cross-merging χ_l + χ_r already encode the joint product
-    # ∏ Y_q = ∏ χ_l · ∏ χ_r = Z̄_l ⊗ X̄_r and fix all w adapter qubits.
-    # Adding same-basis-style cycle rows on both duals (cycle_l Z-type +
-    # cycle_r X-type) introduces ⟨cycle_l[c1], cycle_r[c2]⟩_s = (H_R H_R^T)[c1, c2]
-    # ≠ 0 anti-commutation, breaking the stabilizer property.
-    H_X = np.vstack([HX_l, HX_r]).astype(np.uint8)
-    H_Z = np.vstack([HZ_l, HZ_r]).astype(np.uint8)
+    cl_ancilla = slices["cl_ancilla"]
+    cr_ancilla = slices["cr_ancilla"]
+    c_adapter = slices["c_adapter"]
 
-    # Webster–Smith–Cohen arXiv:2511.15989 §II.B.2: cross-merge happens on the
-    # adapter columns only (the χ-style seed-operator rows have single-{q}
-    # adapter-col support by construction; κ_l / κ_r columns play no role in
-    # the cross-merge pivot selection).
-    adapter_cols = tuple(range(slices["c_adapter"].start, slices["c_adapter"].stop))
-    bridge_cols = list(adapter_cols)
-    x_support = np.asarray(H_X[:, bridge_cols].any(axis=0)).astype(bool)
-    z_support = np.asarray(H_Z[:, bridge_cols].any(axis=0)).astype(bool)
-    merge_qubits = tuple(
-        bridge_cols[i]
-        for i in range(len(bridge_cols))
-        if bool(x_support[i]) and bool(z_support[i])
-    )
+    # Cycle rows on both duals. cycle_l acts in the basis dual to basis_l
+    # (e.g. basis_l=X → cycle_l is Z-type), cycle_r symmetric. Both carry
+    # T_s on their side's κ ancilla and H_R on the adapter.
+    cycle_l = np.zeros((bridge.T_l.shape[0], n_merged), dtype=np.int_)
+    cycle_l[:, cl_ancilla] = bridge.T_l
+    cycle_l[:, c_adapter] = bridge.H_R
 
-    H_X_out, H_Z_out, Y_stab, obs0_y_idx, x_left, z_left = apply_mixed_basis_merge(
-        H_X, H_Z, merge_qubits, adapter_cols=adapter_cols,
-    )
+    cycle_r = np.zeros((bridge.T_r.shape[0], n_merged), dtype=np.int_)
+    cycle_r[:, cr_ancilla] = bridge.T_r
+    cycle_r[:, c_adapter] = bridge.H_R
 
-    n = n_merged
-    rows: list[np.ndarray] = []
-    for r in H_X_out:
-        rows.append(np.concatenate([r, np.zeros(n, dtype=np.uint8)]))
-    for r in H_Z_out:
-        rows.append(np.concatenate([np.zeros(n, dtype=np.uint8), r]))
-    if Y_stab is not None:
-        for r in Y_stab:
-            rows.append(r.astype(np.uint8))
+    # Per-side X-rows and Z-rows: HX_{l,r} go in the X-row block, HZ_{l,r}
+    # in the Z-row block. cycle_l is the dual of basis_l → opposite Pauli
+    # type from HX_l; same for cycle_r.
+    x_rows: list[np.ndarray] = list(HX_l.astype(np.int_)) + list(HX_r.astype(np.int_))
+    z_rows: list[np.ndarray] = list(HZ_l.astype(np.int_)) + list(HZ_r.astype(np.int_))
+    if bridge.basis_l is Pauli.X:
+        z_rows.extend(cycle_l.astype(np.int_))
+    else:
+        x_rows.extend(cycle_l.astype(np.int_))
+    if bridge.basis_r is Pauli.X:
+        z_rows.extend(cycle_r.astype(np.int_))
+    else:
+        x_rows.extend(cycle_r.astype(np.int_))
+
+    # Pack X-only and Z-only blocks into symplectic form.
+    rows_sym: list[np.ndarray] = []
+    for r in x_rows:
+        rows_sym.append(np.concatenate([r, np.zeros(n_merged, dtype=np.int_)]))
+    for r in z_rows:
+        rows_sym.append(np.concatenate([np.zeros(n_merged, dtype=np.int_), r]))
+
+    # |B| = w bridge-gauge rows: pure single-qubit X on adapter[q].
+    # These cancel the |B| adapter-qubit dimension contribution; without
+    # them dim is k_l + k_r + |B| - 2.
+    for q in range(w):
+        x_part = np.zeros(n_merged, dtype=np.int_)
+        z_part = np.zeros(n_merged, dtype=np.int_)
+        x_part[c_adapter.start + q] = 1
+        rows_sym.append(np.concatenate([x_part, z_part]))
 
     sym_matrix = (
-        np.array(rows, dtype=np.int_) if rows else np.zeros((0, 2 * n), dtype=np.int_)
+        np.array(rows_sym, dtype=np.int_)
+        if rows_sym
+        else np.zeros((0, 2 * n_merged), dtype=np.int_)
     )
-    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=False)
+    # Subsystem code: gauge generators may anti-commute (Cross et al.
+    # arXiv:2407.18393 Theorem 20). QuditCode computes the stabilizer
+    # center automatically.
+    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=True)
 
+    # Record the |B| + |cycles| gauge-extra rows for downstream pipeline
+    # introspection; Y_stab is unused for the subsystem-code construction.
+    gauge_extra = sym_matrix[len(x_rows) + len(z_rows):]
     bridge_populated = dataclasses.replace(
         bridge,
-        Y_stab=Y_stab,
-        merge_qubits=merge_qubits,
-        obs0_xor_map=tuple(obs0_y_idx),
-        x_leftover_indices=tuple(x_left),
-        z_leftover_indices=tuple(z_left),
+        Y_stab=gauge_extra if gauge_extra.size else None,
+        merge_qubits=tuple(range(c_adapter.start, c_adapter.stop)),
+        obs0_xor_map=(),
+        x_leftover_indices=(),
+        z_leftover_indices=(),
     )
     return joint_code, bridge_populated
 
