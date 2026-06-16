@@ -1383,9 +1383,68 @@ def _build_joint_ppm_circuit_mixed_basis(
         data_init_r=spec_r,
     )
 
-    # Multi-round QEC via EdgeColoring on the virtual CSS subset.
+    # Multi-round QEC via *split* EdgeColoring on the virtual CSS subset.
+    #
+    # IMPORTANT (mixed-basis determinism). A naive call to
+    # ``EdgeColoring().get_circuit(virtual_cssc, qubit_ids)`` initializes
+    # ALL ancillas in |+⟩ at the start of the round, fires the X-stab CX
+    # subgraph, then the Z-stab CZ subgraph, and finally measures ALL
+    # ancillas in X-basis. Because all X-ancillas remain in superposition
+    # while the Z-stab CZ gates fire, the X-CX gates entangle the data
+    # in a way that can rotate the adapter qubit's Z eigenvalue before
+    # the Z-stab ancillas record it. The result is that χ_r outcomes
+    # become non-deterministic shot-to-shot whenever χ_l shares an
+    # adapter qubit with χ_r — the canonical failure mode noted in the
+    # Tier 1 design docstring.
+    #
+    # Per Cohen, Kim, Bartlett, Brown arXiv:2110.10794 §II.B.2 (mixed-
+    # basis joint PPM) and Cross, He, Rall, Yoder arXiv:2407.18393
+    # Theorem 20 (subsystem-code construction), the X-type and Z-type
+    # gauge measurements must be scheduled in SEPARATE non-overlapping
+    # circuit phases. We split the per-round circuit into:
+    #   • X-phase: RX(X-ancillas) → CX gates → MX(X-ancillas)
+    #   • Z-phase: RX(Z-ancillas) → CZ gates → MX(Z-ancillas)
+    # X-ancillas collapse before Z-CZ gates fire, so the data is in a
+    # definite X-stabilizer eigenstate when the Z-phase starts. With
+    # this schedule the individual χ_l (X-type) and χ_r (Z-type) gauge
+    # measurements become deterministic in the subsystem-code sense.
+    qubit_ids_x = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_x)
+    qubit_ids_x.checks_x = qubit_ids.checks_x
+    qubit_ids_z = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_z)
+    qubit_ids_z.checks_z = qubit_ids.checks_z
+
+    field = joint_code.field
+    n_qudits = joint_code.num_qudits
+    HX_only = _HX if _HX.shape[0] else np.zeros((0, n_qudits), dtype=np.uint8)
+    HZ_only = _HZ if _HZ.shape[0] else np.zeros((0, n_qudits), dtype=np.uint8)
+    virtual_cssc_X = CSSCode(
+        field(HX_only),
+        field(np.zeros((0, n_qudits), dtype=np.uint8)),
+        is_subsystem_code=False,
+    )
+    virtual_cssc_Z = CSSCode(
+        field(np.zeros((0, n_qudits), dtype=np.uint8)),
+        field(HZ_only),
+        is_subsystem_code=False,
+    )
+
     strategy = EdgeColoring()
-    one_round, round_measurement_record = strategy.get_circuit(virtual_cssc, qubit_ids)
+    if HX_only.shape[0]:
+        x_phase_circuit, x_phase_record = strategy.get_circuit(virtual_cssc_X, qubit_ids_x)
+    else:
+        x_phase_circuit, x_phase_record = stim.Circuit(), MeasurementRecord()
+    if HZ_only.shape[0]:
+        z_phase_circuit, z_phase_record = strategy.get_circuit(virtual_cssc_Z, qubit_ids_z)
+    else:
+        z_phase_circuit, z_phase_record = stim.Circuit(), MeasurementRecord()
+
+    one_round = stim.Circuit()
+    one_round += x_phase_circuit
+    one_round += z_phase_circuit
+    round_measurement_record = MeasurementRecord()
+    round_measurement_record.append(x_phase_record)
+    round_measurement_record.append(z_phase_record)
+
     measurement_record = MeasurementRecord()
 
     # Determine which check IDs belong to rows in the algebraic stabilizer
@@ -1515,37 +1574,43 @@ def _build_joint_ppm_circuit_mixed_basis(
     bridge_gauge_orig = x_row_idx[-w:] if w else []
     bridge_gauge_check_ids = tuple(row_to_check[i] for i in bridge_gauge_orig)
 
-    # obs0 (canonical Cross-He-Rall-Yoder / Cowtan-He-Williamson-Yoder form):
+    # obs0 (canonical Cohen-Kim-Bartlett-Brown / Cross-He-Rall-Yoder /
+    # Cowtan-He-Williamson-Yoder form):
     #   obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)
+    #          ⊕ ⊕ m(Y-stabs in obs0_xor_map)
+    #          ⊕ ⊕ m(leftover X-cycle) ⊕ ⊕ m(leftover Z-cycle)
     #
-    # Per Cross, He, Rall, Yoder arXiv:2407.18393 Theorem 20 (Appendix A.2)
-    # and Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5, the Pauli
-    # PRODUCT of these rows equals X̄_l ⊗ Z̄_r ⊗ Z^|B| on the adapter
-    # (the X-on-adapter stray from ∏ χ_l cancels with ∏ bridge_gauges; the
-    # Z-on-adapter stray from ∏ χ_r remains and equals +1 on the |0⟩^|B|
-    # adapter init).
+    # Per Cohen, Kim, Bartlett, Brown arXiv:2110.10794 §II.B.2, Cross, He,
+    # Rall, Yoder arXiv:2407.18393 Theorem 20 (Appendix A.2), and the
+    # design spec ``docs/superpowers/specs/2026-06-15-mixed-basis-joint-
+    # ppm-design.md`` §9 Lemma 2, the Pauli PRODUCT of the χ_l × χ_r ×
+    # bridge_gauge rows alone equals X̄_l ⊗ Z̄_r ⊗ Z^|B| on the adapter
+    # AS AN OPERATOR, BUT this operator anti-commutes with the χ_l and
+    # bridge_gauge X-on-adapter gauge generators themselves. Concretely,
+    # the Z-on-adapter contribution from ∏ χ_r anti-commutes with the
+    # X-on-adapter contributions of individual χ_l and bridge_gauge rows.
+    # The Webster-Smith-Cohen / Cross-He-Rall-Yoder construction patches
+    # this by adding ``Y-stab`` corrections — products of an X-singleton
+    # and Z-singleton at each merge qubit — whose XOR into obs0 cancels
+    # the leftover Z (and X) on the adapter. The current
+    # ``_stitch_to_joint_code_mixed`` does NOT yet populate
+    # ``bridge.obs0_xor_map`` / ``bridge.x_leftover_indices`` /
+    # ``bridge.z_leftover_indices`` (pair-merge + Y-stab construction is
+    # deferred to Tier 2), so the necessary Y-stab and cycle-correction
+    # XOR terms are unavailable and a full obs0 cannot be emitted yet.
     #
-    # IMPORTANT TIER 1 LIMITATION: the bridge-gauge measurements (X-type,
-    # scheduled in the X-stab CX half of each EdgeColoring round) randomize
-    # the adapter Z eigenvalue BEFORE the χ_r (Z-type) measurements of the
-    # same round. Consequently the obs0 XOR is non-deterministic
-    # shot-to-shot on the cross-eigenstate init even though the operator
-    # product is in the stabilizer center. Stim's
-    # ``detector_error_model()`` correctly rejects this as
-    # "non-deterministic observable".
+    # The X-/Z-phase split schedule above IS a prerequisite for the
+    # corrected obs0 (it guarantees χ_l ancillas are committed before any
+    # Z-CZ gates randomize their adapter eigenvalues), but it is not by
+    # itself sufficient: the operator-algebra defect (X̄_l ⊗ Z̄_r ⊗ Z^|B|
+    # ∉ stabilizer center of the gauge group) is independent of the
+    # schedule and requires the missing Y-stab / leftover corrections.
     #
-    # For Tier 1 acceptance we therefore DO NOT emit obs0 here — the
-    # circuit compiles to a DEM with 0 observables. The χ check IDs and
-    # bridge-gauge check IDs are still computed and recorded below as
-    # ``_obs0_chi_l_check_ids`` / ``_obs0_chi_r_check_ids`` /
-    # ``_obs0_bridge_gauge_check_ids`` (currently unused; held for
-    # downstream consumers that want to compute the XOR manually outside
-    # the Stim DEM, e.g. for hand-verified sanity checks). Tier 2 fixes:
-    # either (a) reorder Z-stab CZ before X-stab CX within the round so
-    # χ_r captures the adapter Z eigenvalue before bridge_gauges randomize
-    # it, or (b) include leftover X/Z cycle correction terms (Lemma 2 of
-    # the design spec, docs/superpowers/specs/
-    # 2026-06-15-mixed-basis-joint-ppm-design.md §9).
+    # Tier 1 acceptance therefore continues to emit no observable here.
+    # The χ check IDs and bridge-gauge check IDs are computed and stored
+    # in ``_obs0_*_check_ids`` for downstream consumers that want to
+    # compute the XOR manually outside the Stim DEM, e.g. for
+    # hand-verified sanity checks once the Y-stab / cycle pieces land.
     _obs0_chi_l_check_ids = chi_l_check_ids  # noqa: F841 (recorded for Tier 2)
     _obs0_chi_r_check_ids = chi_r_check_ids  # noqa: F841 (recorded for Tier 2)
     _obs0_bridge_gauge_check_ids = bridge_gauge_check_ids  # noqa: F841 (recorded for Tier 2)

@@ -13,16 +13,21 @@ acceptance bar for the mixed-basis pipeline:
     successfully — the syndrome graph for the pure-X / pure-Z stabilizer
     block is well-formed.
 
-obs0 is NOT emitted in Tier 1: the canonical Cross–He–Rall–Yoder /
-Cowtan–He–Williamson–Yoder formula
-``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` is provably correct as an
-operator product (= X̄_l ⊗ Z̄_r ⊗ Z^|B|) but the per-round measurement
-schedule in ``EdgeColoring.get_circuit`` (all X-stab CX gates fire before
-any Z-stab CZ gates) randomizes the adapter Z eigenvalue between χ_l /
-bridge_gauge and χ_r within the same round, so the running XOR is
-non-deterministic. Stim's ``detector_error_model()`` correctly rejects
-that observable; see ``_build_joint_ppm_circuit_mixed_basis`` docstring
-for the full Tier 2 fix options.
+obs0 is NOT emitted in Tier 1. As of the split-schedule fix
+(``_build_joint_ppm_circuit_mixed_basis`` runs X-stab CX gates and X-MX
+in a fully separate phase BEFORE the Z-stab CZ gates begin), individual
+χ_l / bridge_gauge measurement outcomes are deterministic in the
+subsystem-code sense. However, the canonical
+``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` formula remains
+non-deterministic shot-to-shot because the operator product
+X̄_l ⊗ Z̄_r ⊗ Z^|B| anti-commutes with the χ_l and bridge_gauge
+X-on-adapter rows themselves (Z-on-adapter from ∏ χ_r anti-commutes
+with X-on-adapter from individual χ_l). Per the design spec §9 Lemma 2
+the full obs0 must additionally XOR in (i) Y-stab rows from the
+pair-merge step and (ii) leftover X-cycle / Z-cycle outcomes. Those
+extra Bridge fields are not yet populated by
+``_stitch_to_joint_code_mixed`` — Tier 2 work. See
+``_build_joint_ppm_circuit_mixed_basis`` docstring for full details.
 
 The full truth-table verification (obs0 sign for all four |ψ_l⟩ ⊗ |ψ_r⟩
 joint eigenstates) is captured below as ``xfail`` — see
@@ -66,8 +71,11 @@ def test_mixed_basis_joint_ppm_circuit_builds() -> None:
     Tier 1: obs0 is intentionally not emitted (see
     ``_build_joint_ppm_circuit_mixed_basis`` docstring) — the canonical
     Cross–He–Rall–Yoder formula
-    ``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` is non-deterministic on
-    the cross-eigenstate init under the current EdgeColoring schedule.
+    ``⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)`` is missing Y-stab and
+    leftover X/Z cycle corrections (Lemma 2 of the design spec). The
+    split X/Z syndrome schedule guarantees deterministic individual χ
+    outcomes (a structural prerequisite for FT) but does NOT by itself
+    close the operator-algebraic obs0 identity.
     """
     from qldpc.circuits.surgery import build_joint_ppm_circuit
 
@@ -89,18 +97,24 @@ def test_mixed_basis_circuit_compiles_to_dem() -> None:
 @pytest.mark.xfail(
     reason=(
         "obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges) is non-deterministic "
-        "shot-to-shot under the EdgeColoring syndrome schedule even though the "
-        "operator product equals X̄_l ⊗ Z̄_r ⊗ Z^|B| (a logical, with Z^|B|=+1 "
-        "on |0⟩^|B| bridge init). The X-stab CX gates of χ_l / bridge_gauges "
-        "fire BEFORE the Z-stab CZ gates of χ_r in each round, randomizing the "
-        "adapter Z eigenvalue before χ_r captures it. Tier 2 fix: either "
-        "reorder Z-CZ before X-CX in the syndrome cycle, or include leftover "
-        "X/Z cycle correction terms (Lemma 2 of the design spec, "
-        "docs/superpowers/specs/2026-06-15-mixed-basis-joint-ppm-design.md §9). "
-        "Stim's compile_detector_sampler ALSO yields 0 here regardless of "
-        "init — its reference sample biases non-deterministic collapses to +Z, "
-        "so the observable flip is always 0 in noiseless runs; the truth table "
-        "cannot be probed via the LER-sweep API even if obs0 were deterministic."
+        "even with the split X-/Z-phase syndrome schedule (X-ancillas measured "
+        "before Z-CZ gates fire). The operator product equals X̄_l ⊗ Z̄_r ⊗ "
+        "Z^|B| as an OPERATOR, but this operator anti-commutes with the χ_l "
+        "and bridge_gauge X-on-adapter gauge generators themselves (Z on "
+        "adapter from ∏ χ_r ↔ X on adapter from individual χ_l rows). Hence "
+        "the obs0 product is NOT in the algebraic stabilizer center of the "
+        "gauge group, and Stim's detector_error_model correctly rejects it. "
+        "Per Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2 and the design "
+        "spec docs/superpowers/specs/2026-06-15-mixed-basis-joint-ppm-design"
+        ".md §9 Lemma 2, the full obs0 formula additionally XORs in (a) Y-stab "
+        "rows from the pair-merge step (obs0_xor_map) and (b) leftover "
+        "X-cycle / Z-cycle rows (x_leftover_indices / z_leftover_indices). "
+        "Tier 2 work: extend _stitch_to_joint_code_mixed to populate these "
+        "Bridge fields via the merge.py pair-merge algorithm, then include "
+        "them in obs0. The split syndrome schedule (DONE) is a structural "
+        "prerequisite for any FT mixed-basis pipeline but does not by itself "
+        "make obs0 deterministic — the missing piece is operator-algebraic "
+        "(Y-stab / cycle corrections), not scheduling."
     ),
     strict=True,
 )
