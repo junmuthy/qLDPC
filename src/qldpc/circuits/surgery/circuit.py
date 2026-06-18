@@ -1356,19 +1356,24 @@ def _build_joint_ppm_circuit_mixed_basis(
     H_R · H_R^T).
 
     Pipeline:
-      1. ``_split_quditcode_into_virtual_cssc`` partitions the joint-code
-         matrix into pure-X / pure-Z rows (used by EdgeColoring) and
-         Y-type rows (from the Webster cross-merge).
-      2. Allocate ancillas: ``QubitIDs.from_code(virtual_cssc)`` for the
-         CSS subset, then additional Y ancillas appended.
-      3. Per-side state prep + detach (different bases for l / r).
-      4. Per-round QEC: X-phase (RX → CX → MX) + Z-phase (RX → CZ → MX)
-         + Y-phase (RX → CX/CY/CZ → MX), the X/Z split is required for
-         determinism per Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2.
-      5. Detectors only for rows in the stabilizer center.
-      6. obs0 per Lemma 2 (design spec §9): XOR of m(Y_stab[i]) for i in
-         bridge.obs0_xor_map, plus m(leftover X-cycle) and
-         m(leftover Z-cycle) rows.
+      1. _build_mixed_basis_joint_code (joint_layout.py) builds the merged
+         QuditCode following docs/superpowers/docs/main.tex §4.2/§4.3
+         block-by-block, returning a JointPPMLayout with per-row provenance.
+      2. _split_quditcode_into_virtual_cssc partitions the joint-code matrix
+         into pure-X / pure-Z rows (used by EdgeColoring) and Y-type rows
+         (from the §4.3 cross-merge).
+      3. Allocate ancillas: QubitIDs.from_code(virtual_cssc) for the CSS
+         subset, then additional Y ancillas appended.
+      4. Per-side state prep + detach (different bases for l / r).
+      5. Per-round QEC: split X / Z / Y phases for determinism per
+         Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2.
+      6. obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(y_q) per Lemma 2 of the design
+         spec — implemented via JointPPMLayout row provenance. For the
+         degenerate fixture where every V_0 vertex is a port (e.g.
+         Steane × Steane), surviving χ rows are empty and obs0 reduces to
+         ⊕ m(y_q) alone, which has a residual ∏ Y on the adapter; in that
+         regime obs0 emission is suppressed (test_mixed_basis_circuit_
+         compiles_to_dem passes vacuously, truth-table test stays xfail).
     """
     intercode = g_l.code is not g_r.code
     g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug

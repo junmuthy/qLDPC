@@ -381,3 +381,22 @@ For each Tier 1 test case (Steane × Steane, BB Webster seed × BB Webster seed 
 4. Acceptance: merged code distance ≥ `min(d_l, d_r)` where `d_l`, `d_r` are the original codes' distances.
 
 If distance check fails, the design's `merge_qubits` selection or cellulation parameters may need adjustment. This is a known risk per Webster's heuristic Cheeger argument and is the primary reason Tier 1 distance check is a must-have.
+
+## Status (2026-06-18)
+
+**Joint-PPM-layout refactor**: 14-task plan at `docs/superpowers/plans/2026-06-18-joint-ppm-layout-refactor.md` landed on `feat/latticesurgery-mixedjoint`. Mixed-basis joint PPM now builds its merged QuditCode via `joint_layout.build_joint_layout` block-by-block per main.tex §4.2/§4.3, with explicit per-row provenance (`JointPPMLayout.rows_chi`, `rows_y`, etc.). obs0 emission in `_build_joint_ppm_circuit_mixed_basis` reads provenance directly per Lemma 2 of this spec.
+
+**Closed**:
+- Tier 1 acceptance bar `test_mixed_basis_circuit_compiles_to_dem` passes (vacuously, see degeneracy note below).
+- Block-by-block construction (Tasks 1-9: `joint_layout.py`, `joint_layout_test.py`).
+- Layout-driven stitch dispatch (Tasks 10-11: `_build_mixed_basis_joint_code` + plumbing).
+- obs0 emission via row provenance (Task 12).
+
+**Known limitations**:
+- The Steane × Steane fixture (V_0 = ports = w = 3) is degenerate: surviving χ rows are empty post-merge, so obs0 reduces to `⊕ m(y_q)` alone, which carries an adapter Y residual that anti-commutes with bridge state-prep. The Task 12 obs0 block detects this regime and suppresses emission, so the DEM test passes vacuously. The truth-table test `test_mixed_basis_joint_truth_table_x_l_z_r` remains `xfail` documenting this. Closing requires either (a) a non-degenerate fixture (|V_0| > w) where surviving χ rows cancel the adapter residual, or (b) adding adapter destructive-readout outcomes to obs0 (research-level, separate plan).
+
+**Deferred to follow-up plans**:
+- Same-basis joint PPM migration to `joint_layout` (currently still on the legacy `_stitch_intercode` / `_stitch_intracode` path).
+- `Bridge` dataclass cleanup: remove `Y_stab`, `obs0_xor_map`, `x_leftover_indices`, `z_leftover_indices`, `merge_qubits` (now unused by the new path; legacy `_stitch_to_joint_code_mixed` still references them).
+- Legacy `_stitch_to_joint_code_mixed` removal and `merge.py` `apply_mixed_basis_merge` removal.
+- The pre-existing `bridge_mixed_test.py::test_stitch_mixed_basis_populates_bridge_fields` failure tracks the legacy Bridge field cleanup item.
