@@ -384,19 +384,22 @@ If distance check fails, the design's `merge_qubits` selection or cellulation pa
 
 ## Status (2026-06-18)
 
-**Joint-PPM-layout refactor**: 14-task plan at `docs/superpowers/plans/2026-06-18-joint-ppm-layout-refactor.md` landed on `feat/latticesurgery-mixedjoint`. Mixed-basis joint PPM now builds its merged QuditCode via `joint_layout.build_joint_layout` block-by-block per main.tex §4.2/§4.3, with explicit per-row provenance (`JointPPMLayout.rows_chi`, `rows_y`, etc.). obs0 emission in `_build_joint_ppm_circuit_mixed_basis` reads provenance directly per Lemma 2 of this spec.
+**Joint-PPM-layout refactor**: 14-task plan at `docs/superpowers/plans/2026-06-18-joint-ppm-layout-refactor.md` landed on `feat/latticesurgery-mixedjoint`. Mixed-basis joint PPM now builds its merged QuditCode via `joint_layout.build_joint_layout` block-by-block per main.tex §4.2/§4.3, with explicit per-row provenance (`JointPPMLayout.rows_chi`, `rows_y`, etc.). obs0 emission in `_build_joint_ppm_circuit_mixed_basis` reads provenance directly per Lemma 2 of this spec, plus the Y-basis adapter prep/detach + adapter Y-readout XOR per main.tex §4.5 Eq. eq:obs0-corrected (Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2 Fig.~4 |Y⟩-ancilla protocol).
 
 **Closed**:
-- Tier 1 acceptance bar `test_mixed_basis_circuit_compiles_to_dem` passes (vacuously, see degeneracy note below).
+- Tier 1 acceptance bar `test_mixed_basis_circuit_compiles_to_dem` passes deterministically.
 - Block-by-block construction (Tasks 1-9: `joint_layout.py`, `joint_layout_test.py`).
 - Layout-driven stitch dispatch (Tasks 10-11: `_build_mixed_basis_joint_code` + plumbing).
-- obs0 emission via row provenance (Task 12).
+- obs0 emission via row provenance with virtual_cssc split-aware row→check ID mapping (Task 12 + follow-up mapping fix).
+- Y-basis bridge prep (RY) + detach (MY) + adapter Y-readout XOR into obs0.
+- BB [[72,12]] mixed-basis X̄_l ⊗ Z̄_r noiseless truth table: 4/4 joint eigenstates verified (`test_mixed_basis_joint_truth_table_bb_xz`).
 
 **Known limitations**:
-- The Steane × Steane fixture (V_0 = ports = w = 3) is degenerate: surviving χ rows are empty post-merge, so obs0 reduces to `⊕ m(y_q)` alone, which carries an adapter Y residual that anti-commutes with bridge state-prep. The Task 12 obs0 block detects this regime and suppresses emission, so the DEM test passes vacuously. The truth-table test `test_mixed_basis_joint_truth_table_x_l_z_r` remains `xfail` documenting this. Closing requires either (a) a non-degenerate fixture (|V_0| > w) where surviving χ rows cancel the adapter residual, or (b) adding adapter destructive-readout outcomes to obs0 (research-level, separate plan).
+- The Steane × Steane fixture (V_0 = ports = w = 3) is degenerate: surviving χ rows are empty post-merge, so obs0 reduces to `⊕ m(y_q) ⊕ ⊕ m_Y(a_q)` which is sign-blind to the data input. The `test_mixed_basis_joint_truth_table_x_l_z_r` xfail documents this; non-degenerate fixtures (|V_0| > w) work fully — see the BB truth-table test for verified correctness.
+- Truth-table-style noiseless sign verification MUST use `compile_sampler` + manual XOR (per the project's `raw_observables` helper in `examples/lattice_surgery.ipynb` §0), NOT `detector_sampler.sample(separate_observables=True)` which returns flips relative to noiseless reference and always reads 0 on noiseless runs.
 
 **Deferred to follow-up plans**:
 - Same-basis joint PPM migration to `joint_layout` (currently still on the legacy `_stitch_intercode` / `_stitch_intracode` path).
-- `Bridge` dataclass cleanup: remove `Y_stab`, `obs0_xor_map`, `x_leftover_indices`, `z_leftover_indices`, `merge_qubits` (now unused by the new path; legacy `_stitch_to_joint_code_mixed` still references them).
+- `Bridge` dataclass cleanup: remove `Y_stab`, `obs0_xor_map`, `x_leftover_indices`, `z_leftover_indices`, `merge_qubits` (now unused; legacy `_stitch_to_joint_code_mixed` still references them).
 - Legacy `_stitch_to_joint_code_mixed` removal and `merge.py` `apply_mixed_basis_merge` removal.
 - The pre-existing `bridge_mixed_test.py::test_stitch_mixed_basis_populates_bridge_fields` failure tracks the legacy Bridge field cleanup item.
