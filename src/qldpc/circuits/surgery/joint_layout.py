@@ -91,8 +91,9 @@ def _block_data(g, *, basis_block: PauliXZ, side: str, slices: dict[str, slice],
     block[:, slices[f"Q_{side}"]] = H
     # f extension lives on κ^s iff this basis is dual to the side's gadget basis.
     if basis_block is not g.basis:
-        c_0 = list(g.data_checks)
         kappa_slice = slices[f"k_{side}"]
-        for k, j in enumerate(c_0):
+        for k, j in enumerate(g.data_checks):
+            if j < 0:
+                continue  # sentinel for extra-κ rows from build_gadget_augmented
             block[j, kappa_slice.start + k] = 1
     return block
