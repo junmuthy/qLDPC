@@ -43,6 +43,28 @@ class JointPPMLayout:
 
     column_slices: dict[str, slice]
 
+    def to_quditcode(self, field):
+        """Bundle H_X, H_Z, H_Y into a single QuditCode matrix.
+
+        Args:
+          field: GF(2) field implementation from the side codes (e.g. g_l.code.field).
+
+        Returns:
+          QuditCode with matrix = [H_X | 0] rows, then [0 | H_Z] rows, then
+          H_Y rows (already symplectic). Subsystem-code flag set since the
+          mixed-basis merged code is a subsystem code by construction.
+        """
+        from qldpc.codes.common import QuditCode
+
+        zero_x = np.zeros_like(self.H_X)
+        zero_z = np.zeros_like(self.H_Z)
+        rows = np.vstack([
+            np.hstack([self.H_X, zero_x]),
+            np.hstack([zero_z, self.H_Z]),
+            self.H_Y,
+        ]).astype(np.uint8)
+        return QuditCode(field(rows), is_subsystem_code=True)
+
 
 def column_slices_for_bridge(g_l, g_r, bridge) -> dict[str, slice]:
     """Partition merged-code columns into Q_l | Q_r | k_l | k_r | A.

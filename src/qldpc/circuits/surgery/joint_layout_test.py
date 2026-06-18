@@ -426,3 +426,32 @@ def test_build_joint_layout_raises_for_same_basis() -> None:
     bridge = build_bridge(g_l, g_r)
     with pytest.raises(NotImplementedError, match="same-basis"):
         build_joint_layout(g_l, g_r, bridge)
+
+
+from qldpc.codes.common import QuditCode
+
+
+def test_layout_to_quditcode_round_trips_rows() -> None:
+    """JointPPMLayout.to_quditcode(field) produces a QuditCode whose matrix concatenates
+    [H_X | 0], [0 | H_Z], H_Y in that order."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    layout = build_joint_layout(g_l, g_r, bridge)
+
+    qc = layout.to_quditcode(code_l.field)
+    assert isinstance(qc, QuditCode)
+    expected = np.vstack([
+        np.hstack([layout.H_X, np.zeros_like(layout.H_X)]),
+        np.hstack([np.zeros_like(layout.H_Z), layout.H_Z]),
+        layout.H_Y,
+    ])
+    assert (np.asarray(qc.matrix).astype(np.uint8) == expected).all()
+    assert qc.num_qudits == layout.column_slices["A"].stop
