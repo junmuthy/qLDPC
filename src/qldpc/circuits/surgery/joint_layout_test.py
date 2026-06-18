@@ -6,7 +6,7 @@ import numpy as np
 
 from qldpc import codes
 from qldpc.circuits.surgery.joint_layout import JointPPMLayout, column_slices_for_bridge
-from qldpc.circuits.surgery.joint_layout import build_pre_merge_layout
+from qldpc.circuits.surgery.joint_layout import apply_cross_merge, build_pre_merge_layout
 from qldpc.objects import Pauli
 
 
@@ -290,3 +290,34 @@ def test_pre_merge_layout_row_counts_mixed_basis_steane() -> None:
     assert len(layout.rows_chi["l"]) == n_V0_l
     assert len(layout.rows_chi["r"]) == n_V0_r
     assert layout.rows_y == ()
+
+
+def test_cross_merge_deletes_port_rows_and_builds_w_y_rows() -> None:
+    """Cross-merge deletes one port row from H_X and H_Z each, builds w y_q rows."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    pre = build_pre_merge_layout(g_l, g_r, bridge)
+
+    post = apply_cross_merge(pre, bridge)
+    w = bridge.width
+
+    # H_X loses w port-χ_r rows; H_Z loses w port-χ_l rows.
+    assert post.H_X.shape[0] == pre.H_X.shape[0] - w
+    assert post.H_Z.shape[0] == pre.H_Z.shape[0] - w
+    # H_Y has w rows.
+    assert post.H_Y.shape == (w, 2 * pre.column_slices["A"].stop)
+    # rows_y == range(w).
+    assert post.rows_y == tuple(range(w))
+    # Surviving χ_l = non-port chi rows.
+    surviving_chi_l = len(post.rows_chi["l"])
+    surviving_chi_r = len(post.rows_chi["r"])
+    assert surviving_chi_l == len(pre.rows_chi["l"]) - w
+    assert surviving_chi_r == len(pre.rows_chi["r"]) - w

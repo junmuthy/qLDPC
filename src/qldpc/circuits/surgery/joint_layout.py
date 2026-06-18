@@ -253,3 +253,152 @@ def build_pre_merge_layout(g_l, g_r, bridge) -> JointPPMLayout:
         basis_r=bridge.basis_r,
         column_slices=slices,
     )
+
+
+def apply_cross_merge(pre: JointPPMLayout, bridge) -> JointPPMLayout:
+    """Cross-merge per main.tex §4.3.
+
+    For each adapter qubit q ∈ {0..w-1}:
+      * Find the left port χ row at adapter column q (basis_l=Z → row in H_Z).
+      * Find the right port χ row at adapter column q (basis_r=X → row in H_X).
+      * Delete both rows; build y_q = (X-part-of-right-port | Z-part-of-left-port)
+        as a symplectic row in H_Y.
+
+    Port rows are identified by their adapter labels: for side s, the port row
+    that contributes adapter X/Z at column q is the χ row whose label equals q.
+    """
+    w = bridge.width
+    N = pre.column_slices["A"].stop
+
+    chi_l_rows = list(pre.rows_chi["l"])  # indices into the matrix that holds chi_l
+    chi_r_rows = list(pre.rows_chi["r"])
+
+    # Determine which matrix holds each side's χ block.
+    def _matrix_for(basis):
+        return "H_X" if basis is Pauli.X else "H_Z"
+
+    chi_l_matrix = _matrix_for(pre.basis_l)
+    chi_r_matrix = _matrix_for(pre.basis_r)
+    assert chi_l_matrix != chi_r_matrix, "same-basis not supported here; use build_joint_layout for dispatch"
+
+    # Map adapter label q → row index for each side.
+    # The provenance rows_chi[side] are listed in V_0^s vertex order.
+    # bridge.label_s[i] is the SkipTree label of vertex i (-1 if non-port).
+    def _label_to_row_index(labels: tuple[int, ...], side_rows: list[int]) -> dict[int, int]:
+        port_map: dict[int, int] = {}
+        for offset, row_idx in enumerate(side_rows):
+            lab = int(labels[offset])
+            if lab >= 0:
+                port_map[lab] = row_idx
+        return port_map
+
+    port_l_map = _label_to_row_index(bridge.label_l, chi_l_rows)
+    port_r_map = _label_to_row_index(bridge.label_r, chi_r_rows)
+
+    H_X_pre = pre.H_X.copy()
+    H_Z_pre = pre.H_Z.copy()
+
+    y_rows = np.zeros((w, 2 * N), dtype=np.uint8)
+    port_l_delete: list[int] = []  # row indices in the matrix holding chi_l
+    port_r_delete: list[int] = []  # row indices in the matrix holding chi_r
+    for q in range(w):
+        row_l = port_l_map[q]
+        row_r = port_r_map[q]
+        if pre.basis_l is Pauli.X:
+            # chi_l in H_X, chi_r in H_Z
+            x_part = H_X_pre[row_l]
+            z_part = H_Z_pre[row_r]
+        else:
+            # chi_l in H_Z, chi_r in H_X
+            x_part = H_X_pre[row_r]
+            z_part = H_Z_pre[row_l]
+        y_rows[q, :N] = x_part
+        y_rows[q, N:] = z_part
+        port_l_delete.append(row_l)
+        port_r_delete.append(row_r)
+
+    # Delete merged port rows from the appropriate matrices.
+    if pre.basis_l is Pauli.X:
+        # chi_l rows live in H_X; chi_r in H_Z
+        H_X_out = np.delete(H_X_pre, sorted(set(port_l_delete)), axis=0)
+        H_Z_out = np.delete(H_Z_pre, sorted(set(port_r_delete)), axis=0)
+        x_deletions = sorted(set(port_l_delete))
+        z_deletions = sorted(set(port_r_delete))
+    else:
+        # chi_l rows live in H_Z; chi_r in H_X
+        H_Z_out = np.delete(H_Z_pre, sorted(set(port_l_delete)), axis=0)
+        H_X_out = np.delete(H_X_pre, sorted(set(port_r_delete)), axis=0)
+        x_deletions = sorted(set(port_r_delete))
+        z_deletions = sorted(set(port_l_delete))
+
+    # Re-map row indices in provenance after deletion.
+    def _remap(rows: tuple[int, ...], deleted: list[int]) -> tuple[int, ...]:
+        deleted_set = set(deleted)
+        deleted_sorted = sorted(deleted_set)
+        out = []
+        for r in rows:
+            if r in deleted_set:
+                continue
+            shift = sum(1 for d in deleted_sorted if d < r)
+            out.append(r - shift)
+        return tuple(out)
+
+    # Remap based on which matrix each kind lives in.
+    # For basis_l=Z, basis_r=X:
+    #   H_X holds: data_x_l, data_x_r, gauge_l (basis_l=Z dual), cycle_l (dual), chi_r
+    #   H_Z holds: data_z_l, data_z_r, chi_l, gauge_r (basis_r=X dual), cycle_r (dual)
+    def _holder_x(kind: str, side: str) -> bool:
+        """Return True iff the rows of (kind, side) live in H_X (pre-merge)."""
+        if kind in ("data_x",):
+            return True
+        if kind in ("data_z",):
+            return False
+        side_basis = pre.basis_l if side == "l" else pre.basis_r
+        if kind == "chi":
+            return side_basis is Pauli.X
+        if kind in ("gauge", "cycle"):
+            return side_basis is Pauli.Z  # dual lives in H_X
+        raise ValueError(f"unknown kind: {kind}")
+
+    new_data_x = {
+        s: _remap(pre.rows_data_x[s], x_deletions) for s in ("l", "r")
+    }
+    new_data_z = {
+        s: _remap(pre.rows_data_z[s], z_deletions) for s in ("l", "r")
+    }
+    new_chi = {
+        s: _remap(
+            pre.rows_chi[s],
+            x_deletions if _holder_x("chi", s) else z_deletions,
+        )
+        for s in ("l", "r")
+    }
+    new_gauge = {
+        s: _remap(
+            pre.rows_gauge[s],
+            x_deletions if _holder_x("gauge", s) else z_deletions,
+        )
+        for s in ("l", "r")
+    }
+    new_cycle = {
+        s: _remap(
+            pre.rows_cycle[s],
+            x_deletions if _holder_x("cycle", s) else z_deletions,
+        )
+        for s in ("l", "r")
+    }
+
+    return JointPPMLayout(
+        H_X=H_X_out,
+        H_Z=H_Z_out,
+        H_Y=y_rows,
+        rows_data_x=new_data_x,
+        rows_data_z=new_data_z,
+        rows_chi=new_chi,
+        rows_gauge=new_gauge,
+        rows_cycle=new_cycle,
+        rows_y=tuple(range(w)),
+        basis_l=pre.basis_l,
+        basis_r=pre.basis_r,
+        column_slices=pre.column_slices,
+    )
