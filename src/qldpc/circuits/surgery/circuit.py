@@ -7,6 +7,8 @@ References:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import stim
 
@@ -18,6 +20,9 @@ from qldpc.objects import Pauli
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
+
+if TYPE_CHECKING:
+    from qldpc.circuits.surgery.joint_layout import JointPPMLayout
 
 
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
@@ -1045,15 +1050,16 @@ def build_joint_ppm_circuit(
       * ``tuple[str, str]`` (intercode only) — per-code logical-init spec.
         ``data_init=("0", "+")`` → c_l in |0⟩_L, c_r in |+⟩_L.
     """
-    joint_code, bridge = _stitch_to_joint_code(g_l, g_r, bridge)
-
-    if isinstance(joint_code, CSSCode):
+    if bridge.basis_l is bridge.basis_r:
+        joint_code, bridge = _stitch_to_joint_code(g_l, g_r, bridge)
         return _build_joint_ppm_circuit_same_basis(
             g_l, g_r, bridge, joint_code,
             rounds=rounds, noise_model=noise_model, data_init=data_init,
         )
+    joint_code, bridge, layout = _build_mixed_basis_joint_code(g_l, g_r, bridge)
     return _build_joint_ppm_circuit_mixed_basis(
         g_l, g_r, bridge, joint_code,
+        layout=layout,
         rounds=rounds, noise_model=noise_model, data_init=data_init,
     )
 
@@ -1335,6 +1341,7 @@ def _build_joint_ppm_circuit_mixed_basis(
     bridge: Bridge,
     joint_code: QuditCode,
     *,
+    layout: JointPPMLayout,
     rounds: int,
     noise_model: NoiseModel | None,
     data_init: str | tuple[str, ...] | list[str] | None,
