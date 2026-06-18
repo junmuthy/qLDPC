@@ -42,3 +42,24 @@ class JointPPMLayout:
     basis_r: PauliXZ
 
     column_slices: dict[str, slice]
+
+
+def column_slices_for_bridge(g_l, g_r, bridge) -> dict[str, slice]:
+    """Partition merged-code columns into Q_l | Q_r | k_l | k_r | A.
+
+    Mirrors main.tex §4.2 qubit ordering. Inter-code: n_r = g_r.code.num_qudits;
+    intra-code (g_l.code is g_r.code): n_r = 0 (shared data block) — caller is
+    responsible for noting that Q_r aliases Q_l.
+    """
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits if g_l.code is not g_r.code else 0
+    k_l = bridge.g_l_aug.incidence.shape[0]
+    k_r = bridge.g_r_aug.incidence.shape[0]
+    w = bridge.width
+    return {
+        "Q_l": slice(0, n_l),
+        "Q_r": slice(n_l, n_l + n_r),
+        "k_l": slice(n_l + n_r, n_l + n_r + k_l),
+        "k_r": slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r),
+        "A": slice(n_l + n_r + k_l + k_r, n_l + n_r + k_l + k_r + w),
+    }
