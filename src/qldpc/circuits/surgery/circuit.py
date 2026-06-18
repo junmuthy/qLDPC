@@ -617,16 +617,18 @@ def _stitch_to_joint_code(
 
     Mixed-basis path (Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2
     Theorem 20 proof; Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5)
-    delegates to ``_stitch_to_joint_code_mixed`` which assembles a SUBSYSTEM
-    code: the per-side χ_l (basis_l-type) and χ_r (basis_r-type) seed-operator
-    rows remain as separate gauge generators whose pairwise anti-commutation
-    on shared adapter qubits is structural and expected. The stabilizer
-    center is computed automatically by ``QuditCode(is_subsystem_code=True)``.
+    delegates to ``_build_mixed_basis_joint_code`` which assembles a SUBSYSTEM
+    code via the block-by-block ``joint_layout`` module: the per-side χ_l
+    (basis_l-type) and χ_r (basis_r-type) seed-operator rows remain as
+    separate gauge generators whose pairwise anti-commutation on shared
+    adapter qubits is structural and expected. The stabilizer center is
+    computed automatically by ``QuditCode(is_subsystem_code=True)``.
     """
     if bridge.basis_l is bridge.basis_r:
         return _stitch_to_joint_csscode(g_l, g_r, bridge), bridge
 
-    return _stitch_to_joint_code_mixed(g_l, g_r, bridge)
+    code, bridge_out, _layout = _build_mixed_basis_joint_code(g_l, g_r, bridge)
+    return code, bridge_out
 
 
 def _assemble_meas_comp_per_side(
@@ -760,52 +762,68 @@ def _assemble_meas_comp_per_side(
     return M_meas_l_block, M_comp_l_block, M_meas_r_block, M_comp_r_block, slices
 
 
+def _build_mixed_basis_joint_code(
+    g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge
+) -> tuple[QuditCode, Bridge, "JointPPMLayout"]:
+    """New mixed-basis stitch via block-by-block layout (joint_layout module).
+
+    Returns the QuditCode plus the JointPPMLayout itself; downstream callers
+    (specifically the obs0 emission in _build_joint_ppm_circuit_mixed_basis)
+    consume the layout's row provenance to construct obs0 = ⊕ m(χ_l) ⊕
+    ⊕ m(χ_r) ⊕ ⊕ m(y_q) directly.
+    """
+    from qldpc.circuits.surgery.joint_layout import JointPPMLayout, build_joint_layout
+
+    layout = build_joint_layout(g_l, g_r, bridge)
+    code = layout.to_quditcode(g_l.code.field)
+    return code, bridge, layout
+
+
 def _stitch_to_joint_code_mixed(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> tuple[QuditCode, Bridge]:
-    """Mixed-basis stitch: assemble subsystem code per Cross et al. Theorem 20.
+    """Mixed-basis stitch: assemble code via Webster-Smith-Cohen cross-merge.
 
     The merged code for an inter-code mixed-basis joint Pauli measurement
-    (e.g. X̄_l ⊗ Z̄_r) is a SUBSYSTEM code, not a stabilizer code:
+    (e.g. X̄_l ⊗ Z̄_r) is built per:
 
-      * Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2 (proof of
-        Theorem 20) derives the dimension count via gauge generators that
-        anti-commute on the shared bridge qubits.
-      * Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5 specializes the
-        same construction to the lattice-surgery setting we implement here.
+      * Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 — the cross-merge
+        recipe that combines a χ_l (X-type) and χ_r (Z-type) pair on each
+        shared bridge qubit into a single Y-type stabilizer row.
+      * Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2 (Theorem 20)
+        — the underlying subsystem-code dimension analysis.
+      * Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5 — lattice-
+        surgery specialization.
 
-    χ_l (the basis_l-type seed-operator rows) and χ_r (basis_r-type)
-    REMAIN as separate gauge operators — their pairwise anti-commutation
-    on shared adapter qubits is structural and expected. The actual
-    stabilizer group is the CENTER of the gauge group; qLDPC computes it
-    automatically via ``QuditCode(..., is_subsystem_code=True)`` and the
-    Lemma 1 commutation test is REMOVED from the test suite (subsystem
-    gauges by definition need not commute).
+    Construction (inter-code Steane × Steane, k_l = k_r = 1, w = 3):
 
-    Construction (inter-code Steane × Steane, k_l = k_r = 1, |B| = 3):
+      1. Per-side blocks via ``_assemble_meas_comp_per_side`` (X/Z split
+         by each side's own basis).
+      2. Cycle rows on BOTH duals: cycle_l of comp_l-type with support
+         T_l on cl_ancilla + H_R on adapter; cycle_r symmetric. These
+         anti-commute pairwise on the adapter via H_R · H_R^T — structural,
+         expected for the subsystem code.
+      3. Cross-merge step (``apply_mixed_basis_merge`` from merge.py): for
+         each adapter qubit q where both an X- and Z-row have single-{q}
+         adapter support, fuse them into a Y-stab. The χ_l (X-type on
+         data + adapter) and χ_r (Z-type) rows are the canonical pivots.
+         Multi-adapter-col rows (cycle rows) are left unchanged.
+      4. Final symplectic matrix = [HX_out | 0] ∪ [0 | HZ_out] ∪ Y_stab.
 
-      1. Per-side blocks from ``_assemble_meas_comp_per_side``: HX_l, HZ_l
-         (basis_l determines which is the meas-side χ-carrier), and HX_r,
-         HZ_r symmetrically.
-      2. Same-basis-style cycle rows on BOTH duals: cycle_l of comp_l-type
-         with support T_l on cl_ancilla + H_R on adapter; cycle_r of
-         comp_r-type symmetric. These anti-commute pairwise on the adapter
-         (⟨cycle_l, cycle_r⟩_s = (H_R H_R^T)[i, j]) — fine in a subsystem
-         code.
-      3. |B| = w "bridge gauge" rows, one per adapter column q: pure single-
-         qubit X on adapter[q]. These complete the gauge group: without
-         them the construction has dim = k_l + k_r + |B| - 2; with them
-         the |B| adapter qubits' contribution is cancelled and dim drops
-         to k_l + k_r - 1 (matches Cross et al. Theorem 20 dimension
-         analysis).
+    Returns a ``QuditCode`` — tried as stabilizer code first, falls back
+    to subsystem if any gauge generator pair anti-commutes (cycle_l /
+    cycle_r anti-commutation is the normal failure mode).
 
-    The "+1 q_1 connector" check from Cross et al. Appendix A.2 turns out
-    NOT to be needed for the cases we tested (Steane × Steane gives dim = 1
-    without it). If a future code shows dim too high, add a mixed-Pauli
-    connector row (Z on κ_l[0], X on κ_r[0]); empirically the bridge
-    gauges absorb the needed final dim reduction on their own.
+    Bridge fields populated:
+      * ``Y_stab``: the cross-merge Y rows (shape ``(n_Y, 2*n_merged)``)
+      * ``obs0_xor_map``: list of Y_stab row indices XORed into obs0
+        (per Lemma 2). All Y rows contribute.
+      * ``x_leftover_indices`` / ``z_leftover_indices``: indices (within
+        the X-row / Z-row blocks of the final code) of cycle rows that
+        contribute to obs0 to cancel residual X^A / Z^A on the adapter.
+      * ``merge_qubits``: adapter columns processed by the cross-merge.
     """
     import dataclasses
 
@@ -837,9 +855,7 @@ def _stitch_to_joint_code_mixed(
     cr_ancilla = slices["cr_ancilla"]
     c_adapter = slices["c_adapter"]
 
-    # Cycle rows on both duals. cycle_l acts in the basis dual to basis_l
-    # (e.g. basis_l=X → cycle_l is Z-type), cycle_r symmetric. Both carry
-    # T_s on their side's κ ancilla and H_R on the adapter.
+    # Step 2: cycle rows on both duals.
     cycle_l = np.zeros((bridge.T_l.shape[0], n_merged), dtype=np.int_)
     cycle_l[:, cl_ancilla] = bridge.T_l
     cycle_l[:, c_adapter] = bridge.H_R
@@ -848,56 +864,97 @@ def _stitch_to_joint_code_mixed(
     cycle_r[:, cr_ancilla] = bridge.T_r
     cycle_r[:, c_adapter] = bridge.H_R
 
-    # Per-side X-rows and Z-rows: HX_{l,r} go in the X-row block, HZ_{l,r}
-    # in the Z-row block. cycle_l is the dual of basis_l → opposite Pauli
-    # type from HX_l; same for cycle_r.
-    x_rows: list[np.ndarray] = list(HX_l.astype(np.int_)) + list(HX_r.astype(np.int_))
-    z_rows: list[np.ndarray] = list(HZ_l.astype(np.int_)) + list(HZ_r.astype(np.int_))
+    # Build pre-merge HX_all / HZ_all.
+    # cycle_l is in the basis dual to basis_l; cycle_r in the basis dual to basis_r.
+    HX_pre_rows: list[np.ndarray] = list(HX_l.astype(np.int_)) + list(HX_r.astype(np.int_))
+    HZ_pre_rows: list[np.ndarray] = list(HZ_l.astype(np.int_)) + list(HZ_r.astype(np.int_))
     if bridge.basis_l is Pauli.X:
-        z_rows.extend(cycle_l.astype(np.int_))
+        HZ_pre_rows.extend(cycle_l.astype(np.int_))
     else:
-        x_rows.extend(cycle_l.astype(np.int_))
+        HX_pre_rows.extend(cycle_l.astype(np.int_))
     if bridge.basis_r is Pauli.X:
-        z_rows.extend(cycle_r.astype(np.int_))
+        HZ_pre_rows.extend(cycle_r.astype(np.int_))
     else:
-        x_rows.extend(cycle_r.astype(np.int_))
+        HX_pre_rows.extend(cycle_r.astype(np.int_))
 
-    # Pack X-only and Z-only blocks into symplectic form.
+    HX_all = (
+        np.array(HX_pre_rows, dtype=np.int_)
+        if HX_pre_rows
+        else np.zeros((0, n_merged), dtype=np.int_)
+    )
+    HZ_all = (
+        np.array(HZ_pre_rows, dtype=np.int_)
+        if HZ_pre_rows
+        else np.zeros((0, n_merged), dtype=np.int_)
+    )
+
+    # Step 3: cross-merge. merge_qubits = adapter columns with both X and Z support.
+    from .merge import apply_mixed_basis_merge
+
+    adapter_cols = tuple(range(c_adapter.start, c_adapter.stop))
+    merge_qubits = tuple(
+        q for q in adapter_cols if HX_all[:, q].any() and HZ_all[:, q].any()
+    )
+    HX_out, HZ_out, Y_stab, obs0_y, x_left, z_left = apply_mixed_basis_merge(
+        HX_all.astype(np.uint8),
+        HZ_all.astype(np.uint8),
+        merge_qubits,
+        adapter_cols=adapter_cols,
+    )
+    HX_out = np.asarray(HX_out).astype(np.int_)
+    HZ_out = np.asarray(HZ_out).astype(np.int_)
+
+    # Identify the leftover cycle row indices (within HX_out / HZ_out) for
+    # obs0 cancellation per Lemma 2. Cycle rows have weight ≥ 2 support on
+    # the adapter, so we identify them structurally. For our construction,
+    # cycle_r (X-type) lives in HX_out (when basis_r=Z), and cycle_l (Z-type)
+    # lives in HZ_out (when basis_l=X). The merge algorithm never deletes
+    # multi-adapter rows so they survive in order at the END of HX_out/HZ_out.
+    def _adapter_weight(row: np.ndarray) -> int:
+        return int(row[c_adapter.start : c_adapter.stop].sum())
+
+    x_cycle_indices_in_out = tuple(
+        i for i in range(HX_out.shape[0]) if _adapter_weight(HX_out[i]) >= 2
+    )
+    z_cycle_indices_in_out = tuple(
+        i for i in range(HZ_out.shape[0]) if _adapter_weight(HZ_out[i]) >= 2
+    )
+
+    # Step 4: pack symplectic matrix.
     rows_sym: list[np.ndarray] = []
-    for r in x_rows:
+    for r in HX_out:
         rows_sym.append(np.concatenate([r, np.zeros(n_merged, dtype=np.int_)]))
-    for r in z_rows:
+    for r in HZ_out:
         rows_sym.append(np.concatenate([np.zeros(n_merged, dtype=np.int_), r]))
-
-    # |B| = w bridge-gauge rows: pure single-qubit X on adapter[q].
-    # These cancel the |B| adapter-qubit dimension contribution; without
-    # them dim is k_l + k_r + |B| - 2.
-    for q in range(w):
-        x_part = np.zeros(n_merged, dtype=np.int_)
-        z_part = np.zeros(n_merged, dtype=np.int_)
-        x_part[c_adapter.start + q] = 1
-        rows_sym.append(np.concatenate([x_part, z_part]))
+    if Y_stab is not None:
+        for r in Y_stab:
+            rows_sym.append(r.astype(np.int_))
 
     sym_matrix = (
         np.array(rows_sym, dtype=np.int_)
         if rows_sym
         else np.zeros((0, 2 * n_merged), dtype=np.int_)
     )
-    # Subsystem code: gauge generators may anti-commute (Cross et al.
-    # arXiv:2407.18393 Theorem 20). QuditCode computes the stabilizer
-    # center automatically.
-    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=True)
 
-    # Record the |B| + |cycles| gauge-extra rows for downstream pipeline
-    # introspection; Y_stab is unused for the subsystem-code construction.
-    gauge_extra = sym_matrix[len(x_rows) + len(z_rows):]
+    # Try stabilizer code first; fall back to subsystem if cycle anti-commutation
+    # makes the matrix non-CSS-commuting.
+    is_subsystem = False
+    if rows_sym:
+        Hx = sym_matrix[:, :n_merged].astype(np.int_)
+        Hz = sym_matrix[:, n_merged:].astype(np.int_)
+        comm = (Hx @ Hz.T + Hz @ Hx.T) % 2
+        np.fill_diagonal(comm, 0)
+        is_subsystem = bool(comm.any())
+
+    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=is_subsystem)
+
     bridge_populated = dataclasses.replace(
         bridge,
-        Y_stab=gauge_extra if gauge_extra.size else None,
-        merge_qubits=tuple(range(c_adapter.start, c_adapter.stop)),
-        obs0_xor_map=(),
-        x_leftover_indices=(),
-        z_leftover_indices=(),
+        Y_stab=Y_stab if Y_stab is not None else None,
+        merge_qubits=merge_qubits,
+        obs0_xor_map=tuple(obs0_y),
+        x_leftover_indices=x_cycle_indices_in_out,
+        z_leftover_indices=z_cycle_indices_in_out,
     )
     return joint_code, bridge_populated
 
@@ -1110,15 +1167,21 @@ def _split_quditcode_into_virtual_cssc(
 
     Mixed-basis subsystem-code helper (Cross, He, Rall, Yoder
     arXiv:2407.18393 Theorem 20 / Cowtan, He, Williamson, Yoder
-    arXiv:2503.05003 §3.5). The merged code is a SUBSYSTEM code: not all
-    pairs of rows commute. But within the row blocks our stitch produces
-    (``_stitch_to_joint_code_mixed``), every row is either pure-X or pure-Z
-    (no mixed Y rows arise for the bridge constructions tested). This helper
-    builds a "virtual" CSSCode from the pure-X and pure-Z subsets purely for
-    structural reuse of the CSS syndrome-extraction pipeline (EdgeColoring).
-    The virtual code may NOT be a true CSS code in the stabilizer-center
-    sense; downstream callers are responsible for not registering detectors
-    against rows that anti-commute with other gauge generators.
+    arXiv:2503.05003 §3.5 / Webster, Smith, Cohen arXiv:2511.15989 §II.B.2).
+    The merged code is a SUBSYSTEM code: not all pairs of rows commute.
+
+    The stitch ``_stitch_to_joint_code_mixed`` produces three row classes:
+      * pure-X rows (HX block): data X-stabilizers + comp_r-side rows +
+        cycle_r if basis_r=Z.
+      * pure-Z rows (HZ block): symmetric on Z side.
+      * mixed Y rows (Y_stab block): one per merge qubit from the Webster
+        cross-merge. Their X-part comes from a χ_l row, Z-part from a χ_r
+        row, with single-{q} adapter support on each side.
+
+    This helper builds a "virtual" CSSCode from the pure-X / pure-Z subsets
+    for reuse of the CSS syndrome-extraction pipeline (EdgeColoring). Y rows
+    are reported separately via ``mixed_row_indices`` and are handled by
+    dedicated CY/CZ-based extraction in the mixed-basis pipeline.
 
     Returns
     -------
@@ -1135,8 +1198,8 @@ def _split_quditcode_into_virtual_cssc(
     z_row_indices
         Indices of the pure-Z rows.
     mixed_row_indices
-        Indices of any rows with both X and Z support; expected empty for
-        the current stitch but reported for completeness.
+        Indices of any rows with both X and Z support (Y rows from the
+        Webster cross-merge).
     """
     H = np.asarray(joint_code.matrix).astype(np.int_)
     n = joint_code.num_qudits
@@ -1161,25 +1224,24 @@ def _split_quditcode_into_virtual_cssc(
 def _mixed_basis_qubit_coords(
     n_data: int,
     qubit_ids: QubitIDs,
+    y_ancilla_ids: tuple[int, ...] = (),
 ) -> stim.Circuit:
     """Emit a simple sequential QUBIT_COORDS layout for mixed-basis joint PPM.
 
-    Unlike the same-basis 6/7-lane semantic layout, the mixed-basis path
-    cannot reuse ``_surgery_qubit_coordinates`` because that helper assumes
-    a CSSCode with the gadget's χ/G row-block ordering on each side; here
-    the merged matrix is a subsystem code with mixed left/right blocks of
-    different Pauli type. We use a minimal grid: y=0 data, y=2 X-checks,
-    y=4 Z-checks. This is purely cosmetic — no surgery semantics depend on
-    these coords for the mixed-basis Tier 1 pipeline.
+    Lanes: y=0 data, y=6 ancilla+bridge, y=2 X-checks, y=4 Z-checks,
+    y=3 Y-stab ancillas (cross-merge per Webster, Smith, Cohen
+    arXiv:2511.15989 §II.B.2).
     """
     circuit = stim.Circuit()
     for i, qid in enumerate(qubit_ids.data):
-        lane = 0 if i < n_data else 6  # data lane / ancilla+bridge lane
+        lane = 0 if i < n_data else 6
         circuit.append("QUBIT_COORDS", qid, (i, lane))
     for i, qid in enumerate(qubit_ids.checks_x):
         circuit.append("QUBIT_COORDS", qid, (i, 2))
     for i, qid in enumerate(qubit_ids.checks_z):
         circuit.append("QUBIT_COORDS", qid, (i, 4))
+    for i, qid in enumerate(y_ancilla_ids):
+        circuit.append("QUBIT_COORDS", qid, (i, 3))
     return circuit
 
 
@@ -1280,30 +1342,26 @@ def _build_joint_ppm_circuit_mixed_basis(
     """Mixed-basis joint PPM circuit (subsystem merged code).
 
     Cross, He, Rall, Yoder (arXiv:2407.18393) Theorem 20 / Cowtan, He,
-    Williamson, Yoder (arXiv:2503.05003 §3.5) construction. The merged
-    code is a subsystem code with anti-commuting gauge generators; we
-    cannot reuse the same-basis pipeline directly.
+    Williamson, Yoder (arXiv:2503.05003 §3.5) / Webster, Smith, Cohen
+    (arXiv:2511.15989 §II.B.2) construction. The merged code is a
+    subsystem code with anti-commuting gauge generators (the SkipTree
+    cycle rows on opposite Pauli types overlap on the adapter via
+    H_R · H_R^T).
 
-    Tier 1 (this implementation):
-      1. Partition ``joint_code.matrix`` into pure-X / pure-Z rows; build
-         a virtual CSSCode for ID allocation + EdgeColoring syndrome
-         extraction.
-      2. Allocate ``qubit_ids = QubitIDs.from_code(virtual_cssc)``.
+    Pipeline:
+      1. ``_split_quditcode_into_virtual_cssc`` partitions the joint-code
+         matrix into pure-X / pure-Z rows (used by EdgeColoring) and
+         Y-type rows (from the Webster cross-merge).
+      2. Allocate ancillas: ``QubitIDs.from_code(virtual_cssc)`` for the
+         CSS subset, then additional Y ancillas appended.
       3. Per-side state prep + detach (different bases for l / r).
-      4. Multi-round QEC via EdgeColoring on the virtual CSS subset.
-      5. Detectors for round 2+ ONLY for rows in the stabilizer center
-         (commute with all other gauge generators). Round 1 detectors
-         skipped for Tier 1 — fault tolerance requires the proper
-         subsystem-code detector logic deferred to Tier 2.
-      6. obs0: XOR of χ_l (basis_l-type meas) and χ_r (basis_r-type
-         meas) ancilla measurements at the final round. Per the
-         structural identity ∏_v χ_l(v) · ∏_w χ_r(w) = X̄_l ⊗ Z̄_r (up
-         to phase and stabilizers; Webster-Smith-Cohen / Cowtan §3.5).
-
-    TODO(Tier 2): proper fault-tolerance for the anti-commuting gauge
-    structure (Y-stab detector pattern; obs0 sign-tracking through
-    leftover X/Z cycle measurements; final destructive readout
-    detectors).
+      4. Per-round QEC: X-phase (RX → CX → MX) + Z-phase (RX → CZ → MX)
+         + Y-phase (RX → CX/CY/CZ → MX), the X/Z split is required for
+         determinism per Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2.
+      5. Detectors only for rows in the stabilizer center.
+      6. obs0 per Lemma 2 (design spec §9): XOR of m(Y_stab[i]) for i in
+         bridge.obs0_xor_map, plus m(leftover X-cycle) and
+         m(leftover Z-cycle) rows.
     """
     intercode = g_l.code is not g_r.code
     g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
@@ -1316,14 +1374,15 @@ def _build_joint_ppm_circuit_mixed_basis(
     virtual_cssc, _HX, _HZ, x_row_idx, z_row_idx, mixed_row_idx = (
         _split_quditcode_into_virtual_cssc(joint_code)
     )
-    if mixed_row_idx:
-        raise NotImplementedError(
-            "mixed-Pauli (Y-type) rows in mixed-basis joint code are not yet "
-            "supported; current bridge constructions emit only pure-X / pure-Z "
-            "gauge generators (Cowtan-He-Williamson-Yoder arXiv:2503.05003 §3.5)."
-        )
 
     qubit_ids = QubitIDs.from_code(virtual_cssc)
+    # Allocate Y-row ancillas appended after the virtual_cssc's check ids.
+    n_Y = len(mixed_row_idx)
+    if n_Y:
+        max_id = max(qubit_ids.all_qubits) if qubit_ids.all_qubits else -1
+        y_ancilla_ids: tuple[int, ...] = tuple(range(max_id + 1, max_id + 1 + n_Y))
+    else:
+        y_ancilla_ids = ()
     n_data_total = n_l + n_r if intercode else n_l
 
     if intercode:
@@ -1371,7 +1430,7 @@ def _build_joint_ppm_circuit_mixed_basis(
     if intercode and len(spec_r) != n_r:
         raise ValueError(f"data_init right length {len(spec_r)} != n_r {n_r}")
 
-    circuit = _mixed_basis_qubit_coords(n_data_total, qubit_ids)
+    circuit = _mixed_basis_qubit_coords(n_data_total, qubit_ids, y_ancilla_ids)
     circuit += _mixed_basis_state_prep(
         g_l, g_r, bridge,
         data_l_ids=data_l_ids,
@@ -1438,12 +1497,51 @@ def _build_joint_ppm_circuit_mixed_basis(
     else:
         z_phase_circuit, z_phase_record = stim.Circuit(), MeasurementRecord()
 
+    # Y-row syndrome extraction phase. Each Y-stab row gets a dedicated
+    # ancilla initialized in |+⟩ (RX); CX/CY/CZ gates entangle the ancilla
+    # with the data depending on the Pauli at each qubit; finally MX
+    # collapses the ancilla to record the eigenvalue.
+    y_phase_circuit = stim.Circuit()
+    y_phase_record = MeasurementRecord()
+    if n_Y:
+        H_full = np.asarray(joint_code.matrix).astype(np.int_)
+        n_q = joint_code.num_qudits
+        if y_ancilla_ids:
+            y_phase_circuit.append("RX", list(y_ancilla_ids))
+        # Emit per-Pauli gate lists (collected then appended in canonical order).
+        for y_anc, orig_row_idx in zip(y_ancilla_ids, mixed_row_idx):
+            row = H_full[orig_row_idx]
+            x_part = row[:n_q]
+            z_part = row[n_q:]
+            cx_pairs: list[int] = []
+            cy_pairs: list[int] = []
+            cz_pairs: list[int] = []
+            for q in range(n_q):
+                xq, zq = int(x_part[q]), int(z_part[q])
+                if xq == 1 and zq == 0:
+                    cx_pairs.extend([y_anc, qubit_ids.data[q]])
+                elif xq == 0 and zq == 1:
+                    cz_pairs.extend([y_anc, qubit_ids.data[q]])
+                elif xq == 1 and zq == 1:
+                    cy_pairs.extend([y_anc, qubit_ids.data[q]])
+            if cx_pairs:
+                y_phase_circuit.append("CX", cx_pairs)
+            if cy_pairs:
+                y_phase_circuit.append("CY", cy_pairs)
+            if cz_pairs:
+                y_phase_circuit.append("CZ", cz_pairs)
+        if y_ancilla_ids:
+            y_phase_circuit.append("MX", list(y_ancilla_ids))
+            y_phase_record.append({q: i for i, q in enumerate(y_ancilla_ids)})
+
     one_round = stim.Circuit()
     one_round += x_phase_circuit
     one_round += z_phase_circuit
+    one_round += y_phase_circuit
     round_measurement_record = MeasurementRecord()
     round_measurement_record.append(x_phase_record)
     round_measurement_record.append(z_phase_record)
+    round_measurement_record.append(y_phase_record)
 
     measurement_record = MeasurementRecord()
 
@@ -1452,12 +1550,14 @@ def _build_joint_ppm_circuit_mixed_basis(
     # Only these are safe to register as detectors (deterministic outcomes).
     H_sym = np.asarray(joint_code.matrix).astype(np.int_)
     center_mask = _compute_stabilizer_center_mask(H_sym, joint_code.num_qudits)
-    # Map virtual_cssc check_id → original row index in joint_code.matrix.
+    # Map original row index in joint_code.matrix → measurement-record ancilla ID.
     row_to_check: dict[int, int] = {}
     for slot, orig in enumerate(x_row_idx):
         row_to_check[orig] = qubit_ids.checks_x[slot]
     for slot, orig in enumerate(z_row_idx):
         row_to_check[orig] = qubit_ids.checks_z[slot]
+    for slot, orig in enumerate(mixed_row_idx):
+        row_to_check[orig] = y_ancilla_ids[slot]
     center_check_ids = tuple(
         row_to_check[orig] for orig in row_to_check if center_mask[orig]
     )
@@ -1512,108 +1612,39 @@ def _build_joint_ppm_circuit_mixed_basis(
         circuit.append(r_data_op, list(data_r_ids))
         measurement_record.append({q: i for i, q in enumerate(data_r_ids)})
 
-    # obs0 χ-row identification. By construction in
-    # _stitch_to_joint_code_mixed, the rows of joint_code.matrix are
-    # packed in two blocks:
-    #   x_rows = [HX_l (m_l_meas_X + n_V_l), HX_r (m_r_comp_X + n_gauge_r),
-    #             cycle_(basis_l=Z side), bridge_gauge (w)]
-    #   z_rows = [HZ_l (m_l_comp_Z + n_gauge_l), HZ_r (m_r_meas_Z + n_V_r),
-    #             cycle_(basis_l=X side)]
-    # where for basis_s = X the side-s "meas" block is the X-type and the
-    # "comp" block is the Z-type (symmetric for basis_s = Z).
+    # obs0 emission per Lemma 2 (design spec §9):
+    #   obs0 = ⊕_{i ∈ obs0_xor_map} m(Y_stab[i])
+    #          ⊕ ⊕_{c ∈ x_leftover_indices} m(X-cycle row c)
+    #          ⊕ ⊕_{c ∈ z_leftover_indices} m(Z-cycle row c)
     #
-    # χ_l live in the M_meas_l sub-block on side l (rows
-    # [m_l_meas, m_l_meas + n_V_l) within the side-l block of the basis_l-
-    # type row list). χ_r symmetric on the basis_r-type list.
-    n_V_l = len(g_l.support)
-    n_V_r = len(g_r.support)
-    n_gauge_l = g_l_aug.gauge.shape[0]
-    if bridge.basis_l is Pauli.X:
-        m_l_meas = g_l.code.matrix_x.shape[0]
-        m_l_comp_ext = g_l.code.matrix_z.shape[0]
-        chi_l_orig = x_row_idx[m_l_meas : m_l_meas + n_V_l]
-    else:
-        m_l_meas = g_l.code.matrix_z.shape[0]
-        m_l_comp_ext = g_l.code.matrix_x.shape[0]
-        chi_l_orig = z_row_idx[m_l_meas : m_l_meas + n_V_l]
+    # Each Y_stab row corresponds to a cross-merged χ_l × χ_r pair at one
+    # merge qubit. By construction (Webster-Smith-Cohen arXiv:2511.15989
+    # §II.B.2 + Lemma 2 of the design spec):
+    #   ∏_i Y_stab[i] = X̄_l ⊗ Z̄_r ⊗ ∏_k Y_k (on adapter merge_qubits)
+    # The leftover X-cycle / Z-cycle rows (those with weight-≥2 adapter
+    # support that survived the merge) contribute Z^A / X^A terms that
+    # cancel the ∏_k Y_k = X^A · Z^A residual on the adapter.
+    obs0_check_ids: list[int] = []
+    # Y-stab measurements: map bridge.obs0_xor_map (indices into Y_stab) to
+    # ancilla IDs in y_ancilla_ids.
+    for y_idx in bridge.obs0_xor_map:
+        if 0 <= y_idx < len(y_ancilla_ids):
+            obs0_check_ids.append(y_ancilla_ids[y_idx])
+    # Leftover X-cycle measurements: bridge.x_leftover_indices are indices
+    # into the HX_out block. Map to qubit_ids.checks_x.
+    for xi in bridge.x_leftover_indices:
+        if 0 <= xi < len(qubit_ids.checks_x):
+            obs0_check_ids.append(qubit_ids.checks_x[xi])
+    # Leftover Z-cycle measurements: bridge.z_leftover_indices map to checks_z.
+    for zi in bridge.z_leftover_indices:
+        if 0 <= zi < len(qubit_ids.checks_z):
+            obs0_check_ids.append(qubit_ids.checks_z[zi])
 
-    # χ_r position depends on whether basis_r == basis_l (same row list)
-    # or basis_r != basis_l (different row list, no left-side prefix).
-    if bridge.basis_l is bridge.basis_r:
-        # Both χ_l and χ_r live in the same Pauli-type list — χ_r comes
-        # after the entire side-l block of that list.
-        m_r_meas = (
-            g_r.code.matrix_x.shape[0] if bridge.basis_r is Pauli.X
-            else g_r.code.matrix_z.shape[0]
-        )
-        prefix = m_l_meas + n_V_l + m_r_meas
-        same_list = x_row_idx if bridge.basis_r is Pauli.X else z_row_idx
-        chi_r_orig = same_list[prefix : prefix + n_V_r]
-    else:
-        # χ_r is in the basis_r-type row list. The basis_r list contains
-        # side-l comp rows first (m_l_comp_ext + n_gauge_l), then side-r
-        # meas rows (m_r_meas) and finally χ_r rows. χ_r are at offset
-        # m_l_comp_ext + n_gauge_l + m_r_meas within the basis_r-list.
-        m_r_meas = (
-            g_r.code.matrix_x.shape[0] if bridge.basis_r is Pauli.X
-            else g_r.code.matrix_z.shape[0]
-        )
-        offset = m_l_comp_ext + n_gauge_l + m_r_meas
-        basis_r_list = x_row_idx if bridge.basis_r is Pauli.X else z_row_idx
-        chi_r_orig = basis_r_list[offset : offset + n_V_r]
-
-    # χ_l and χ_r meas-check ancilla IDs (basis_l-type and basis_r-type seed
-    # operators respectively).
-    chi_l_check_ids = tuple(row_to_check[i] for i in chi_l_orig)
-    chi_r_check_ids = tuple(row_to_check[i] for i in chi_r_orig)
-
-    # Bridge-gauge ancilla IDs. Per ``_stitch_to_joint_code_mixed`` these are
-    # the trailing w pure-X rows of the X-block (single X on each adapter
-    # qubit). These would appear in the full obs0 formula to absorb the
-    # X^|B| stray support of ∏ χ_l on the adapter qubits.
-    bridge_gauge_orig = x_row_idx[-w:] if w else []
-    bridge_gauge_check_ids = tuple(row_to_check[i] for i in bridge_gauge_orig)
-
-    # obs0 (canonical Cohen-Kim-Bartlett-Brown / Cross-He-Rall-Yoder /
-    # Cowtan-He-Williamson-Yoder form):
-    #   obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(bridge_gauges)
-    #          ⊕ ⊕ m(Y-stabs in obs0_xor_map)
-    #          ⊕ ⊕ m(leftover X-cycle) ⊕ ⊕ m(leftover Z-cycle)
-    #
-    # Per Cohen, Kim, Bartlett, Brown arXiv:2110.10794 §II.B.2, Cross, He,
-    # Rall, Yoder arXiv:2407.18393 Theorem 20 (Appendix A.2), and the
-    # design spec ``docs/superpowers/specs/2026-06-15-mixed-basis-joint-
-    # ppm-design.md`` §9 Lemma 2, the Pauli PRODUCT of the χ_l × χ_r ×
-    # bridge_gauge rows alone equals X̄_l ⊗ Z̄_r ⊗ Z^|B| on the adapter
-    # AS AN OPERATOR, BUT this operator anti-commutes with the χ_l and
-    # bridge_gauge X-on-adapter gauge generators themselves. Concretely,
-    # the Z-on-adapter contribution from ∏ χ_r anti-commutes with the
-    # X-on-adapter contributions of individual χ_l and bridge_gauge rows.
-    # The Webster-Smith-Cohen / Cross-He-Rall-Yoder construction patches
-    # this by adding ``Y-stab`` corrections — products of an X-singleton
-    # and Z-singleton at each merge qubit — whose XOR into obs0 cancels
-    # the leftover Z (and X) on the adapter. The current
-    # ``_stitch_to_joint_code_mixed`` does NOT yet populate
-    # ``bridge.obs0_xor_map`` / ``bridge.x_leftover_indices`` /
-    # ``bridge.z_leftover_indices`` (pair-merge + Y-stab construction is
-    # deferred to Tier 2), so the necessary Y-stab and cycle-correction
-    # XOR terms are unavailable and a full obs0 cannot be emitted yet.
-    #
-    # The X-/Z-phase split schedule above IS a prerequisite for the
-    # corrected obs0 (it guarantees χ_l ancillas are committed before any
-    # Z-CZ gates randomize their adapter eigenvalues), but it is not by
-    # itself sufficient: the operator-algebra defect (X̄_l ⊗ Z̄_r ⊗ Z^|B|
-    # ∉ stabilizer center of the gauge group) is independent of the
-    # schedule and requires the missing Y-stab / leftover corrections.
-    #
-    # Tier 1 acceptance therefore continues to emit no observable here.
-    # The χ check IDs and bridge-gauge check IDs are computed and stored
-    # in ``_obs0_*_check_ids`` for downstream consumers that want to
-    # compute the XOR manually outside the Stim DEM, e.g. for
-    # hand-verified sanity checks once the Y-stab / cycle pieces land.
-    _obs0_chi_l_check_ids = chi_l_check_ids  # noqa: F841 (recorded for Tier 2)
-    _obs0_chi_r_check_ids = chi_r_check_ids  # noqa: F841 (recorded for Tier 2)
-    _obs0_bridge_gauge_check_ids = bridge_gauge_check_ids  # noqa: F841 (recorded for Tier 2)
+    if obs0_check_ids:
+        obs0_targets = [
+            measurement_record.get_target_rec(cid) for cid in obs0_check_ids
+        ]
+        circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)

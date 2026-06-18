@@ -455,3 +455,28 @@ def test_layout_to_quditcode_round_trips_rows() -> None:
     ])
     assert (np.asarray(qc.matrix).astype(np.uint8) == expected).all()
     assert qc.num_qudits == layout.column_slices["A"].stop
+
+
+def test_stitch_via_joint_layout_matches_legacy_row_counts_mixed_basis() -> None:
+    """Layout-derived QuditCode and the legacy _stitch_to_joint_code_mixed
+    produce stabilizer matrices with the same TOTAL row count (modulo provenance
+    grouping). Verifies the new path is dimension-consistent with the existing
+    implementation.
+    """
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_code_mixed
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    legacy_code, _ = _stitch_to_joint_code_mixed(g_l, g_r, bridge)
+    layout = build_joint_layout(g_l, g_r, bridge)
+    new_code = layout.to_quditcode(code_l.field)
+    assert np.asarray(new_code.matrix).shape[0] == np.asarray(legacy_code.matrix).shape[0]
+    assert new_code.num_qudits == legacy_code.num_qudits
