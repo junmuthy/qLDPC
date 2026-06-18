@@ -13,7 +13,7 @@ import dataclasses
 
 import numpy as np
 
-from qldpc.objects import PauliXZ
+from qldpc.objects import Pauli, PauliXZ
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -63,3 +63,36 @@ def column_slices_for_bridge(g_l, g_r, bridge) -> dict[str, slice]:
         "k_r": slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r),
         "A": slice(n_l + n_r + k_l + k_r, n_l + n_r + k_l + k_r + w),
     }
+
+
+def _block_data(g, *, basis_block: PauliXZ, side: str, slices: dict[str, slice], N: int) -> np.ndarray:
+    """Build the data-stabilizer block (H_X or H_Z) for one side.
+
+    Matches main.tex §4.2 row blocks 1 and 2 of $\\tilde H^{\\mathrm{joint,pre}}$:
+    the side's original H_basis sits on Q_s; when basis_block is dual to the
+    side's gadget basis, the rows whose index is in C_0^s extend into κ^s via
+    f_basis^s = π_{C_0^s}^T (a single 1 per κ^s column at row C_0^s[k]).
+
+    Args:
+      g: GadgetLayout for the side.
+      basis_block: Pauli.X to build a row of H_X, Pauli.Z to build a row of H_Z.
+      side: 'l' or 'r'.
+      slices: column partition from column_slices_for_bridge.
+      N: total merged-code column count.
+
+    Returns:
+      Matrix of shape (m_basis, N). The data columns Q_s hold the original
+      H_basis^s; the κ^s columns hold f_basis = π_{C_0^s}^T iff basis_block is
+      the basis DUAL to g.basis (single-gadget extension). All other columns 0.
+    """
+    H = np.asarray(g.code.matrix_x if basis_block is Pauli.X else g.code.matrix_z).astype(np.uint8)
+    m = H.shape[0]
+    block = np.zeros((m, N), dtype=np.uint8)
+    block[:, slices[f"Q_{side}"]] = H
+    # f extension lives on κ^s iff this basis is dual to the side's gadget basis.
+    if basis_block is not g.basis:
+        c_0 = list(g.data_checks)
+        kappa_slice = slices[f"k_{side}"]
+        for k, j in enumerate(c_0):
+            block[j, kappa_slice.start + k] = 1
+    return block

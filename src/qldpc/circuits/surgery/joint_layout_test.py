@@ -66,3 +66,37 @@ def test_column_slices_for_steane_pair() -> None:
     assert slices["k_l"] == slice(n_l + n_r, n_l + n_r + k_l)
     assert slices["k_r"] == slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
     assert slices["A"] == slice(n_l + n_r + k_l + k_r, n_l + n_r + k_l + k_r + w)
+
+
+def test_block_data_x_left_carries_f_X_on_kappa_l_for_basis_l_Z() -> None:
+    """Left H_X^l data rows in mixed-basis Z⊗X must extend f_X^l = π_{C_0^l}^T into κ^l."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.joint_layout import _block_data
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    slices = column_slices_for_bridge(g_l, g_r, bridge)
+    N = slices["A"].stop
+
+    block = _block_data(g_l, basis_block=Pauli.X, side="l", slices=slices, N=N)
+    m_X_l = g_l.code.matrix_x.shape[0]
+    assert block.shape == (m_X_l, N)
+    # Data side equals original H_X^l on Q_l columns.
+    assert (block[:, slices["Q_l"]] == np.asarray(g_l.code.matrix_x).astype(np.uint8)).all()
+    # κ^l columns: f_X^l = π_{C_0^l}^T extends H_X^l rows whose index is in C_0^l.
+    # C_0^l = X-checks touching V_0^l on the left's Z-gadget.
+    c_0_l = list(g_l.data_checks)
+    f_X_l_expected = np.zeros((m_X_l, bridge.g_l_aug.incidence.shape[0]), dtype=np.uint8)
+    for k, j in enumerate(c_0_l):
+        f_X_l_expected[j, k] = 1
+    assert (block[:, slices["k_l"]] == f_X_l_expected).all()
+    # Everything else zero.
+    assert not block[:, slices["Q_r"]].any()
+    assert not block[:, slices["k_r"]].any()
+    assert not block[:, slices["A"]].any()
