@@ -1311,8 +1311,18 @@ def _mixed_basis_state_prep(
         circuit.append(l_complement, list(ancilla_l_ids))
     if ancilla_r_ids:
         circuit.append(r_complement, list(ancilla_r_ids))
+    # Bridge prep:
+    #   * Same-basis (basis_l is basis_r): basis_l-complement init matches the
+    #     adapter stabilizer choice in ``_stitch_to_joint_code_mixed``.
+    #   * Mixed-basis (basis_l ≠ basis_r): |Y_+⟩^⊗w so that ∏ Y_{a_q} is a
+    #     stabilizer with eigenvalue +1, absorbing the adapter Y residual per
+    #     main.tex §4.5 Eq. eq:obs0-corrected (Cohen-Kim-Bartlett-Brown
+    #     arXiv:2110.10794 §II.B.2 / Fig. 4 |Y⟩ ancilla protocol).
     if bridge_ids:
-        circuit.append(l_complement, list(bridge_ids))
+        if bridge.basis_l is bridge.basis_r:
+            circuit.append(l_complement, list(bridge_ids))
+        else:
+            circuit.append("RY", list(bridge_ids))
     return circuit
 
 
@@ -1612,8 +1622,14 @@ def _build_joint_ppm_circuit_mixed_basis(
         circuit.append(r_anc_op, detach_r)
         measurement_record.append({q: i for i, q in enumerate(detach_r)})
     if bridge_ids:
-        # Bridge qubits measured in basis_l-complement (matches their init).
-        circuit.append(l_anc_op, list(bridge_ids))
+        # Mixed-basis: bridge measured in Y basis (matches |Y_+⟩ prep) so that
+        # ∏ m(a_q) gives the ∏ Y_{a_q} eigenvalue per main.tex §4.5
+        # Eq. eq:obs0-corrected. Same-basis: matches basis_l-complement init.
+        if bridge.basis_l is bridge.basis_r:
+            bridge_meas_op = l_anc_op
+        else:
+            bridge_meas_op = "MY"
+        circuit.append(bridge_meas_op, list(bridge_ids))
         measurement_record.append({q: i for i, q in enumerate(bridge_ids)})
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
 
@@ -1624,43 +1640,39 @@ def _build_joint_ppm_circuit_mixed_basis(
         circuit.append(r_data_op, list(data_r_ids))
         measurement_record.append({q: i for i, q in enumerate(data_r_ids)})
 
-    # obs0 per Lemma 2 (design spec §9 / main.tex §4.4):
-    #   obs0 = ⊕_{i ∈ rows_chi['l']} m(check_for(i)) ⊕ ⊕_{i ∈ rows_chi['r']} m(check_for(i))
-    #          ⊕ ⊕_{q ∈ rows_y} m(y_ancilla_ids[q])
-    #
-    # When surviving χ rows are nonempty, this gives Z̄_l ⊗ X̄_r as a product
-    # of merged-code stabilizers (Lemma 2). When all V_0 vertices are ports
-    # (degenerate case, e.g. Steane × Steane), no χ survive: the y_q product
-    # alone carries a ∏ Y_{a_q} residual on the adapter that anti-commutes
-    # with bridge state-prep. In that case we suppress obs0 emission rather
-    # than emit a non-deterministic observable. The truth-table test
-    # (test_mixed_basis_joint_truth_table_x_l_z_r) remains xfail for this
-    # fixture until a non-degenerate fixture is added; see
-    # docs/superpowers/plans/2026-06-18-joint-ppm-layout-refactor.md §Task 13.
+    # obs0 per main.tex §4.5 Eq. eq:obs0-corrected:
+    #   Z̄_l ⊗ X̄_r = ∏ χ_l surviving · ∏ χ_r surviving · ∏ y_q · ∏ Y_{a_q}
+    # The last product (∏ Y_{a_q}) over bridge destructive Y-basis readouts
+    # closes the adapter Y residual that arises in the mixed-basis case
+    # (Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2 / Fig. 4 |Y⟩-ancilla
+    # protocol). With |Y_+⟩^⊗w bridge init (RY) and MY detach, this term is
+    # deterministic and produces a deterministic obs0 even in the degenerate
+    # V_0 = ports regime (e.g. Steane × Steane), where rows_chi['l'] and
+    # rows_chi['r'] are both empty.
     obs0_check_ids: list[int] = []
 
     def _row_to_check_id(row_idx: int, in_x_block: bool) -> int:
         check_ids = qubit_ids.checks_x if in_x_block else qubit_ids.checks_z
         return check_ids[row_idx]
 
-    if layout.rows_chi["l"] or layout.rows_chi["r"]:
-        # Non-degenerate: surviving χ rows cancel the adapter residual.
-        for row_idx in layout.rows_chi["l"]:
-            in_x = layout.basis_l is Pauli.X
-            obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
-        for row_idx in layout.rows_chi["r"]:
-            in_x = layout.basis_r is Pauli.X
-            obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
-        for y_idx in layout.rows_y:
-            obs0_check_ids.append(y_ancilla_ids[y_idx])
+    for row_idx in layout.rows_chi["l"]:
+        in_x = layout.basis_l is Pauli.X
+        obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+    for row_idx in layout.rows_chi["r"]:
+        in_x = layout.basis_r is Pauli.X
+        obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+    for y_idx in layout.rows_y:
+        obs0_check_ids.append(y_ancilla_ids[y_idx])
+    # ∏ Y_{a_q}: bridge destructive Y-basis readouts — closes the adapter
+    # residual per main.tex §4.5 Eq. eq:obs0-corrected.
+    for bid in bridge_ids:
+        obs0_check_ids.append(bid)
 
-        if obs0_check_ids:
-            obs0_targets = [
-                measurement_record.get_target_rec(cid) for cid in obs0_check_ids
-            ]
-            circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
-    # else: degenerate V_0 = port case; obs0 not emitted (test_mixed_basis_
-    # circuit_compiles_to_dem passes vacuously; truth_table test stays xfail).
+    if obs0_check_ids:
+        obs0_targets = [
+            measurement_record.get_target_rec(cid) for cid in obs0_check_ids
+        ]
+        circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
