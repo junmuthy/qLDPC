@@ -147,3 +147,109 @@ def _block_cycle(T_s: np.ndarray, H_R: np.ndarray, *, side: str,
     block[:, slices[f"k_{side}"]] = np.asarray(T_s).astype(np.uint8)
     block[:, slices["A"]] = np.asarray(H_R).astype(np.uint8)
     return block
+
+
+def build_pre_merge_layout(g_l, g_r, bridge) -> JointPPMLayout:
+    """Assemble the pre-merge (before cross-merge) joint check matrices per main.tex §4.2.
+
+    Row order in H_X:
+      1. data H_X^l (block 1)
+      2. data H_X^r (block 2)
+      3. gauge H_X'^{l,aug} if basis_l=Z (gauge sits in H_X when basis is dual)
+      4. χ rows from the side whose basis is X (so χ rows live in H_X)
+      5. cycle row from the side whose basis is Z (cycle lives in dual matrix)
+
+    Mirror order in H_Z. The exact placement is basis-aware. ``rows_chi[side]``
+    holds row indices into whichever of H_X/H_Z carries that side's χ rows.
+
+    Note: this function assumes inter-code (g_l.code is not g_r.code). Intra-code
+    is left for a separate task; the dispatcher in build_joint_layout will guard
+    against it.
+    """
+    assert g_l.code is not g_r.code, "intra-code mixed-basis not yet implemented"
+    slices = column_slices_for_bridge(g_l, g_r, bridge)
+    N = slices["A"].stop
+
+    # Per-side blocks
+    data_x_l = _block_data(g_l, basis_block=Pauli.X, side="l", slices=slices, N=N)
+    data_z_l = _block_data(g_l, basis_block=Pauli.Z, side="l", slices=slices, N=N)
+    data_x_r = _block_data(g_r, basis_block=Pauli.X, side="r", slices=slices, N=N)
+    data_z_r = _block_data(g_r, basis_block=Pauli.Z, side="r", slices=slices, N=N)
+    chi_l = _block_chi(bridge.g_l_aug, side="l", slices=slices, N=N, labels=bridge.label_l)
+    chi_r = _block_chi(bridge.g_r_aug, side="r", slices=slices, N=N, labels=bridge.label_r)
+    gauge_l = _block_gauge(bridge.g_l_aug, side="l", slices=slices, N=N)
+    gauge_r = _block_gauge(bridge.g_r_aug, side="r", slices=slices, N=N)
+    cycle_l = _block_cycle(bridge.T_l, bridge.H_R, side="l", slices=slices, N=N)
+    cycle_r = _block_cycle(bridge.T_r, bridge.H_R, side="r", slices=slices, N=N)
+
+    # χ_s sits in H_basis_s; gauge_s and cycle_s sit in H_dual(basis_s).
+    H_X_blocks: list[tuple[np.ndarray, str, str]] = [
+        (data_x_l, "data_x", "l"),
+        (data_x_r, "data_x", "r"),
+    ]
+    H_Z_blocks: list[tuple[np.ndarray, str, str]] = [
+        (data_z_l, "data_z", "l"),
+        (data_z_r, "data_z", "r"),
+    ]
+    for side_label, basis, chi_block, gauge_block, cycle_block in (
+        ("l", bridge.basis_l, chi_l, gauge_l, cycle_l),
+        ("r", bridge.basis_r, chi_r, gauge_r, cycle_r),
+    ):
+        if basis is Pauli.X:
+            H_X_blocks.append((chi_block, "chi", side_label))
+            H_Z_blocks.append((gauge_block, "gauge", side_label))
+            H_Z_blocks.append((cycle_block, "cycle", side_label))
+        else:
+            H_Z_blocks.append((chi_block, "chi", side_label))
+            H_X_blocks.append((gauge_block, "gauge", side_label))
+            H_X_blocks.append((cycle_block, "cycle", side_label))
+
+    def _stack_with_provenance(blocks):
+        rows: list[np.ndarray] = []
+        provenance: dict[tuple[str, str], list[int]] = {}
+        for block, kind, side_label in blocks:
+            start = len(rows)
+            for r in np.asarray(block).astype(np.uint8):
+                rows.append(r)
+            end = len(rows)
+            provenance.setdefault((kind, side_label), []).extend(range(start, end))
+        if rows:
+            mat = np.stack(rows).astype(np.uint8)
+        else:
+            mat = np.zeros((0, N), dtype=np.uint8)
+        return mat, provenance
+
+    H_X, prov_X = _stack_with_provenance(H_X_blocks)
+    H_Z, prov_Z = _stack_with_provenance(H_Z_blocks)
+
+    def _gather(prov, kind):
+        out: dict[str, tuple[int, ...]] = {"l": (), "r": ()}
+        for (k, side_label), idx in prov.items():
+            if k == kind:
+                out[side_label] = tuple(idx)
+        return out
+
+    H_Y = np.zeros((0, 2 * N), dtype=np.uint8)
+    return JointPPMLayout(
+        H_X=H_X,
+        H_Z=H_Z,
+        H_Y=H_Y,
+        rows_data_x=_gather(prov_X, "data_x"),
+        rows_data_z=_gather(prov_Z, "data_z"),
+        rows_chi={
+            "l": _gather(prov_X if bridge.basis_l is Pauli.X else prov_Z, "chi")["l"],
+            "r": _gather(prov_X if bridge.basis_r is Pauli.X else prov_Z, "chi")["r"],
+        },
+        rows_gauge={
+            "l": _gather(prov_Z if bridge.basis_l is Pauli.X else prov_X, "gauge")["l"],
+            "r": _gather(prov_Z if bridge.basis_r is Pauli.X else prov_X, "gauge")["r"],
+        },
+        rows_cycle={
+            "l": _gather(prov_Z if bridge.basis_l is Pauli.X else prov_X, "cycle")["l"],
+            "r": _gather(prov_Z if bridge.basis_r is Pauli.X else prov_X, "cycle")["r"],
+        },
+        rows_y=(),
+        basis_l=bridge.basis_l,
+        basis_r=bridge.basis_r,
+        column_slices=slices,
+    )
