@@ -402,3 +402,19 @@ def apply_cross_merge(pre: JointPPMLayout, bridge) -> JointPPMLayout:
         basis_r=pre.basis_r,
         column_slices=pre.column_slices,
     )
+
+
+def build_joint_layout(g_l, g_r, bridge) -> JointPPMLayout:
+    """Dispatcher: build pre-merge layout then apply cross-merge if mixed-basis.
+
+    Same-basis joint PPM is out of scope for this iteration — it raises
+    NotImplementedError. Callers (e.g. _build_joint_ppm_circuit_same_basis)
+    continue to use the existing _stitch_intercode / _stitch_intracode path.
+    """
+    if bridge.basis_l is bridge.basis_r:
+        raise NotImplementedError(
+            "same-basis joint PPM remains on the legacy stitch in circuit.py; "
+            "build_joint_layout handles only mixed-basis (basis_l != basis_r)"
+        )
+    pre = build_pre_merge_layout(g_l, g_r, bridge)
+    return apply_cross_merge(pre, bridge)

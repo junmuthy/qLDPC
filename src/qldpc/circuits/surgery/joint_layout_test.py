@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from qldpc import codes
 from qldpc.circuits.surgery.joint_layout import JointPPMLayout, column_slices_for_bridge
@@ -321,3 +322,107 @@ def test_cross_merge_deletes_port_rows_and_builds_w_y_rows() -> None:
     surviving_chi_r = len(post.rows_chi["r"])
     assert surviving_chi_l == len(pre.rows_chi["l"]) - w
     assert surviving_chi_r == len(pre.rows_chi["r"]) - w
+
+
+from qldpc.circuits.surgery.joint_layout import build_joint_layout
+
+
+def test_build_joint_layout_mixed_basis_commutation_excluding_cycle_pair() -> None:
+    """Verifies the commutation claims of main.tex §4.4 for the merged subsystem code.
+
+    The merged code is a subsystem code (non-CSS): cycle_l (X-type, in H_X) and
+    cycle_r (Z-type, in H_Z) anti-commute on the adapter via H_R·H_R^T, forming a
+    gauge pair. The STABILIZER CLAIMS from §4.4 are:
+      (a) data H_X, H_Z, and all χ rows pairwise commute (Lemma 1 of design spec).
+      (b) y_q commutes with everything in H_X ∪ H_Z and with every other y_q'.
+      (c) cycle rows commute with all data, χ, and y rows (only cycle_l-cycle_r
+          inter-side pair may anti-commute, and that's the gauge structure).
+    """
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    layout = build_joint_layout(g_l, g_r, bridge)
+    N = layout.column_slices["A"].stop
+
+    def _sym(H, kind):
+        if kind == "x":
+            return np.hstack([H, np.zeros_like(H)])
+        if kind == "z":
+            return np.hstack([np.zeros_like(H), H])
+        return H
+
+    H_X_sym = _sym(layout.H_X, "x")
+    H_Z_sym = _sym(layout.H_Z, "z")
+    H_Y_sym = layout.H_Y
+
+    def _inner(A, B):
+        # A, B in F_2^{m × 2N}; ⟨a, b⟩_J = a_X · b_Z + a_Z · b_X mod 2
+        a_x, a_z = A[:, :N], A[:, N:]
+        b_x, b_z = B[:, :N], B[:, N:]
+        return (a_x @ b_z.T + a_z @ b_x.T) % 2
+
+    # (b): y_q commutes with everything.
+    for other_sym in (H_X_sym, H_Z_sym, H_Y_sym):
+        inner = _inner(H_Y_sym, other_sym)
+        assert (inner == 0).all(), (
+            f"y_q anti-commutes with another stabilizer; this would break Lemma 1"
+        )
+
+    # Identify cycle rows by provenance.
+    cycle_l_in_H_X = layout.rows_cycle["l"] if layout.basis_l is Pauli.Z else ()
+    cycle_r_in_H_X = layout.rows_cycle["r"] if layout.basis_r is Pauli.Z else ()
+    cycle_l_in_H_Z = layout.rows_cycle["l"] if layout.basis_l is Pauli.X else ()
+    cycle_r_in_H_Z = layout.rows_cycle["r"] if layout.basis_r is Pauli.X else ()
+    cycle_in_H_X = sorted(set(cycle_l_in_H_X) | set(cycle_r_in_H_X))
+    cycle_in_H_Z = sorted(set(cycle_l_in_H_Z) | set(cycle_r_in_H_Z))
+
+    # Non-cycle rows: data + chi (the "honest stabilizers" of the merged code).
+    non_cycle_in_H_X = [
+        i for i in range(layout.H_X.shape[0]) if i not in cycle_in_H_X
+    ]
+    non_cycle_in_H_Z = [
+        i for i in range(layout.H_Z.shape[0]) if i not in cycle_in_H_Z
+    ]
+
+    # (a): non-cycle H_X and non-cycle H_Z rows pairwise commute.
+    nc_X_sym = H_X_sym[non_cycle_in_H_X]
+    nc_Z_sym = H_Z_sym[non_cycle_in_H_Z]
+    nc_all = np.vstack([nc_X_sym, nc_Z_sym])
+    assert (_inner(nc_all, nc_all) == 0).all(), (
+        "non-cycle (data + χ) rows anti-commute pairwise; Lemma 1 fails"
+    )
+
+    # (c): cycle rows commute with non-cycle rows (data, χ, y).
+    if cycle_in_H_X:
+        c_X_sym = H_X_sym[cycle_in_H_X]
+        assert (_inner(c_X_sym, nc_all) == 0).all()
+        assert (_inner(c_X_sym, H_Y_sym) == 0).all()
+    if cycle_in_H_Z:
+        c_Z_sym = H_Z_sym[cycle_in_H_Z]
+        assert (_inner(c_Z_sym, nc_all) == 0).all()
+        assert (_inner(c_Z_sym, H_Y_sym) == 0).all()
+
+    # cycle_l ↔ cycle_r is the EXPECTED gauge pair — anti-commutes via H_R H_R^T.
+    # Not asserted as commuting (that's the whole point of the subsystem code).
+
+
+def test_build_joint_layout_raises_for_same_basis() -> None:
+    """build_joint_layout only handles mixed-basis in this plan; same-basis raises."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(code, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    with pytest.raises(NotImplementedError, match="same-basis"):
+        build_joint_layout(g_l, g_r, bridge)
