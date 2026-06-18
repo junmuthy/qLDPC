@@ -140,3 +140,81 @@ def test_mixed_basis_joint_truth_table_x_l_z_r() -> None:
         assert (obs[:, 0] == expected).all(), (
             f"init={init} expected obs0={expected}, got mean {obs[:, 0].mean():.3f}"
         )
+
+
+def _raw_observables(circuit, shots):
+    """Raw ±1 obs values via compile_sampler + manual XOR.
+
+    Truth-table sign checks REQUIRE this API — detector_sampler.sample(
+    separate_observables=True) returns flips relative to the noiseless
+    reference (always 0 on noiseless run), hiding the sign. See
+    examples/lattice_surgery.ipynb §0 ``raw_observables`` for the
+    canonical helper this mirrors.
+    """
+    import numpy as np
+    sampler = circuit.compile_sampler()
+    raw = sampler.sample(shots=shots).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
+    cols = []
+    for line in obs_lines:
+        offsets = [int(t.strip("rec[]")) for t in line.split() if t.startswith("rec[")]
+        meas_idx = [n_meas + off for off in offsets]
+        cols.append(np.bitwise_xor.reduce(raw[:, meas_idx], axis=1))
+    return np.stack(cols, axis=1)
+
+
+def test_mixed_basis_joint_truth_table_bb_xz() -> None:
+    """Mixed-basis joint X̄_l ⊗ Z̄_r noiseless truth table on BB [[72,12]].
+
+    This test uses a NON-DEGENERATE fixture (|V_0^l|=8 > w=4 < |V_0^r|=14)
+    so the cross-merge leaves surviving χ rows on both sides. The Y-basis
+    bridge protocol (main.tex §4.5 Eq. eq:obs0-corrected) + provenance-
+    driven obs0 should then give the correct joint eigenvalue.
+
+    Per the project convention this verifies via ``_raw_observables`` —
+    NOT ``detector_sampler.sample(separate_observables=True)``, which
+    returns flips relative to the noiseless reference (always 0 in a
+    noiseless run, hiding the sign).
+    """
+    import sympy
+    from qldpc.circuits.surgery import (
+        build_bridge,
+        build_gadget,
+        build_joint_ppm_circuit,
+        keep_only_observable,
+        logical_state_init,
+    )
+
+    xs, ys = sympy.symbols("x y")
+    c_l = codes.BBCode({xs: 6, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    c_r = codes.BBCode({xs: 6, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    x_l = np.asarray(c_l.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    z_r = np.asarray(c_r.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g_l = build_gadget(c_l, x_l, basis=Pauli.X)
+    g_r = build_gadget(c_r, z_r, basis=Pauli.Z)
+    bridge = build_bridge(
+        g_l, g_r, port_subset_l=tuple(range(4)), port_subset_r=tuple(range(4)),
+    )
+
+    for s_l, s_r, expected in [
+        ("+", "0", 0),
+        ("-", "0", 1),
+        ("+", "1", 1),
+        ("-", "1", 0),
+    ]:
+        init_l = logical_state_init(c_l, s_l, log_idx=0)
+        init_r = logical_state_init(c_r, s_r, log_idx=0)
+        circuit, _ = build_joint_ppm_circuit(
+            g_l, g_r, bridge, rounds=3, noise_model=None,
+            data_init=(init_l, init_r),
+        )
+        circuit = keep_only_observable(circuit, keep_idx=0)
+        obs = _raw_observables(circuit, shots=32)
+        assert obs.shape[1] == 1, f"expected 1 observable, got {obs.shape[1]}"
+        actual_bits = obs[:, 0]
+        # In a noiseless run the eigenvalue is deterministic shot-to-shot.
+        assert (actual_bits == expected).all(), (
+            f"init=({s_l},{s_r}) expected obs0={expected}, got "
+            f"bits {np.bincount(actual_bits, minlength=2).tolist()}"
+        )
