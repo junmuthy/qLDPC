@@ -162,3 +162,40 @@ def test_block_data_skips_sentinel_minus_one_indices_for_augmented_gadget() -> N
     ]
     actual_last_row_kappa = np.flatnonzero(block[m_X_l - 1, slices["k_l"]])
     assert sorted(actual_last_row_kappa.tolist()) == sorted(legit_kappa_positions)
+
+
+def test_block_chi_left_z_basis_attaches_adapter_label() -> None:
+    """χ_l rows (basis_l=Z) carry (π_{V_0^l} | H_Z'^{l,aug} | π_{P_l}^T P_{σ_l}) on (Q_l | k_l | A)."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.joint_layout import _block_chi
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    slices = column_slices_for_bridge(g_l, g_r, bridge)
+    N = slices["A"].stop
+
+    block = _block_chi(bridge.g_l_aug, side="l", slices=slices, N=N,
+                       labels=bridge.label_l)
+    n_V0_l = len(g_l.support)
+    assert block.shape == (n_V0_l, N)
+    # Q_l side: π_{V_0^l} — row i has 1 at column V_0^l[i].
+    for i, v in enumerate(g_l.support):
+        assert block[i, slices["Q_l"].start + v] == 1
+    # k_l side: H_Z'^{l,aug} (incidence^T).
+    assert (block[:, slices["k_l"]] == bridge.g_l_aug.incidence.T).all()
+    # Adapter columns: row i has 1 at column A.start + label_l[i] when label_l[i] >= 0,
+    # 0 otherwise.
+    for i, lab in enumerate(bridge.label_l):
+        if lab >= 0:
+            assert block[i, slices["A"].start + lab] == 1
+        else:
+            assert not block[i, slices["A"]].any()
+    # No support on Q_r / k_r.
+    assert not block[:, slices["Q_r"]].any()
+    assert not block[:, slices["k_r"]].any()

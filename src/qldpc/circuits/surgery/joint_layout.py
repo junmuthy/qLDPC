@@ -97,3 +97,30 @@ def _block_data(g, *, basis_block: PauliXZ, side: str, slices: dict[str, slice],
                 continue  # sentinel for extra-κ rows from build_gadget_augmented
             block[j, kappa_slice.start + k] = 1
     return block
+
+
+def _block_chi(g_aug, *, side: str, slices: dict[str, slice], N: int,
+               labels: tuple[int, ...]) -> np.ndarray:
+    """Build the χ-row block — main.tex §4.2 row blocks 3 and 4.
+
+    Each row i corresponds to a V_0^s vertex v_i. The row carries:
+      * Q_s columns: π_{V_0^s} (single 1 at qubit v_i)
+      * κ^s columns: H_{X/Z}'^{s,aug} (=g_aug.incidence^T) row i
+      * Adapter columns: 1 at column labels[i] if labels[i] >= 0 (port row), else 0.
+
+    The basis attribution (whether this block sits in H_X or H_Z) is the
+    caller's responsibility — for basis_l=Z the left χ block belongs in H_Z,
+    for basis_r=X the right χ block belongs in H_X.
+    """
+    n_V0 = len(g_aug.support)
+    block = np.zeros((n_V0, N), dtype=np.uint8)
+    # π_{V_0^s} on Q_s
+    for i, v in enumerate(g_aug.support):
+        block[i, slices[f"Q_{side}"].start + v] = 1
+    # H'^{s,aug} = incidence^T on κ^s
+    block[:, slices[f"k_{side}"]] = np.asarray(g_aug.incidence).astype(np.uint8).T
+    # π_{P_s}^T P_{σ_s} on adapter via labels
+    for i, lab in enumerate(labels):
+        if lab >= 0:
+            block[i, slices["A"].start + lab] = 1
+    return block
