@@ -199,3 +199,55 @@ def test_block_chi_left_z_basis_attaches_adapter_label() -> None:
     # No support on Q_r / k_r.
     assert not block[:, slices["Q_r"]].any()
     assert not block[:, slices["k_r"]].any()
+
+
+def test_block_gauge_supports_only_kappa() -> None:
+    """Gauge rows H_{X/Z}'^{s,aug} have support only on κ^s."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.joint_layout import _block_gauge
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    slices = column_slices_for_bridge(g_l, g_r, bridge)
+    N = slices["A"].stop
+
+    block = _block_gauge(bridge.g_l_aug, side="l", slices=slices, N=N)
+    r_l = bridge.g_l_aug.gauge.shape[0]
+    assert block.shape == (r_l, N)
+    assert (block[:, slices["k_l"]] == np.asarray(bridge.g_l_aug.gauge).astype(np.uint8)).all()
+    assert not block[:, slices["Q_l"]].any()
+    assert not block[:, slices["Q_r"]].any()
+    assert not block[:, slices["k_r"]].any()
+    assert not block[:, slices["A"]].any()
+
+
+def test_block_cycle_carries_T_on_kappa_and_H_R_on_adapter() -> None:
+    """Cycle row T_s on κ^s + H_R on adapter."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+    from qldpc.circuits.surgery.joint_layout import _block_cycle
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    x = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, z, basis=Pauli.Z)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    slices = column_slices_for_bridge(g_l, g_r, bridge)
+    N = slices["A"].stop
+
+    block = _block_cycle(bridge.T_l, bridge.H_R, side="l", slices=slices, N=N)
+    w_minus_1 = bridge.H_R.shape[0]
+    assert block.shape == (w_minus_1, N)
+    assert (block[:, slices["k_l"]] == bridge.T_l).all()
+    assert (block[:, slices["A"]] == bridge.H_R).all()
+    assert not block[:, slices["Q_l"]].any()
+    assert not block[:, slices["Q_r"]].any()
+    assert not block[:, slices["k_r"]].any()

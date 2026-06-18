@@ -124,3 +124,26 @@ def _block_chi(g_aug, *, side: str, slices: dict[str, slice], N: int,
         if lab >= 0:
             block[i, slices["A"].start + lab] = 1
     return block
+
+
+def _block_gauge(g_aug, *, side: str, slices: dict[str, slice], N: int) -> np.ndarray:
+    """Gauge block H_{X/Z}'^{s,aug} — main.tex §4.2 row block 3 (left) or
+    analogous right row block. Supports only κ^s, zero elsewhere."""
+    G = np.asarray(g_aug.gauge).astype(np.uint8)
+    r = G.shape[0]
+    block = np.zeros((r, N), dtype=np.uint8)
+    block[:, slices[f"k_{side}"]] = G
+    return block
+
+
+def _block_cycle(T_s: np.ndarray, H_R: np.ndarray, *, side: str,
+                 slices: dict[str, slice], N: int) -> np.ndarray:
+    """Cycle row block T_s on κ^s + H_R on adapter — main.tex §4.2 last row block.
+
+    Both T_s and H_R have w-1 rows; the returned block has the same row count.
+    """
+    n_rows = T_s.shape[0]
+    block = np.zeros((n_rows, N), dtype=np.uint8)
+    block[:, slices[f"k_{side}"]] = np.asarray(T_s).astype(np.uint8)
+    block[:, slices["A"]] = np.asarray(H_R).astype(np.uint8)
+    return block
