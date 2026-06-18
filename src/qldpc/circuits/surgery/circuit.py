@@ -1651,16 +1651,46 @@ def _build_joint_ppm_circuit_mixed_basis(
     # rows_chi['r'] are both empty.
     obs0_check_ids: list[int] = []
 
-    def _row_to_check_id(row_idx: int, in_x_block: bool) -> int:
-        check_ids = qubit_ids.checks_x if in_x_block else qubit_ids.checks_z
-        return check_ids[row_idx]
+    # Compute layout-row → joint-row → virtual_cssc-row → check-id mappings.
+    # layout.rows_chi[side] are indices into layout.H_X (if side's basis is X)
+    # or layout.H_Z (if Z). to_quditcode stacks [H_X | 0] then [0 | H_Z] then
+    # H_Y, so joint_row = layout_H_X_row for H_X rows or N_X + layout_H_Z_row
+    # for H_Z rows. _split_quditcode_into_virtual_cssc then re-partitions
+    # joint rows by Pauli type into x_row_idx / z_row_idx lists, where
+    # qubit_ids.checks_x[i] corresponds to joint_row = x_row_idx[i]. We
+    # invert that map here so a layout-row routes to the correct ancilla ID.
+    N_X = layout.H_X.shape[0]
+    x_inv = {jr: i for i, jr in enumerate(x_row_idx)}
+    z_inv = {jr: i for i, jr in enumerate(z_row_idx)}
+
+    def _layout_x_row_to_check_id(layout_row_idx: int) -> int | None:
+        """Map layout.H_X row index to check_id via joint row + virtual_cssc split."""
+        joint_row = layout_row_idx  # H_X rows are first in joint matrix
+        if joint_row not in x_inv:
+            return None  # row was not pure-X (split moved it somewhere else)
+        return qubit_ids.checks_x[x_inv[joint_row]]
+
+    def _layout_z_row_to_check_id(layout_row_idx: int) -> int | None:
+        """Map layout.H_Z row index to check_id via joint row + virtual_cssc split."""
+        joint_row = N_X + layout_row_idx  # H_Z rows come after H_X
+        if joint_row not in z_inv:
+            return None
+        return qubit_ids.checks_z[z_inv[joint_row]]
 
     for row_idx in layout.rows_chi["l"]:
-        in_x = layout.basis_l is Pauli.X
-        obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+        if layout.basis_l is Pauli.X:
+            cid = _layout_x_row_to_check_id(row_idx)
+        else:
+            cid = _layout_z_row_to_check_id(row_idx)
+        if cid is not None:
+            obs0_check_ids.append(cid)
     for row_idx in layout.rows_chi["r"]:
-        in_x = layout.basis_r is Pauli.X
-        obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+        if layout.basis_r is Pauli.X:
+            cid = _layout_x_row_to_check_id(row_idx)
+        else:
+            cid = _layout_z_row_to_check_id(row_idx)
+        if cid is not None:
+            obs0_check_ids.append(cid)
     for y_idx in layout.rows_y:
         obs0_check_ids.append(y_ancilla_ids[y_idx])
     # ∏ Y_{a_q}: bridge destructive Y-basis readouts — closes the adapter
