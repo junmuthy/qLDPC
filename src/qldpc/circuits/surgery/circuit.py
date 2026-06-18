@@ -1619,39 +1619,43 @@ def _build_joint_ppm_circuit_mixed_basis(
         circuit.append(r_data_op, list(data_r_ids))
         measurement_record.append({q: i for i, q in enumerate(data_r_ids)})
 
-    # obs0 emission per Lemma 2 (design spec §9):
-    #   obs0 = ⊕_{i ∈ obs0_xor_map} m(Y_stab[i])
-    #          ⊕ ⊕_{c ∈ x_leftover_indices} m(X-cycle row c)
-    #          ⊕ ⊕_{c ∈ z_leftover_indices} m(Z-cycle row c)
+    # obs0 per Lemma 2 (design spec §9 / main.tex §4.4):
+    #   obs0 = ⊕_{i ∈ rows_chi['l']} m(check_for(i)) ⊕ ⊕_{i ∈ rows_chi['r']} m(check_for(i))
+    #          ⊕ ⊕_{q ∈ rows_y} m(y_ancilla_ids[q])
     #
-    # Each Y_stab row corresponds to a cross-merged χ_l × χ_r pair at one
-    # merge qubit. By construction (Webster-Smith-Cohen arXiv:2511.15989
-    # §II.B.2 + Lemma 2 of the design spec):
-    #   ∏_i Y_stab[i] = X̄_l ⊗ Z̄_r ⊗ ∏_k Y_k (on adapter merge_qubits)
-    # The leftover X-cycle / Z-cycle rows (those with weight-≥2 adapter
-    # support that survived the merge) contribute Z^A / X^A terms that
-    # cancel the ∏_k Y_k = X^A · Z^A residual on the adapter.
+    # When surviving χ rows are nonempty, this gives Z̄_l ⊗ X̄_r as a product
+    # of merged-code stabilizers (Lemma 2). When all V_0 vertices are ports
+    # (degenerate case, e.g. Steane × Steane), no χ survive: the y_q product
+    # alone carries a ∏ Y_{a_q} residual on the adapter that anti-commutes
+    # with bridge state-prep. In that case we suppress obs0 emission rather
+    # than emit a non-deterministic observable. The truth-table test
+    # (test_mixed_basis_joint_truth_table_x_l_z_r) remains xfail for this
+    # fixture until a non-degenerate fixture is added; see
+    # docs/superpowers/plans/2026-06-18-joint-ppm-layout-refactor.md §Task 13.
     obs0_check_ids: list[int] = []
-    # Y-stab measurements: map bridge.obs0_xor_map (indices into Y_stab) to
-    # ancilla IDs in y_ancilla_ids.
-    for y_idx in bridge.obs0_xor_map:
-        if 0 <= y_idx < len(y_ancilla_ids):
-            obs0_check_ids.append(y_ancilla_ids[y_idx])
-    # Leftover X-cycle measurements: bridge.x_leftover_indices are indices
-    # into the HX_out block. Map to qubit_ids.checks_x.
-    for xi in bridge.x_leftover_indices:
-        if 0 <= xi < len(qubit_ids.checks_x):
-            obs0_check_ids.append(qubit_ids.checks_x[xi])
-    # Leftover Z-cycle measurements: bridge.z_leftover_indices map to checks_z.
-    for zi in bridge.z_leftover_indices:
-        if 0 <= zi < len(qubit_ids.checks_z):
-            obs0_check_ids.append(qubit_ids.checks_z[zi])
 
-    if obs0_check_ids:
-        obs0_targets = [
-            measurement_record.get_target_rec(cid) for cid in obs0_check_ids
-        ]
-        circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
+    def _row_to_check_id(row_idx: int, in_x_block: bool) -> int:
+        check_ids = qubit_ids.checks_x if in_x_block else qubit_ids.checks_z
+        return check_ids[row_idx]
+
+    if layout.rows_chi["l"] or layout.rows_chi["r"]:
+        # Non-degenerate: surviving χ rows cancel the adapter residual.
+        for row_idx in layout.rows_chi["l"]:
+            in_x = layout.basis_l is Pauli.X
+            obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+        for row_idx in layout.rows_chi["r"]:
+            in_x = layout.basis_r is Pauli.X
+            obs0_check_ids.append(_row_to_check_id(row_idx, in_x))
+        for y_idx in layout.rows_y:
+            obs0_check_ids.append(y_ancilla_ids[y_idx])
+
+        if obs0_check_ids:
+            obs0_targets = [
+                measurement_record.get_target_rec(cid) for cid in obs0_check_ids
+            ]
+            circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
+    # else: degenerate V_0 = port case; obs0 not emitted (test_mixed_basis_
+    # circuit_compiles_to_dem passes vacuously; truth_table test stays xfail).
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
