@@ -1313,13 +1313,17 @@ def test_joint_ppm_qubit_coords_intercode_layout() -> None:
     y1 = sorted(by_y.get(1, []))
     assert len(y1) >= 2, f"y=1 expected at least 2 κ qubits, got {len(y1)}"
 
-    # y=6 must have bridge data (= bridge.width) at x=0..w-1, plus
-    # cycle ancillas (= bridge.width - 1) at x=0..w-2.
-    y6 = sorted(by_y.get(6, []))
+    # y=6 holds the w bridge-data (adapter) qubits at x=0..w-1; y=7 holds the
+    # w-1 bridge cycle ancillas at x=0..w-2 on their own lane (regression: both
+    # used to share y=6, with cycle check i colliding with bridge-data qubit i).
     w = bridge.width
-    expected_y6_count = w + max(0, w - 1)  # bridge data + cycle ancillas
-    assert len(y6) == expected_y6_count, (
-        f"y=6 expected {expected_y6_count} qubits (w={w} bridge data + w-1 cycle ancillas), got {len(y6)}"
+    y6 = sorted(by_y.get(6, []))
+    assert [x for x, _ in y6] == list(range(w)), (
+        f"y=6 expected bridge data at x=0..{w - 1}, got {[x for x, _ in y6]}"
+    )
+    y7 = sorted(by_y.get(7, []))
+    assert [x for x, _ in y7] == list(range(w - 1)), (
+        f"y=7 expected {w - 1} cycle ancillas at x=0..{w - 2}, got {[x for x, _ in y7]}"
     )
 
 
@@ -1882,3 +1886,42 @@ def test_expand_joint_data_init_rejects_non_str_non_seq_type() -> None:
 
     with pytest.raises(TypeError, match="data_init must be"):
         _expand_joint_data_init({"bad": "input"}, n_l=4, n_r=4, intercode=True)  # type: ignore[arg-type]
+
+
+def test_single_ppm_dem_ok_bb_36_8_with_boost() -> None:
+    """Single-PPM DEM constructs cleanly on BB [[36, 8]] with boost.
+
+    Contract test: single-PPM does NOT call build_bridge / SkipTree, so the
+    joint-PPM boost-drop and duplicate-edge bugs (fixed in bridge.py) cannot
+    affect it. This regression locks that property in — both BB [[36, 8]]
+    (duplicate weight-2 incidence rows on Z̄_0) AND boost (Cheeger h<1)
+    simultaneously, the double-boundary case for the bridge bugs. If a future
+    refactor accidentally routes single-PPM through bridge code, this test
+    will catch it via stim's non-deterministic-detector rejection.
+    """
+    import sympy
+
+    from qldpc.circuits.noise_model import DepolarizingNoiseModel
+    from qldpc.circuits.surgery.cheeger import boost_gadget, cheeger_constant
+    from qldpc.circuits.surgery.circuit import (
+        build_single_ppm_circuit,
+        keep_only_observable,
+    )
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(code, z, basis=Pauli.Z)
+    # Premise: restricted incidence has duplicate weight-2 rows.
+    assert g.incidence.shape[0] > np.unique(g.incidence, axis=0).shape[0], (
+        "test premise broken: BB [[36, 8]] Z̄_0 restriction should have duplicate κ rows"
+    )
+    if cheeger_constant(g) < 1.0:
+        g = boost_gadget(g, method="combinatorial", target=1.0, max_extra_qubits=20, seed=3)
+
+    noise = DepolarizingNoiseModel(1e-3, include_idling_error=False)
+    circuit = build_single_ppm_circuit(g, rounds=3, noise_model=noise)
+    stripped = keep_only_observable(circuit, keep_idx=0)
+    dem = stripped.detector_error_model(approximate_disjoint_errors=True)
+    assert dem.num_detectors > 0
