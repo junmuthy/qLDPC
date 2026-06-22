@@ -41,3 +41,19 @@ def test_build_y_gadget_rejects_multi_overlap():
     code, x, _ = _steane_y_pair()
     with pytest.raises(ValueError):
         build_y_gadget(code, x=x, z=x)
+
+
+def test_ybar_is_in_merged_stabilizer():
+    from qldpc.circuits.surgery.y_gadget import build_y_gadget
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    n0 = code.num_qudits
+    # symplectic Ȳ on the ORIGINAL data qubits: X-part = x, Z-part = z
+    ybar = np.concatenate([x, z]).astype(np.uint8)  # length 2*n0
+    # restrict merged stabilizer group to original-data columns and check ȳ is reachable
+    H = np.asarray(yg.merged_code.matrix).astype(np.uint8)
+    n = yg.merged_code.num_qudits
+    data_cols = list(range(n0)) + list(range(n, n + n0))  # X-block + Z-block on data
+    Hd = H[:, data_cols]
+    from qldpc.circuits.surgery.y_gadget import _in_rowspace_gf2
+    assert _in_rowspace_gf2(Hd, ybar)

@@ -33,6 +33,24 @@ from .merge import apply_mixed_basis_merge
 GF2 = galois.GF(2)
 
 
+def _in_rowspace_gf2(M: np.ndarray, v: np.ndarray) -> bool:
+    """Return True iff ``v`` (1D uint8) lies in the GF(2) row space of ``M``.
+
+    Standard GF(2) membership test: ``v ∈ rowspace(M)`` exactly when appending
+    ``v`` as a new row does not increase the rank, i.e. ``rank(M) == rank([M; v])``.
+    Ranks are taken over GF(2) via ``galois``'s overload of
+    ``numpy.linalg.matrix_rank`` on ``galois.GF(2)`` arrays.
+
+    Used to certify that the symplectic vector ``[x | z]`` of Ȳ = iX̄Z̄ is a
+    product of the merged-code stabilizers restricted to the original data
+    qubits, the core correctness guarantee of the single-overlap logical-Y
+    merge of Cross, He, Rall, Yoder arXiv:2407.18393 §3.7.
+    """
+    M2 = GF2(np.asarray(M).astype(np.uint8))
+    A = GF2(np.vstack([np.asarray(M).astype(np.uint8), np.asarray(v).astype(np.uint8)[None, :]]))
+    return int(np.linalg.matrix_rank(M2)) == int(np.linalg.matrix_rank(A))
+
+
 def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     """Return the single data qubit shared by logical-X support ``x`` and logical-Z support ``z``.
 
