@@ -184,7 +184,15 @@ class Obs0Row:
 
 @dataclasses.dataclass(frozen=True)
 class Obs0ReadoutPlan:
-    """How :func:`build_single_y_ppm_circuit` reads the Ȳ eigenvalue into obs0.
+    """How :func:`build_single_y_ppm_circuit` reads the DESTRUCTIVE Ȳ cross-check.
+
+    NOTE on roles: the FAULT-TOLERANT physical readout (``obs0``) is the XOR of
+    the selected rows' IN-CIRCUIT last-QEC-round ancilla outcomes (see
+    :class:`Obs0Row` / :func:`_ybar_obs0_rows`). This plan describes the
+    DESTRUCTIVE cross-check (``obs1``), the noiseless sibling of
+    ``_surgery_observable``'s obs1: it reads the SAME §3.2 product off the final
+    destructive readouts. It is kept only as a cross-check (it collapses the
+    data and is not a physical protocol on k>1 codes).
 
     The §3.2 readout product (Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 lines
     562-563) is a single merged-code stabilizer equal to Ȳ on the logical qubit.
@@ -193,9 +201,13 @@ class Obs0ReadoutPlan:
       1. Sign / phase. ``Ȳ = iX̄Z̄`` carries an ``i``; the GF(2) row product
          only tracks Pauli SUPPORT, so the *signed* Pauli product of the chosen
          rows is ``-Y…`` (sign −1, computed with ``stim.PauliString``). XOR-ing
-         the in-circuit ANCILLA records of those rows therefore reads
-         ``NOT(Ȳ eigenvalue)`` — a fixed global inversion that cannot be carried
-         in a ``stim`` ``OBSERVABLE_INCLUDE`` (no constant term).
+         the IN-CIRCUIT ancilla records of those rows is therefore deterministic
+         but reads ``NOT(Ȳ eigenvalue)`` — a fixed global inversion. This is the
+         honest, documented convention for ``obs0`` (a ``stim``
+         ``OBSERVABLE_INCLUDE`` carries no constant offset to normalise it).
+         Reading the SAME product off the destructive readouts (this plan)
+         instead carries the physical Pauli-eigenvalue record signs, giving the
+         un-inverted eigenvalue (Y+ → 0, Y− → 1) — the complement of ``obs0``.
 
       2. Eigenbasis. The product is deterministic only if every qubit's Pauli in
          it matches that qubit's prep/destructive-readout eigenbasis: data → Y
@@ -204,11 +216,8 @@ class Obs0ReadoutPlan:
          row product meeting exactly this constraint (an "all-Y on data"
          representative).
 
-    Reading the product off the FINAL DESTRUCTIVE readouts (``MY`` data / ``M``
-    κ_x / ``MX`` κ_z) — whose record signs are the physical Pauli-eigenvalue
-    convention — gives the correct Ȳ eigenvalue with NO sign offset (Y+ → 0,
-    Y− → 1). This plan stores, per data/ancilla qubit in the product's support,
-    the Pauli to read there; the circuit maps each to its destructive record.
+    This plan stores, per data/ancilla qubit in the product's support, the Pauli
+    to read there; the circuit maps each to its destructive record for ``obs1``.
 
     Fields:
         data_y   — original-data column indices read with ``MY`` (Pauli Y).
@@ -428,13 +437,21 @@ class YGadgetLayout:
                       its ``H_sym`` row index plus Pauli-family provenance
                       (``"X"`` / ``"Z"`` / ``"Y"`` q1, and its index within that
                       family). Solved over GF(2) by :func:`_ybar_obs0_rows` —
-                      NOT hardcoded.
-        obs0_readout— :class:`Obs0ReadoutPlan`: per support-qubit, the Pauli to
-                      read off the FINAL DESTRUCTIVE readout (data → Y, κ_x → Z,
-                      κ_z → X). The destructive record signs carry the physical
-                      Ȳ = iX̄Z̄ phase, so :func:`build_single_y_ppm_circuit` reads
-                      the eigenvalue with the correct sign (Y+ → 0, Y− → 1) and
-                      no global offset.
+                      NOT hardcoded. :func:`build_single_y_ppm_circuit` emits the
+                      FAULT-TOLERANT ``obs0`` as the XOR of these rows' IN-CIRCUIT
+                      last-QEC-round ancilla outcomes (family_index → ``checks_x``
+                      / ``checks_z`` / ``y_ancilla_ids`` slot). That readout is
+                      DETERMINISTIC but measures −Ȳ (the GF(2) product drops the
+                      ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit): Y+ → 1,
+                      Y− → 0 — handled by a documented sign convention.
+        obs0_readout— :class:`Obs0ReadoutPlan`: the DESTRUCTIVE cross-check
+                      (``obs1``, NOT the physical readout). Per support-qubit it
+                      gives the Pauli to read off the final destructive readout
+                      (data → Y, κ_x → Z, κ_z → X). Those record signs carry the
+                      physical Ȳ = iX̄Z̄ phase, so :func:`build_single_y_ppm_circuit`
+                      emits it as ``obs1`` with the un-inverted eigenvalue
+                      (Y+ → 0, Y− → 1) — the complement of the in-circuit ``obs0``
+                      (whose signed product is −Ȳ; see ``obs0_xor_map``).
     """
 
     code: CSSCode

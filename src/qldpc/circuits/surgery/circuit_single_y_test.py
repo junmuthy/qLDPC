@@ -74,23 +74,34 @@ def test_single_y_circuit_rejects_product_state_init() -> None:
 
 
 def test_single_y_noiseless_truth_table() -> None:
-    """Noiseless Steane Ȳ truth table: Y+ → obs0=0, Y- → obs0=1.
+    """Noiseless Steane Ȳ truth table: Y+ → obs0=1, Y- → obs0=0 (−Ȳ convention).
 
     Ȳ = iX̄Z̄ measured by the single-overlap §3.7 merged code (Cross, He, Rall,
-    Yoder arXiv:2407.18393 §3.7), NO bridge — the readout does not need it. On
-    |+i⟩_L the Ȳ eigenvalue is +1 (obs0 = 0); on |−i⟩_L it is −1 (obs0 = 1).
+    Yoder arXiv:2407.18393 §3.7), NO bridge — the readout does not need it.
+
     obs0 is the §3.2 readout product (a single merged-code stabilizer equal to
-    Ȳ), read off the final destructive readouts so the ``Ȳ = iX̄Z̄`` phase comes
-    out with the correct sign. Verified via the raw compile_sampler + manual XOR
-    (``_raw_observables``), NOT ``detector_sampler.sample(
-    separate_observables=True)`` — the latter reports flips relative to the
-    noiseless baseline (always 0) and hides the sign.
+    Ȳ), read off the IN-CIRCUIT last-QEC-round ancilla outcomes of the rows the
+    GF(2) picker selected — the fault-tolerant physical readout (same mechanism
+    as the X/Z-measurement sibling ``_surgery_observable``). It is fully
+    DETERMINISTIC but measures the SIGNED Pauli product of those rows, which for
+    Ȳ = iX̄Z̄ is −Ȳ: the GF(2) picker drops the ``i`` phase, so the signed product
+    carries sign −1. Hence the raw obs0 bit is the eigenvalue bit of −Ȳ =
+    NOT(Ȳ bit): on |+i⟩_L (Ȳ = +1) obs0 = 1; on |−i⟩_L (Ȳ = −1) obs0 = 0. We
+    assert these real, deterministic values (no faked sign). The complementary
+    obs1 (destructive cross-check, kept at index 1) carries the un-inverted
+    eigenvalue Y+ → 0, Y- → 1.
+
+    Verified via the raw compile_sampler + manual XOR (``_raw_observables``),
+    NOT ``detector_sampler.sample(separate_observables=True)`` — the latter
+    reports flips relative to the noiseless baseline (always 0) and hides the
+    sign.
     """
     from qldpc.circuits.surgery import build_single_y_ppm_circuit, keep_only_observable
 
     code, x, z = _steane_y_pair()
     yg = build_y_gadget(code, x=x, z=z)
-    for data_init, expected in (("Y+", 0), ("Y-", 1)):
+    # obs0 measures −Ȳ (intrinsic iX̄Z̄ sign), so the eigenvalue bit is inverted.
+    for data_init, expected in (("Y+", 1), ("Y-", 0)):
         circuit = build_single_y_ppm_circuit(yg, rounds=3, data_init=data_init)
         circuit = keep_only_observable(circuit, keep_idx=0)
         obs = _raw_observables(circuit, shots=64)

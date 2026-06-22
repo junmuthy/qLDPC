@@ -539,8 +539,10 @@ def build_single_y_ppm_circuit(
          readouts (single-row or readout-compatible null-space combinations,
          same construction as the mixed-basis final detectors).
       6. obs0 — the Ȳ eigenvalue as the full §3.2 readout product (a single
-         merged-code stabilizer equal to Ȳ), read off the FINAL DESTRUCTIVE
-         readouts per ``yg.obs0_readout``; emitted when deterministic.
+         merged-code stabilizer equal to Ȳ), read off the IN-CIRCUIT last-QEC-
+         round ancilla outcomes of the picked rows (the fault-tolerant readout);
+         emitted when deterministic. obs1 reads the SAME product off the final
+         destructive readouts (``yg.obs0_readout``) as a noiseless cross-check.
 
     ``data_init`` options:
       * ``None`` (default): data |0⟩ (R). No Ȳ eigenstate is prepared.
@@ -564,12 +566,20 @@ def build_single_y_ppm_circuit(
     such product that is (i) equal to Ȳ on the logical qubit and (ii) measurable
     in the prep/readout EIGENBASIS of every qubit (Y on data, Z on κ_x, X on
     κ_z) — without (ii) the bare χ_X ⊕ χ_Z ⊕ q1 product is non-deterministic and
-    obs0 would be suppressed. obs0 is read off the FINAL DESTRUCTIVE readouts of
-    that product's support (data MY ⊕ κ_x M ⊕ κ_z MX); the destructive record
-    signs carry the physical ``Ȳ = iX̄Z̄`` phase, so the eigenvalue comes out
-    with the correct sign (Y+ → 0, Y- → 1) — no bridge and no Bell/flag cell.
-    The §3.7 bridge (Remark 23) is a separate FAULT-DISTANCE refinement, deferred
-    to its own task; it is not needed for this readout.
+    obs0 would be suppressed. obs0 is the FAULT-TOLERANT readout: the XOR of
+    those rows' IN-CIRCUIT last-QEC-round ancilla outcomes (χ_X → ``checks_x``
+    M-record, χ_Z → ``checks_z`` M-record, q1 → ``y_ancilla`` MX-record), exactly
+    as the X/Z-measurement sibling ``_surgery_observable`` reads its merged
+    stabilizer off the final QEC round. This readout is DETERMINISTIC but
+    measures the SIGNED Pauli product −Ȳ (the GF(2) picker drops the ``i`` of
+    iX̄Z̄), so the raw obs0 bit is NOT(Ȳ eigenvalue bit): Y+ → 1, Y- → 0. That
+    inverted convention is documented and asserted honestly (no faked sign); a
+    stim OBSERVABLE_INCLUDE cannot carry a constant offset to normalise it. The
+    complementary obs1 reads the SAME product off the final destructive readouts
+    (data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check, carrying the
+    un-inverted eigenvalue (Y+ → 0, Y- → 1). No bridge and no Bell/flag cell are
+    needed for this readout. The §3.7 bridge (Remark 23) is a separate
+    FAULT-DISTANCE refinement, deferred to its own task; it is not needed here.
     """
     merged_code = yg.merged_code
     field = merged_code.field
@@ -875,39 +885,77 @@ def build_single_y_ppm_circuit(
                 if val:
                     emitted_for.add(center_idx[s2])
 
-    # --- obs0: the Ȳ eigenvalue (full §3.2 readout product) --------------------
+    # --- obs0: the Ȳ eigenvalue (full §3.2 IN-CIRCUIT readout product) ---------
     # Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 (lines 562-563): output the
     # PARITY OF ALL appended checks whose product is the logical. For Ȳ = iX̄Z̄
     # that product is the surviving χ_X rows ⊕ surviving χ_Z rows ⊕ q1
     # (line 2433: X̄_M Z̄_M = product of interface + module checks), rotated by
     # code stabilizers into the prep/readout eigenbasis. The picker
     # ``_ybar_obs0_rows`` solved this over GF(2): it is a single merged-code
-    # stabilizer equal to Ȳ on the logical qubit, with Pauli Y on its data
-    # support, Z on its κ_x support, X on its κ_z support.
+    # stabilizer equal to Ȳ on the logical qubit. ``yg.obs0_xor_map`` records,
+    # per selected row, its merged-code (``H_sym``) row index plus its Pauli
+    # family (``"X"`` χ/stab row, ``"Z"`` χ/stab row, or the ``"Y"`` q1 row) and
+    # its index within that family.
     #
-    # We read this stabilizer off the FINAL DESTRUCTIVE readouts (``yg.obs0_readout``):
-    # data Y-support → MY records, κ_x Z-support → M records, κ_z X-support → MX
-    # records. The destructive record signs are the physical Pauli-eigenvalue
-    # convention, so the XOR gives the correct Ȳ eigenvalue (Y+ → 0, Y- → 1)
-    # with no global offset — unlike the in-circuit ANCILLA records, whose
-    # product carries the unphysical sign of the GF(2)-tracked Pauli support
-    # (``Ȳ = iX̄Z̄`` loses its ``i``; the signed Pauli product of the chosen rows
-    # is ``-Y…``, which a stim OBSERVABLE_INCLUDE cannot offset). No bridge and
-    # no Bell/flag cell are needed for this readout.
-    # The plan reads data in Y (MY), so obs0 is the Ȳ eigenvalue only when an Ȳ
-    # eigenstate was prepared (data_init Y+/Y-). With the default |0⟩ prep the
-    # data is read in Z (M) and no Ȳ eigenvalue exists, so obs0 is not emitted.
+    # This is the FAULT-TOLERANT physical readout: each selected row is measured
+    # IN-CIRCUIT every QEC round, and obs0 is the XOR of those rows' LAST-round
+    # ancilla outcomes — exactly as the X/Z-measurement sibling ``_surgery_
+    # observable`` reads its merged stabilizer off the final-round meas-check
+    # records. The family→ancilla map is the same one the round circuit uses
+    # (``_split_quditcode_into_virtual_cssc`` partitions ``merged_code.matrix``
+    # in the SAME row order as ``H_sym``, so family_index is the slot in
+    # ``checks_x`` / ``checks_z`` / ``y_ancilla_ids``):
+    #   family "X" → ``qubit_ids.checks_x[family_index]``   (X-phase, M record)
+    #   family "Z" → ``qubit_ids.checks_z[family_index]``   (Z-phase, M record)
+    #   family "Y" → ``y_ancilla_ids[family_index]``        (Y-phase, MX record)
+    #
+    # SIGN CONVENTION. The in-circuit readout is DETERMINISTIC, but it measures
+    # the SIGNED Pauli product of the chosen rows, which for Ȳ = iX̄Z̄ is −Ȳ: the
+    # GF(2) picker tracks only Pauli SUPPORT and drops the ``i`` phase, so the
+    # signed product of the selected rows carries sign −1 (intrinsic to iX̄Z̄,
+    # verified for every eigenbasis-compatible representative). Hence the raw
+    # obs0 bit is the eigenvalue bit of −Ȳ = NOT(Ȳ eigenvalue bit): on |+i⟩_L
+    # (Ȳ = +1) raw obs0 = 1, on |−i⟩_L (Ȳ = −1) raw obs0 = 0. This inverted
+    # convention is the honest physical outcome; the truth table asserts these
+    # real values (Y+ → 1, Y- → 0). A stim OBSERVABLE_INCLUDE carries no constant
+    # offset, so we do not (and cannot, without a deterministically-1 reference
+    # record) normalise the sign here. No bridge and no Bell/flag cell are needed
+    # for this readout.
+    # obs0 is the Ȳ eigenvalue only when an Ȳ eigenstate was prepared (data_init
+    # Y+/Y-). With the default |0⟩ prep no Ȳ eigenvalue exists, so it is omitted.
     if data_init in ("Y+", "Y-"):
-        plan = yg.obs0_readout
         obs0_recs: list[stim.GateTarget] = []
-        for q in plan.data_y:  # data column q, read MY
-            obs0_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
-        for q in plan.kx_z:  # κ_x column q, read M (Z)
-            obs0_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
-        for q in plan.kz_x:  # κ_z column q, read MX (X)
-            obs0_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
+        for row in yg.obs0_xor_map:
+            if row.family == "X":
+                cid = qubit_ids.checks_x[row.family_index]
+            elif row.family == "Z":
+                cid = qubit_ids.checks_z[row.family_index]
+            else:  # "Y" — the q1 mixed check, read MX in the Y-phase
+                cid = y_ancilla_ids[row.family_index]
+            obs0_recs.append(measurement_record.get_target_rec(cid))
         if obs0_recs and _observable_is_deterministic(circuit, obs0_recs):
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
+
+    # --- obs1: destructive cross-check (NOT a physical protocol) ----------------
+    # Read the SAME §3.2 product (``yg.obs0_readout``) off the FINAL DESTRUCTIVE
+    # readouts: data Y-support → MY, κ_x Z-support → M, κ_z X-support → MX. This
+    # destructively collapses the data, so it is not the fault-tolerant readout;
+    # it is the noiseless cross-check sibling of ``_surgery_observable``'s obs1.
+    # Its record signs ARE the physical Pauli-eigenvalue convention, so its raw
+    # bit is the un-inverted Ȳ eigenvalue (Y+ → 0, Y- → 1) — the complement of
+    # the in-circuit obs0, by the −Ȳ sign documented above. Keep obs1 only as a
+    # cross-check; for any LER/noisy run keep ONLY obs0 (keep_only_observable).
+    if data_init in ("Y+", "Y-"):
+        plan = yg.obs0_readout
+        obs1_recs: list[stim.GateTarget] = []
+        for q in plan.data_y:  # data column q, read MY
+            obs1_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
+        for q in plan.kx_z:  # κ_x column q, read M (Z)
+            obs1_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
+        for q in plan.kz_x:  # κ_z column q, read MX (X)
+            obs1_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
+        if obs1_recs and _observable_is_deterministic(circuit, obs1_recs):
+            circuit.append("OBSERVABLE_INCLUDE", obs1_recs, 1)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
