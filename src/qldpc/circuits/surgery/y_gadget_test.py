@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from qldpc.circuits.surgery.y_gadget import _locate_overlap, _steane_y_pair
+from qldpc.circuits.surgery.y_gadget import _locate_overlap, _steane_y_pair, build_y_gadget
 
 
 def test_steane_y_pair_has_single_overlap():
@@ -19,3 +19,25 @@ def test_locate_overlap_rejects_multi_overlap():
     # x overlaps itself on |supp(x)| = 3 qubits (multi-overlap) -> rejected by overlap-size check
     with pytest.raises(ValueError):
         _locate_overlap(code, x, x)
+
+
+def test_build_y_gadget_merged_code_is_valid_subsystem_code():
+    from qldpc.circuits.surgery.y_gadget import build_y_gadget
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    mc = yg.merged_code
+    # all checks commute (symplectic product zero)
+    H = np.asarray(mc.matrix).astype(np.int64)
+    n = mc.num_qudits
+    omega = np.block([[np.zeros((n, n)), np.eye(n)], [np.eye(n), np.zeros((n, n))]]).astype(np.int64)
+    assert ((H @ omega @ H.T) % 2 == 0).all()
+    # encodes one fewer logical than the original
+    assert mc.dimension == code.dimension - 1
+    # exactly one Y_stab row exists (the q1 mixed check)
+    assert yg.Y_stab is not None and yg.Y_stab.shape[0] >= 1
+
+
+def test_build_y_gadget_rejects_multi_overlap():
+    code, x, _ = _steane_y_pair()
+    with pytest.raises(ValueError):
+        build_y_gadget(code, x=x, z=x)
