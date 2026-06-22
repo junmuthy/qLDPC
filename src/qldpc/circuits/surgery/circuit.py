@@ -538,8 +538,9 @@ def build_single_y_ppm_circuit(
       5. Final detectors for center rows reconstructable from the destructive
          readouts (single-row or readout-compatible null-space combinations,
          same construction as the mixed-basis final detectors).
-      6. obs0 — the Ȳ eigenvalue from ``yg.obs0_xor_map`` (Y-phase ancilla
-         outcomes), emitted ONLY when deterministic on the noiseless circuit.
+      6. obs0 — the Ȳ eigenvalue as the full §3.2 readout product (a single
+         merged-code stabilizer equal to Ȳ), read off the FINAL DESTRUCTIVE
+         readouts per ``yg.obs0_readout``; emitted when deterministic.
 
     ``data_init`` options:
       * ``None`` (default): data |0⟩ (R). No Ȳ eigenstate is prepared.
@@ -554,19 +555,21 @@ def build_single_y_ppm_circuit(
     refinement validated by the operational-distance task; it is added only if
     that task finds the operational distance has collapsed to 1.
 
-    obs0 determinism in the degenerate single-overlap regime. For the Steane
-    fixture every original-code vertex is a port, so the cross-merge leaves NO
-    surviving χ rows and ``obs0_xor_map`` points at the lone ``q1`` Y-row. A
-    single ``q1`` measurement reads ``Y`` on ``q0`` but also ``X`` on the κ_x
-    ancillas and ``Z`` on the κ_z ancillas; those ancilla (gauge) contributions
-    are not pinned by the bare extraction, so the bare obs0 is non-deterministic
-    and would make ``detector_error_model()`` raise. We therefore emit obs0 only
-    when it is deterministic on the noiseless circuit; in the degenerate regime
-    it is suppressed, exactly as the joint mixed-basis sibling suppresses obs0
-    for Steane × Steane (``_build_joint_ppm_circuit_mixed_basis`` docstring).
-    Closing this residual deterministically is the job of the §4.1 Bell/flag
-    cell and the obs0-reconstruction task; the noiseless truth-table check that
-    needs a live obs0 is the next task.
+    obs0 readout (full §3.2 product). Cross, He, Rall, Yoder arXiv:2407.18393
+    §3.2 (lines 562-563): the logical-measurement readout is the PARITY OF ALL
+    appended checks whose product is the logical. For Ȳ = iX̄Z̄ that product is
+    the surviving χ_X rows ⊕ surviving χ_Z rows ⊕ the q1 Y-stab row
+    (arXiv:2407.18393 line 2433: ``X̄_M Z̄_M`` = product of interface + module
+    checks). The picker ``_ybar_obs0_rows`` solves over GF(2) for the specific
+    such product that is (i) equal to Ȳ on the logical qubit and (ii) measurable
+    in the prep/readout EIGENBASIS of every qubit (Y on data, Z on κ_x, X on
+    κ_z) — without (ii) the bare χ_X ⊕ χ_Z ⊕ q1 product is non-deterministic and
+    obs0 would be suppressed. obs0 is read off the FINAL DESTRUCTIVE readouts of
+    that product's support (data MY ⊕ κ_x M ⊕ κ_z MX); the destructive record
+    signs carry the physical ``Ȳ = iX̄Z̄`` phase, so the eigenvalue comes out
+    with the correct sign (Y+ → 0, Y- → 1) — no bridge and no Bell/flag cell.
+    The §3.7 bridge (Remark 23) is a separate FAULT-DISTANCE refinement, deferred
+    to its own task; it is not needed for this readout.
     """
     merged_code = yg.merged_code
     field = merged_code.field
@@ -872,23 +875,39 @@ def build_single_y_ppm_circuit(
                 if val:
                     emitted_for.add(center_idx[s2])
 
-    # --- obs0: the Ȳ eigenvalue (Y-phase ancilla outcomes), if deterministic --
-    # Webster, Smith, Cohen arXiv:2511.15989 Lemma 2: obs0 = ∏ surviving χ rows
-    # · ∏ Y rows. For the degenerate Steane fixture obs0_xor_map points only at
-    # the Y row(s); a bare single-overlap extraction leaves an unpinned κ-gauge
-    # residual, so obs0 is non-deterministic and would break DEM compilation.
-    # Emit obs0 only when deterministic on the noiseless circuit (suppressed in
-    # the degenerate regime, matching the joint mixed-basis sibling — the
-    # §4.1 Bell/flag cell is what closes the residual).
-    obs0_check_ids = [y_ancilla_ids[i] for i in yg.obs0_xor_map]
-    if obs0_check_ids and _observable_is_deterministic(
-        circuit, [measurement_record.get_target_rec(cid) for cid in obs0_check_ids]
-    ):
-        circuit.append(
-            "OBSERVABLE_INCLUDE",
-            [measurement_record.get_target_rec(cid) for cid in obs0_check_ids],
-            0,
-        )
+    # --- obs0: the Ȳ eigenvalue (full §3.2 readout product) --------------------
+    # Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 (lines 562-563): output the
+    # PARITY OF ALL appended checks whose product is the logical. For Ȳ = iX̄Z̄
+    # that product is the surviving χ_X rows ⊕ surviving χ_Z rows ⊕ q1
+    # (line 2433: X̄_M Z̄_M = product of interface + module checks), rotated by
+    # code stabilizers into the prep/readout eigenbasis. The picker
+    # ``_ybar_obs0_rows`` solved this over GF(2): it is a single merged-code
+    # stabilizer equal to Ȳ on the logical qubit, with Pauli Y on its data
+    # support, Z on its κ_x support, X on its κ_z support.
+    #
+    # We read this stabilizer off the FINAL DESTRUCTIVE readouts (``yg.obs0_readout``):
+    # data Y-support → MY records, κ_x Z-support → M records, κ_z X-support → MX
+    # records. The destructive record signs are the physical Pauli-eigenvalue
+    # convention, so the XOR gives the correct Ȳ eigenvalue (Y+ → 0, Y- → 1)
+    # with no global offset — unlike the in-circuit ANCILLA records, whose
+    # product carries the unphysical sign of the GF(2)-tracked Pauli support
+    # (``Ȳ = iX̄Z̄`` loses its ``i``; the signed Pauli product of the chosen rows
+    # is ``-Y…``, which a stim OBSERVABLE_INCLUDE cannot offset). No bridge and
+    # no Bell/flag cell are needed for this readout.
+    # The plan reads data in Y (MY), so obs0 is the Ȳ eigenvalue only when an Ȳ
+    # eigenstate was prepared (data_init Y+/Y-). With the default |0⟩ prep the
+    # data is read in Z (M) and no Ȳ eigenvalue exists, so obs0 is not emitted.
+    if data_init in ("Y+", "Y-"):
+        plan = yg.obs0_readout
+        obs0_recs: list[stim.GateTarget] = []
+        for q in plan.data_y:  # data column q, read MY
+            obs0_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
+        for q in plan.kx_z:  # κ_x column q, read M (Z)
+            obs0_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
+        for q in plan.kz_x:  # κ_z column q, read MX (X)
+            obs0_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
+        if obs0_recs and _observable_is_deterministic(circuit, obs0_recs):
+            circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
