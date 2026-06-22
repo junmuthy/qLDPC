@@ -15,17 +15,22 @@ from .cheeger import boost_gadget, cheeger_constant
 from .circuit import (
     build_joint_ppm_circuit,
     build_single_ppm_circuit,
+    build_single_y_ppm_circuit,
     keep_only_observable,
     logical_state_init,
 )
 from .gadget import GadgetLayout, build_gadget
+from .y_gadget import YGadgetLayout, build_y_gadget
 
 __all__ = [
     "GadgetLayout",
+    "YGadgetLayout",
     "Bridge",
     "build_gadget",
+    "build_y_gadget",
     "build_bridge",
     "build_single_ppm_circuit",
+    "build_single_y_ppm_circuit",
     "build_joint_ppm_circuit",
     "keep_only_observable",
     "logical_state_init",
