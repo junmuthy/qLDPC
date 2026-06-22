@@ -16,6 +16,6 @@ def test_steane_y_pair_has_single_overlap():
 
 def test_locate_overlap_rejects_multi_overlap():
     code, x, _ = _steane_y_pair()
-    # x overlaps itself on |supp(x)| > 1 qubits and (x,x) commute -> rejected
+    # x overlaps itself on |supp(x)| = 3 qubits (multi-overlap) -> rejected by overlap-size check
     with pytest.raises(ValueError):
         _locate_overlap(code, x, x)

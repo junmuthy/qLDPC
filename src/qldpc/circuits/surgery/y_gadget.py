@@ -64,7 +64,7 @@ def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     # x and z must anticommute: a logical-X and logical-Z of the SAME logical qubit
     # cross an odd number of times. A commuting pair (even overlap parity) cannot
     # form Ȳ = iX̄Z̄.
-    if int(np.dot(x, z)) % 2 == 0:
+    if int(np.dot(x.astype(np.int64), z.astype(np.int64))) % 2 == 0:
         raise ValueError("x and z commute (x · z is even); they cannot form Ȳ = iX̄Z̄")
 
     overlap = np.where((x.astype(bool)) & (z.astype(bool)))[0]
