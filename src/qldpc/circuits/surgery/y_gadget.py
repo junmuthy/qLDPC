@@ -1,17 +1,18 @@
 """Logical-Y measurement gadget primitives (Ȳ = iX̄Z̄).
 
-Building blocks for measuring a logical Y operator via lattice surgery in the
-clean single-overlap regime of Cross, He, Rall, Yoder arXiv:2407.18393 §3.7,
-where the logical-X support and the logical-Z support of the measured qubit
-intersect on exactly one data qubit. That single shared qubit is where the
-X̄ and Z̄ strings cross to realise Ȳ = iX̄Z̄.
+Building blocks for measuring a logical Y operator via lattice surgery, following
+the homological measurement construction of Ide, Gowda, Nadkarni, Dauphinais
+arXiv:2410.02753 §III.C/§III.D (see also docs/superpowers/docs/main.tex §4). The
+logical-Y support is the set ``W = supp(x) ∩ supp(z)`` of data qubits where the
+logical-X string and the logical-Z string cross; ``|W|`` is odd (the strings
+anticommute) and may be any size, so the merge handles general ``|W| ≥ 1``.
 
 This module provides:
-    _locate_overlap  — validate an (x, z) representative pair and return the
-                       index of their single shared (crossing) data qubit.
+    _locate_overlaps — validate an (x, z) representative pair and return the
+                       tuple ``W = supp(x) ∩ supp(z)`` of physical Y qubits.
     _steane_y_pair   — a concrete Steane-code fixture (code, x, z) whose
                        logical-X / logical-Z supports overlap on exactly one
-                       qubit, i.e. the §3.7 single-overlap case.
+                       qubit (the ``|W|=1`` case).
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from qldpc import codes
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
-from .bridge import Bridge, build_bridge
 from .gadget import GadgetLayout, build_gadget
 from .merge import apply_mixed_basis_merge
 
@@ -463,73 +463,68 @@ def _ybar_obs0_rows(
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class YGadgetLayout:
-    """Merged code for a single logical-Y measurement Ȳ = iX̄Z̄.
+    """Merged code for a logical-Y measurement Ȳ = iX̄Z̄ (general ``|W|``).
 
-    Output of :func:`build_y_gadget`, realising the logical-Y merge of Cross,
-    He, Rall, Yoder arXiv:2407.18393 §3.7 in the single-overlap regime (Remark
-    19): the X-measurement system (the L=1 gadget of X̄) and the Z-measurement
-    system (the L=1 gadget of Z̄) of ONE logical qubit are glued at their single
-    shared data qubit ``q0`` via an explicit mixed-type check ``q1``. ``q1`` is
-    the symplectic Y row ``Y_stab`` obtained by the Webster, Smith, Cohen
-    arXiv:2511.15989 §II.B.2 cross-merge of the χ_X row and the χ_Z row anchored
-    at ``q0``.
+    Output of :func:`build_y_gadget`, realising the homological logical-Y merge
+    of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D (see also
+    docs/superpowers/docs/main.tex §4). The X-measurement system (the L=1 gadget
+    of X̄) and the Z-measurement system (the L=1 gadget of Z̄) of ONE logical
+    qubit are glued along the physical Y-support ``W = supp(x) ∩ supp(z)``: each
+    ``v ∈ W`` carries a mixed-type check ``y_v`` obtained by the §III.D
+    cross-merge of the χ_X row and the χ_Z row anchored at ``v``. The
+    ``Y_stab`` rows are exactly these ``|W|`` symplectic Y rows.
 
-    No-bridge construction (this layout). The merged code here does NOT fold in
-    the §3.7 bridge (adapter qubits ``B`` and gauge checks ``Uᴮ``). The Ȳ
-    READOUT does not need it: the split X / Z / Y QEC schedule of
-    :func:`build_single_y_ppm_circuit` already measures every χ_X row (X-phase),
-    every χ_Z row (Z-phase) and the q1 Y-stab row (Y-phase) each round, and the
-    §3.2 readout product of those checks (lines 562-563) is the deterministic Ȳ
-    eigenvalue. The §3.7 bridge is a SEPARATE concern — it restores the
-    measurement FAULT DISTANCE (Cross, He, Rall, Yoder arXiv:2407.18393 Remark
-    23: without it ``P = Z̄_M · q1 · ∏ H_Z(odd-layer V)`` is a constant-weight
-    undetectable operator) and is deferred to the fault-distance task. The
-    ``bridge`` field is built and stored for that downstream task but its
-    columns/rows are NOT in ``H_sym``.
+    Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D). Each
+    per-system gadget ``g_x`` / ``g_z`` is boosted (combinatorially) to boundary
+    Cheeger constant ≥ 1 BEFORE merging, so the per-system distance argument
+    holds. The boosted gadgets are stored, so ``k_x = len(g_x.ancilla_qubits)``
+    matches the merged-code width.
 
-    Stabilizer code. In the single-overlap case the only pre-merge
-    anticommutation — (χ_X, χ_Z) at ``q0``, whose data supports cross exactly
-    once — is consumed by the cross-merge into ``q1``. The merged code is then a
-    genuine STABILIZER code (``is_subsystem_code=False`` for Steane) encoding
-    ``code.dimension − 1`` logicals, with Ȳ = iX̄Z̄ in its stabilizer group.
+    ∂_0 block (no bridge). The merged check matrix appends ``∂_0 = ker(merged
+    ∂_1)`` (arXiv:2410.02753 §III.D Eq.(66)/(67); main.tex §4.4), the cycle basis
+    of the glued graph, in place of any per-system gauge blocks. At ``|W|=1`` the
+    glued graph contributes no crossing cycle (0 ∂_0 rows); at ``|W|≥2`` it
+    contributes ``|W|−1`` crossing rows. There is NO SkipTree adapter / bridge.
+
+    Stabilizer code. The only pre-merge anticommutations — (χ_X, χ_Z) at each
+    ``v ∈ W``, whose data supports cross — are consumed by the cross-merge into
+    the ``y_v`` rows. The merged code is then a genuine STABILIZER code
+    (``is_subsystem_code=False`` for Steane) encoding ``code.dimension − 1``
+    logicals, with Ȳ = iX̄Z̄ in its stabilizer group.
 
     Fields:
         code        — the underlying CSS code (X̄ and Z̄ live on its qubits).
-        x, z        — the logical-X / logical-Z supports (uint8), overlapping
-                      on exactly the one data qubit ``q0``.
-        q0          — index of that single shared (crossing) data qubit.
+        x, z        — the logical-X / logical-Z supports (uint8); their overlap
+                      ``supp(x) ∩ supp(z)`` is ``W``.
+        W           — ``tuple[int, ...]`` of the data qubits in
+                      ``supp(x) ∩ supp(z)`` (the physical Y qubits of Ȳ).
         g_x, g_z    — the per-system L=1 gadgets (Webster, Smith, Cohen
                       arXiv:2511.15989 §II.A) for X̄ (basis=X) and Z̄ (basis=Z),
-                      built on the same ``code`` with disjoint κ-ancilla ranges.
-        bridge      — the sparse SkipTree+cellulation adapter for the two systems
-                      (Swaroop, Jochym-O'Connor, Yoder arXiv:2410.03628 §III /
-                      §II C). Built and stored for the DEFERRED fault-distance
-                      task (Remark 23); NOT folded into ``H_sym`` here.
-        Y_stab      — ``(n_Y, 2*n_merged)`` symplectic Y rows from the cross-
-                      merge (n_Y == 1 here: the single mixed check ``q1`` at the
-                      data crossing ``q0``).
+                      each Cheeger-boosted to ≥ 1, built on the same ``code``
+                      with disjoint κ-ancilla ranges.
+        Y_stab      — ``(|W|, 2*n_merged)`` symplectic Y rows from the cross-
+                      merge: the mixed checks ``y_v`` at each ``v ∈ W``.
         H_sym       — ``(rows, 2*n_merged)`` merged symplectic check matrix
-                      = [HX_out | 0] ∪ [0 | HZ_out] ∪ Y_stab. Column layout in
-                      each half is ``[data (n) | κ_x | κ_z]`` (no bridge columns).
+                      = [HX_out | 0] ∪ [0 | HZ_out] ∪ Y_stab ∪ ∂_0. Column layout
+                      in each half is ``[data (n) | κ_x | κ_z]``.
         merged_code — ``QuditCode(field(H_sym), is_subsystem_code=...)`` in
                       which Ȳ is in the measured stabilizer center; encodes one
                       fewer logical than ``code``.
-        obs0_xor_map— the full §3.2 Ȳ readout product (Cross, He, Rall, Yoder
-                      arXiv:2407.18393 §3.2 lines 562-563): the merged-code rows
+        obs0_xor_map— the full Ȳ readout product (Ide, Gowda, Nadkarni,
+                      Dauphinais arXiv:2410.02753 §III.D): the merged-code rows
                       whose eigenbasis-compatible GF(2) product equals the
-                      symplectic Ȳ = [x | z] on the original data columns
-                      (arXiv:2407.18393 line 2433: ``X̄_M Z̄_M`` = product of
-                      interface + module checks). Each :class:`Obs0Row` records
-                      its ``H_sym`` row index plus Pauli-family provenance
-                      (``"X"`` / ``"Z"`` / ``"Y"`` q1, and its index within that
-                      family). Solved over GF(2) by :func:`_ybar_obs0_rows` —
-                      NOT hardcoded. :func:`build_single_y_ppm_circuit` emits the
-                      FAULT-TOLERANT ``obs0`` as the XOR of these rows' IN-CIRCUIT
-                      last-QEC-round ancilla outcomes (family_index → ``checks_x``
-                      / ``checks_z`` / ``y_ancilla_ids`` slot). That readout is
-                      DETERMINISTIC but measures −Ȳ (the GF(2) product drops the
-                      ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit): Y+ → 1,
-                      Y− → 0 — handled by a documented sign convention.
+                      symplectic Ȳ = [x | z] on the original data columns. Each
+                      :class:`Obs0Row` records its ``H_sym`` row index plus
+                      Pauli-family provenance (``"X"`` / ``"Z"`` / ``"Y"``, and
+                      its index within that family). Solved over GF(2) by
+                      :func:`_ybar_obs0_rows` — NOT hardcoded.
+                      :func:`build_single_y_ppm_circuit` emits the FAULT-TOLERANT
+                      ``obs0`` as the XOR of these rows' IN-CIRCUIT last-QEC-round
+                      ancilla outcomes (family_index → ``checks_x`` / ``checks_z``
+                      / ``y_ancilla_ids`` slot). That readout is DETERMINISTIC but
+                      measures −Ȳ (the GF(2) product drops the ``i`` of iX̄Z̄), so
+                      the raw obs0 bit is NOT(Ȳ bit): Y+ → 1, Y− → 0 — handled by
+                      a documented sign convention.
         obs0_readout— :class:`Obs0ReadoutPlan`: the DESTRUCTIVE cross-check
                       (``obs1``, NOT the physical readout). Per support-qubit it
                       gives the Pauli to read off the final destructive readout
@@ -543,10 +538,9 @@ class YGadgetLayout:
     code: CSSCode
     x: np.ndarray
     z: np.ndarray
-    q0: int
+    W: tuple[int, ...]
     g_x: GadgetLayout
     g_z: GadgetLayout
-    bridge: Bridge
     Y_stab: np.ndarray
     H_sym: np.ndarray
     merged_code: QuditCode
@@ -555,24 +549,32 @@ class YGadgetLayout:
 
 
 def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLayout:
-    """Assemble the §3.7 logical-Y merged code for Ȳ = iX̄Z̄ on one logical qubit.
+    """Assemble the homological logical-Y merged code for Ȳ = iX̄Z̄ (general ``|W|``).
 
-    Implements the single-overlap (Remark 19) construction of Cross, He, Rall,
-    Yoder arXiv:2407.18393 §3.7: glue the X-measurement L=1 gadget of ``x`` and
-    the Z-measurement L=1 gadget of ``z`` (both Webster, Smith, Cohen
-    arXiv:2511.15989 §II.A) at their single shared data qubit ``q0``, fusing the
-    χ_X and χ_Z rows anchored there into one explicit mixed check ``q1`` via the
-    Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 cross-merge (NOT a single-
-    qubit basis-change rotation — the non-CSS content lives in ``q1``).
+    Implements the Eq.(68) merged code of Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.C/§III.D (see also docs/superpowers/docs/main.tex §4):
+    glue the X-measurement L=1 gadget of ``x`` and the Z-measurement L=1 gadget
+    of ``z`` (both Webster, Smith, Cohen arXiv:2511.15989 §II.A) along the
+    physical Y-support ``W = supp(x) ∩ supp(z)``. At each ``v ∈ W`` the χ_X row
+    and χ_Z row anchored there are fused into one explicit mixed check ``y_v``
+    via the §III.D cross-merge (NOT a single-qubit basis-change rotation — the
+    non-CSS content lives in the ``y_v`` rows).
+
+    Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D: per-system
+    distance argument). Each gadget is boosted to boundary Cheeger constant ≥ 1
+    BEFORE merging; the boosted gadgets are returned so the merged-code width
+    ``n + k_x + k_z`` is consistent with ``len(g_x.ancilla_qubits)``.
 
     The merged symplectic column space is ``[data (n) | κ_x | κ_z]``. The two
-    systems share the data qubits, so the original code stabilizers appear
-    ONCE: H_X is extended onto κ_z so it commutes with χ_Z, and H_Z onto κ_x so
-    it commutes with χ_X (the dual-extension of Webster §II.A step 3). The only
-    pair that anticommutes before the merge is (χ_X, χ_Z) at ``q0`` (their data
-    supports cross exactly once); fusing them removes that anticommutation, so
-    the merged code is a genuine stabilizer code encoding ``code.dimension − 1``
-    logicals with Ȳ = iX̄Z̄ in its stabilizer group.
+    systems share the data qubits, so the original code stabilizers appear ONCE:
+    H_X is extended onto κ_z so it commutes with χ_Z, and H_Z onto κ_x so it
+    commutes with χ_X (the dual-extension of Webster §II.A step 3). NO per-system
+    gauge rows are appended; instead ``∂_0 = ker(merged ∂_1)`` (the cycle basis
+    of the glued graph, §III.D Eq.(66)/(67)) is appended. The only pairs that
+    anticommute before the merge are (χ_X, χ_Z) at each ``v ∈ W``; fusing them
+    removes that anticommutation, so the merged code is a genuine stabilizer code
+    encoding ``code.dimension − 1`` logicals with Ȳ = iX̄Z̄ in its stabilizer
+    group.
 
     Args:
         code: a CSS code carrying the logical qubit to be Y-measured.
@@ -581,24 +583,23 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
 
     Returns:
         A :class:`YGadgetLayout`. ``ValueError`` is raised (via
-        :func:`_locate_overlap`) if ``x``/``z`` are not valid anticommuting
-        logicals overlapping on exactly one qubit (multi-overlap is the
-        out-of-scope Remark 19 extension).
+        :func:`_locate_overlaps`) if ``x``/``z`` are not valid anticommuting
+        logicals (``H_Z @ x = 0``, ``H_X @ z = 0``, ``x · z`` odd).
     """
     x = np.asarray(x).astype(np.uint8)
     z = np.asarray(z).astype(np.uint8)
-    # Validate the single-overlap precondition and locate the crossing qubit q0.
-    q0 = _locate_overlap(code, x, z)
+    W = _locate_overlaps(code, x, z)
 
-    # Per-system L=1 gadgets on the SAME code (disjoint κ-ancilla index ranges).
+    # Per-system L=1 gadgets, each Cheeger-boosted to ≥1 (main.tex §4.7 /
+    # arXiv:2410.02753 §III.D: per-system distance argument).
+    from .cheeger import boost_gadget, cheeger_constant
+
     g_x = build_gadget(code, x, basis=Pauli.X)
     g_z = build_gadget(code, z, basis=Pauli.Z)
-
-    # Sparse adapter joining the two systems (Swaroop, Jochym-O'Connor, Yoder
-    # arXiv:2410.03628 §III SkipTree + §II C cellulation). Stored on the layout
-    # for downstream circuit synthesis; the single-overlap merged code needs
-    # only the q1 mixed check, so the bridge columns do not enter H_sym.
-    bridge = build_bridge(g_x, g_z)
+    if cheeger_constant(g_x) < 1.0:
+        g_x = boost_gadget(g_x, method="combinatorial", target=1.0, seed=0)
+    if cheeger_constant(g_z) < 1.0:
+        g_z = boost_gadget(g_z, method="combinatorial", target=1.0, seed=0)
 
     field = code.field
     n = code.num_qudits
@@ -608,76 +609,57 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     k_z = len(g_z.ancilla_qubits)
     n_merged = n + k_x + k_z
 
-    # --- Decompose each gadget into stabilizer / χ / gauge blocks --------------
-    # X̄ system (Webster §II.A step 3, basis=X):
-    #   HX_merged = [ [H_X | 0]        (X-checks, κ_x part zero)
-    #                 [E_x | F_x^T] ]  (χ_X rows: one data vertex + κ_x columns)
-    #   HZ_merged = [ [H_Z | F̃_x]      (Z-checks dual-extended onto κ_x)
-    #                 [0   | G_x] ]     (gauge rows on κ_x)
+    # χ / extension blocks (Webster §II.A step 3 decomposition).
     chi_x = np.asarray(g_x.HX_merged[m_x:]).astype(np.uint8)  # (|V0x|, n+k_x)
     hz_ext_kx = np.asarray(g_x.HZ_merged[:m_z]).astype(np.uint8)  # [H_Z | F̃_x]
-    gauge_x = np.asarray(g_x.HZ_merged[m_z:, n:]).astype(np.uint8)  # (r_x, k_x)
-
-    # Z̄ system (basis=Z, symmetric dual):
-    #   HZ_merged = [ [H_Z | 0] ; [E_z | F_z^T] ]  (Z-checks; χ_Z rows on κ_z)
-    #   HX_merged = [ [H_X | F̃_z] ; [0 | G_z] ]   (X-checks dual-extended; gauge on κ_z)
     chi_z = np.asarray(g_z.HZ_merged[m_z:]).astype(np.uint8)  # (|V0z|, n+k_z)
     hx_ext_kz = np.asarray(g_z.HX_merged[:m_x]).astype(np.uint8)  # [H_X | F̃_z]
-    gauge_z = np.asarray(g_z.HX_merged[m_x:, n:]).astype(np.uint8)  # (r_z, k_z)
 
-    def _embed(
-        data_kx_block: np.ndarray | None = None,
-        *,
-        kx_cols: np.ndarray | None = None,
-        kz_cols: np.ndarray | None = None,
-        data_cols: np.ndarray | None = None,
-        rows: int = 0,
-    ) -> np.ndarray:
-        """Place a block into the merged ``[data | κ_x | κ_z]`` column space."""
+    def _embed(rows, *, data=None, kx=None, kz=None):
         out = np.zeros((rows, n_merged), dtype=np.uint8)
-        if data_cols is not None:
-            out[:, :n] = data_cols
-        if kx_cols is not None:
-            out[:, n : n + k_x] = kx_cols
-        if kz_cols is not None:
-            out[:, n + k_x : n + k_x + k_z] = kz_cols
+        if data is not None:
+            out[:, :n] = data
+        if kx is not None:
+            out[:, n : n + k_x] = kx
+        if kz is not None:
+            out[:, n + k_x :] = kz
         return out
 
-    # --- X-type rows of the merged code ---------------------------------------
-    # H_X extended onto κ_z (commutes with χ_Z); χ_X on [data | κ_x]; gauge G_z on κ_z.
-    HX_orig = _embed(data_cols=hx_ext_kz[:, :n], kz_cols=hx_ext_kz[:, n:], rows=m_x)
-    chi_x_emb = _embed(data_cols=chi_x[:, :n], kx_cols=chi_x[:, n:], rows=chi_x.shape[0])
-    gauge_z_emb = _embed(kz_cols=gauge_z, rows=gauge_z.shape[0])
-    HX_all = np.vstack([HX_orig, chi_x_emb, gauge_z_emb]).astype(np.uint8)
+    # X-type rows: H_X extended onto κ_z; χ_X on [data | κ_x]. (NO per-system gauge.)
+    HX_all = np.vstack(
+        [
+            _embed(m_x, data=hx_ext_kz[:, :n], kz=hx_ext_kz[:, n:]),
+            _embed(chi_x.shape[0], data=chi_x[:, :n], kx=chi_x[:, n:]),
+        ]
+    ).astype(np.uint8)
+    # Z-type rows: H_Z extended onto κ_x; χ_Z on [data | κ_z].
+    HZ_all = np.vstack(
+        [
+            _embed(m_z, data=hz_ext_kx[:, :n], kx=hz_ext_kx[:, n:]),
+            _embed(chi_z.shape[0], data=chi_z[:, :n], kz=chi_z[:, n:]),
+        ]
+    ).astype(np.uint8)
 
-    # --- Z-type rows of the merged code ---------------------------------------
-    # H_Z extended onto κ_x (commutes with χ_X); χ_Z on [data | κ_z]; gauge G_x on κ_x.
-    HZ_orig = _embed(data_cols=hz_ext_kx[:, :n], kx_cols=hz_ext_kx[:, n:], rows=m_z)
-    chi_z_emb = _embed(data_cols=chi_z[:, :n], kz_cols=chi_z[:, n:], rows=chi_z.shape[0])
-    gauge_x_emb = _embed(kx_cols=gauge_x, rows=gauge_x.shape[0])
-    HZ_all = np.vstack([HZ_orig, chi_z_emb, gauge_x_emb]).astype(np.uint8)
-
-    # --- Cross-merge the χ_X / χ_Z rows anchored at q0 into q1 -----------------
-    # adapter_cols = the DATA columns: a χ row has exactly ONE data qubit in its
-    # support (its vertex), so the single-{q0} criterion selects precisely χ_X
-    # and χ_Z at q0 (original stabilizers have ≥2 data qubits). The fused row IS
-    # the mixed check q1 (Webster, Smith, Cohen arXiv:2511.15989 §II.B.2).
-    HX_out, HZ_out, Y_stab, _obs0_y, _x_left, _z_left = apply_mixed_basis_merge(
+    # Merge χ_X@v / χ_Z@v into one mixed y_v row for every v ∈ W (§III.D / §4.3).
+    HX_out, HZ_out, Y_stab, _obs0_y, _xl, _zl = apply_mixed_basis_merge(
         HX_all,
         HZ_all,
-        merge_qubits=(q0,),
+        merge_qubits=W,
         adapter_cols=tuple(range(n)),
     )
     HX_out = np.asarray(HX_out).astype(np.int_)
     HZ_out = np.asarray(HZ_out).astype(np.int_)
-    if Y_stab is None or Y_stab.shape[0] < 1:
+    if Y_stab is None or Y_stab.shape[0] < len(W):
         raise ValueError(
-            "BLOCKED: cross-merge produced no Y_stab row at q0 — the χ_X/χ_Z "
-            f"pair anchored at q0={q0} was not found (Cross, He, Rall, Yoder "
-            "arXiv:2407.18393 §3.7 mixed check q1 must exist)"
+            f"BLOCKED: cross-merge produced {0 if Y_stab is None else Y_stab.shape[0]} "
+            f"y_v rows, expected |W|={len(W)} (arXiv:2410.02753 §III.D)"
         )
 
-    # --- Pack the merged symplectic matrix [HX_out|0] ∪ [0|HZ_out] ∪ Y_stab ----
+    # ∂_0 = ker(merged ∂_1): cycle basis of the glued graph (§III.D Eq.66/67),
+    # replacing the per-system gauge blocks. 0 rows at |W|=1, |W|−1 crossing rows
+    # at |W|≥2.
+    partial0 = _partial0_symplectic_rows(g_x, g_z, x, z, n=n, k_x=k_x, k_z=k_z)
+
     rows_sym: list[np.ndarray] = []
     for r in HX_out:
         rows_sym.append(np.concatenate([r, np.zeros(n_merged, dtype=np.int_)]))
@@ -685,43 +667,30 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
         rows_sym.append(np.concatenate([np.zeros(n_merged, dtype=np.int_), r]))
     for r in Y_stab:
         rows_sym.append(r.astype(np.int_))
+    for r in partial0:
+        rows_sym.append(r.astype(np.int_))
     H_sym = (
         np.array(rows_sym, dtype=np.int_)
         if rows_sym
         else np.zeros((0, 2 * n_merged), dtype=np.int_)
     )
 
-    # Genuine stabilizer code in the single-overlap case: the only pre-merge
-    # anticommutation (χ_X, χ_Z) at q0 is consumed by q1. Detect any residual
-    # gauge anticommutation defensively (would arise only for multi-overlap).
     Hx = H_sym[:, :n_merged]
     Hz = H_sym[:, n_merged:]
     comm = (Hx @ Hz.T + Hz @ Hx.T) % 2
     np.fill_diagonal(comm, 0)
-    is_subsystem = bool(comm.any())
+    merged_code = QuditCode(field(H_sym), is_subsystem_code=bool(comm.any()))
 
-    merged_code = QuditCode(field(H_sym), is_subsystem_code=is_subsystem)
-
-    # obs0 = the FULL §3.2 readout product (Cross, He, Rall, Yoder
-    # arXiv:2407.18393 §3.2 lines 562-563): output the parity of ALL appended
-    # checks whose product is the logical. For Ȳ = iX̄Z̄ that product is the
-    # surviving χ_X rows ⊕ surviving χ_Z rows ⊕ q1 (line 2433: X̄_M Z̄_M), plus
-    # code stabilizers chosen so the product is measurable in the prep/readout
-    # eigenbasis (data → Y, κ_x → Z, κ_z → X) and hence DETERMINISTIC. Solved
-    # over GF(2) — NOT the q1 row alone (which is non-deterministic, suppresses
-    # obs0, and fails the readout).
     obs0_rows, obs0_readout = _ybar_obs0_rows(
         H_sym, code, x, z, n0=n, n_merged=n_merged, k_x=k_x
     )
-
     return YGadgetLayout(
         code=code,
         x=x,
         z=z,
-        q0=q0,
+        W=W,
         g_x=g_x,
         g_z=g_z,
-        bridge=bridge,
         Y_stab=Y_stab,
         H_sym=H_sym,
         merged_code=merged_code,

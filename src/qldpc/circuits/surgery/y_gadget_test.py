@@ -1,13 +1,40 @@
 # y_gadget_test.py
+import dataclasses
+
 import galois
 import numpy as np
 import pytest
 
+from qldpc.circuits.surgery.cheeger import cheeger_constant
 from qldpc.circuits.surgery.gadget import build_gadget
-from qldpc.circuits.surgery.y_gadget import _locate_overlap, _steane_y_pair, build_y_gadget
+from qldpc.circuits.surgery.y_gadget import (
+    YGadgetLayout,
+    _locate_overlap,
+    _steane_y_pair,
+    build_y_gadget,
+)
 from qldpc.objects import Pauli
 
 GF2 = galois.GF(2)
+
+
+def test_build_y_gadget_no_bridge_field_and_boosted():
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    names = {f.name for f in dataclasses.fields(YGadgetLayout)}
+    assert "bridge" not in names
+    assert yg.W == (int(np.where(x.astype(bool) & z.astype(bool))[0][0]),)
+    assert cheeger_constant(yg.g_x) >= 1.0 and cheeger_constant(yg.g_z) >= 1.0
+    # Ȳ in stabilizer center: symplectic [x|z] in rowspace(H_sym) restricted to data cols
+    n = code.num_qudits
+    nm = yg.merged_code.num_qudits
+    H = np.asarray(yg.H_sym).astype(int)
+    data_cols = list(range(n)) + list(range(nm, nm + n))
+    M = GF2(H[:, data_cols] % 2)
+    v = GF2(np.concatenate([np.asarray(x), np.asarray(z)]).astype(int) % 2)
+    assert int(np.linalg.matrix_rank(M)) == int(
+        np.linalg.matrix_rank(GF2(np.vstack([np.asarray(M), np.asarray(v)[None, :]])))
+    )
 
 
 def test_locate_overlaps_steane_is_singleton():
@@ -52,10 +79,26 @@ def test_build_y_gadget_merged_code_is_valid_subsystem_code():
     assert yg.Y_stab is not None and yg.Y_stab.shape[0] >= 1
 
 
-def test_build_y_gadget_rejects_multi_overlap():
+def test_build_y_gadget_rejects_commuting_pair():
+    # The general-|W| builder no longer rejects multi-overlap (it merges every
+    # v ∈ W), but it MUST still reject a pair that violates the Ȳ = iX̄Z̄
+    # precondition. A commuting (x, z) pair (here z = 0, so x · z is even) is not
+    # an anticommuting logical-X/-Z pair and is rejected by _locate_overlaps.
     code, x, _ = _steane_y_pair()
+    z_commuting = np.zeros_like(x)
     with pytest.raises(ValueError):
-        build_y_gadget(code, x=x, z=x)
+        build_y_gadget(code, x=x, z=z_commuting)
+
+
+def test_build_y_gadget_handles_multi_overlap():
+    # |W|=3 case: the Steane logical-X representative is self-dual (H_X @ x = 0),
+    # so (x, x) is a valid anticommuting pair with |W| = 3. The general-|W|
+    # builder produces a genuine stabilizer code (no longer rejected).
+    code, x, _ = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=x)
+    assert len(yg.W) == 3
+    assert yg.Y_stab.shape[0] == 3
+    assert yg.merged_code.is_subsystem_code is False
 
 
 def test_ybar_is_in_merged_stabilizer():
