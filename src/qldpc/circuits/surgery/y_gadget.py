@@ -173,6 +173,69 @@ def _overlap_size(x: np.ndarray, z: np.ndarray) -> int:
     return int(np.count_nonzero(x.astype(bool) & z.astype(bool)))
 
 
+def _merged_incidence(
+    g_x: GadgetLayout, g_z: GadgetLayout, x: np.ndarray, z: np.ndarray
+) -> tuple[np.ndarray, int, int]:
+    """Merged graph incidence ∂_1 (arXiv:2410.02753 Eq.(66); main.tex §4.4).
+
+    Rows = vertices V_X ⊔ W ⊔ V_Z (data qubits of supp(x)/supp(z)); columns =
+    edges (κ_X | κ_Z). ∂_1^x = g_x.incidence.T (rows=support, cols=κ_X); dual for
+    ∂_1^z. The W rows stack the X- and Z-system incidences side by side, gluing
+    the two graphs at the shared Y-qubits.
+    """
+    x = np.asarray(x).astype(np.uint8)
+    z = np.asarray(z).astype(np.uint8)
+    d1x = np.asarray(g_x.incidence).astype(np.uint8).T  # (|supp x|, k_x)
+    d1z = np.asarray(g_z.incidence).astype(np.uint8).T  # (|supp z|, k_z)
+    supx = list(g_x.support)
+    supz = list(g_z.support)
+    W = sorted(set(int(i) for i in np.where(x)[0]) & set(int(i) for i in np.where(z)[0]))
+    VX = [v for v in supx if v not in W]
+    VZ = [v for v in supz if v not in W]
+    k_x = d1x.shape[1]
+    k_z = d1z.shape[1]
+
+    def rows_of(d: np.ndarray, sup: list[int], sel: list[int]) -> np.ndarray:
+        idx = [sup.index(v) for v in sel]
+        return d[idx] if idx else np.zeros((0, d.shape[1]), dtype=np.uint8)
+
+    top = np.hstack([rows_of(d1x, supx, VX), np.zeros((len(VX), k_z), np.uint8)])
+    mid = np.hstack([rows_of(d1x, supx, W), rows_of(d1z, supz, W)])
+    bot = np.hstack([np.zeros((len(VZ), k_x), np.uint8), rows_of(d1z, supz, VZ)])
+    return np.vstack([top, mid, bot]).astype(np.uint8), k_x, k_z
+
+
+def _partial0_symplectic_rows(
+    g_x: GadgetLayout,
+    g_z: GadgetLayout,
+    x: np.ndarray,
+    z: np.ndarray,
+    *,
+    n: int,
+    k_x: int,
+    k_z: int,
+) -> np.ndarray:
+    """∂_0 = ker(merged ∂_1) as symplectic rows (arXiv:2410.02753 Eq.(67)/(68)).
+
+    Column layout per half: [data (n) | κ_X | κ_Z]. A cycle c = (c_X | c_Z):
+    its κ_X support enters as Z-part on κ_X (∂_0^(X)); its κ_Z support enters as
+    X-part on κ_Z (∂_0^(Z)). A crossing cycle (|W|≥2) populates both → one
+    non-CSS row.
+    """
+    D1, kx, kz = _merged_incidence(g_x, g_z, x, z)
+    if (kx, kz) != (k_x, k_z):
+        raise ValueError(f"incidence κ sizes {(kx, kz)} != ({k_x}, {k_z})")
+    ker = np.asarray(GF2(D1.astype(int)).null_space()).astype(np.uint8)  # rows over (κ_X|κ_Z)
+    nm = n + k_x + k_z
+    out = np.zeros((ker.shape[0], 2 * nm), dtype=np.uint8)
+    for i, c in enumerate(ker):
+        c_x = c[:k_x]
+        c_z = c[k_x:]
+        out[i, n + k_x : nm] = c_z  # X-part on κ_Z  (∂_0^(Z))
+        out[i, nm + n : nm + n + k_x] = c_x  # Z-part on κ_X  (∂_0^(X))
+    return out
+
+
 @dataclasses.dataclass(frozen=True)
 class Obs0Row:
     """One merged-code check row contributing to the Ȳ readout product (obs0).
