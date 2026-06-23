@@ -5,6 +5,16 @@ import pytest
 from qldpc.circuits.surgery.y_gadget import _locate_overlap, _steane_y_pair, build_y_gadget
 
 
+def test_locate_overlaps_steane_is_singleton():
+    from qldpc.circuits.surgery.y_gadget import _locate_overlaps
+
+    code, x, z = _steane_y_pair()
+    W = _locate_overlaps(code, x, z)
+    assert isinstance(W, tuple)
+    assert W == tuple(int(i) for i in np.where(x.astype(bool) & z.astype(bool))[0])
+    assert len(W) % 2 == 1  # anticommuting ⇒ odd overlap
+
+
 def test_steane_y_pair_has_single_overlap():
     code, x, z = _steane_y_pair()
     assert ((np.asarray(code.matrix_z) @ x) % 2 == 0).all()  # x is logical-X

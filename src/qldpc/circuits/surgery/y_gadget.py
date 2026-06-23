@@ -99,6 +99,29 @@ def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     return int(overlap[0])
 
 
+def _locate_overlaps(code: CSSCode, x: np.ndarray, z: np.ndarray) -> tuple[int, ...]:
+    """Return W = supp(x) ∩ supp(z), the physical Pauli-Y qubits of Ȳ = iX̄Z̄.
+
+    Validates (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
+    docs/superpowers/docs/main.tex §4.1):
+      * x is a logical-X representative: H_Z @ x == 0 (mod 2),
+      * z is a logical-Z representative: H_X @ z == 0 (mod 2),
+      * x and z anticommute: x · z is odd (so |W| is odd, ≥ 1).
+    """
+    x = np.asarray(x).astype(np.uint8)
+    z = np.asarray(z).astype(np.uint8)
+    n = code.num_qudits
+    if x.shape != (n,) or z.shape != (n,):
+        raise ValueError(f"x/z must have shape ({n},); got {x.shape}, {z.shape}")
+    if ((np.asarray(code.matrix_z).astype(np.uint8) @ x) % 2 != 0).any():
+        raise ValueError("x is not a logical-X representative: H_Z @ x != 0 (mod 2)")
+    if ((np.asarray(code.matrix_x).astype(np.uint8) @ z) % 2 != 0).any():
+        raise ValueError("z is not a logical-Z representative: H_X @ z != 0 (mod 2)")
+    if int(np.dot(x.astype(np.int64), z.astype(np.int64))) % 2 == 0:
+        raise ValueError("x and z commute (x · z even); they cannot form Ȳ = iX̄Z̄")
+    return tuple(int(i) for i in np.where(x.astype(bool) & z.astype(bool))[0])
+
+
 def _steane_y_pair() -> tuple[CSSCode, np.ndarray, np.ndarray]:
     """Return a Steane code and a logical (x, z) pair overlapping on exactly one qubit.
 
