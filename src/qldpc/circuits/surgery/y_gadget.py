@@ -173,6 +173,50 @@ def _overlap_size(x: np.ndarray, z: np.ndarray) -> int:
     return int(np.count_nonzero(x.astype(bool) & z.astype(bool)))
 
 
+def _bb_y_pair(overlap: int = 1) -> tuple[CSSCode, np.ndarray, np.ndarray]:
+    """BB [[36,8,4]] fixture for Ȳ on logical qubit 0 with chosen |W|.
+
+    overlap=1: canonical reps (already single-overlap). overlap=3: add stabilizer
+    rows (deterministic seed) until supp(x)∩supp(z) has size 3 — the |W|≥2
+    crossing-cycle regime of arXiv:2410.02753 §III.D / main.tex §4.
+    """
+    import sympy
+
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    n = code.num_qudits
+    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
+    LZ = np.asarray(code.get_logical_ops(Pauli.Z)).astype(np.uint8)
+    wide = LX.shape[1] == 2 * n
+    x = (LX[0][:n] if wide else LX[0]).astype(np.uint8)
+    z = (LZ[0][n:] if wide else LZ[0]).astype(np.uint8)
+    if overlap == 1:
+        return code, x, z
+    if overlap == 3:
+        HX = np.asarray(code.matrix_x).astype(np.uint8)
+        HZ = np.asarray(code.matrix_z).astype(np.uint8)
+        rng = np.random.default_rng(0)
+        for _ in range(20000):
+            ax = (
+                rng.integers(0, 2, HX.shape[0])
+                if rng.random() < 0.5
+                else np.zeros(HX.shape[0], int)
+            )
+            az = rng.integers(0, 2, HZ.shape[0])
+            xc = (x ^ (ax @ HX % 2)).astype(np.uint8)
+            zc = (z ^ (az @ HZ % 2)).astype(np.uint8)
+            if not xc.any() or not zc.any():
+                continue
+            if (
+                int(np.count_nonzero(xc.astype(bool) & zc.astype(bool))) == 3
+                and int(xc.sum()) <= 12
+                and int(zc.sum()) <= 12
+            ):
+                return code, xc, zc
+        raise ValueError("BLOCKED: no |W|=3 BB representative found in budget")
+    raise ValueError(f"overlap must be 1 or 3, got {overlap}")
+
+
 def _merged_incidence(
     g_x: GadgetLayout, g_z: GadgetLayout, x: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, int, int]:

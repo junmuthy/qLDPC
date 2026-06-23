@@ -117,6 +117,16 @@ def test_ybar_is_in_merged_stabilizer():
     assert _in_rowspace_gf2(Hd, ybar)
 
 
+def test_bb_y_pair_overlaps():
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair, _locate_overlaps
+
+    for ov in (1, 3):
+        code, x, z = _bb_y_pair(overlap=ov)
+        assert code.num_qudits == 36
+        W = _locate_overlaps(code, x, z)
+        assert len(W) == ov
+
+
 def test_partial0_steane_w1_is_pure_css_no_crossing():
     from qldpc.circuits.surgery.y_gadget import (
         _merged_incidence,
