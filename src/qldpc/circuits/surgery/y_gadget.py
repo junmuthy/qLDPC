@@ -43,8 +43,9 @@ def _in_rowspace_gf2(M: np.ndarray, v: np.ndarray) -> bool:
 
     Used to certify that the symplectic vector ``[x | z]`` of Ȳ = iX̄Z̄ is a
     product of the merged-code stabilizers restricted to the original data
-    qubits, the core correctness guarantee of the single-overlap logical-Y
-    merge of Cross, He, Rall, Yoder arXiv:2407.18393 §3.7.
+    qubits, the core correctness guarantee of the homological logical-Y merge of
+    Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D (see also
+    docs/superpowers/docs/main.tex §4).
     """
     M2 = GF2(np.asarray(M).astype(np.uint8))
     A = GF2(np.vstack([np.asarray(M).astype(np.uint8), np.asarray(v).astype(np.uint8)[None, :]]))
@@ -54,9 +55,11 @@ def _in_rowspace_gf2(M: np.ndarray, v: np.ndarray) -> bool:
 def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     """Return the single data qubit shared by logical-X support ``x`` and logical-Z support ``z``.
 
-    Implements the single-overlap precondition of Cross, He, Rall, Yoder
-    arXiv:2407.18393 §3.7: Ȳ = iX̄Z̄ is realised cleanly when the X̄ and Z̄
-    strings cross on exactly one data qubit.
+    Legacy ``|W|=1`` helper retained as a test fixture; the general-``|W|`` merge
+    uses :func:`_locate_overlaps`. The single-overlap special case of the
+    Ȳ-overlap ``W = supp(x) ∩ supp(z)`` of Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.D (docs/superpowers/docs/main.tex §4.1): Ȳ = iX̄Z̄ is
+    realised cleanly when the X̄ and Z̄ strings cross on exactly one data qubit.
 
     Validates, raising ``ValueError`` otherwise:
         * ``x`` is a logical-X representative: ``H_Z @ x == 0`` (mod 2),
@@ -94,7 +97,8 @@ def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     if overlap.size != 1:
         raise ValueError(
             f"x and z overlap on {overlap.size} qubits, expected exactly 1 "
-            "(Cross, He, Rall, Yoder arXiv:2407.18393 §3.7 single-overlap case)"
+            "(Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D "
+            "single-overlap case)"
         )
     return int(overlap[0])
 
@@ -125,8 +129,10 @@ def _locate_overlaps(code: CSSCode, x: np.ndarray, z: np.ndarray) -> tuple[int, 
 def _steane_y_pair() -> tuple[CSSCode, np.ndarray, np.ndarray]:
     """Return a Steane code and a logical (x, z) pair overlapping on exactly one qubit.
 
-    This is the clean single-overlap fixture for Ȳ = iX̄Z̄ of Cross, He, Rall,
-    Yoder arXiv:2407.18393 §3.7. The canonical weight-3 logical-X and logical-Z
+    This is the clean single-overlap (``|W|=1``) fixture for the Ȳ-overlap
+    ``W = supp(x) ∩ supp(z)`` of Ȳ = iX̄Z̄ (Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.D; docs/superpowers/docs/main.tex §4.1). The canonical
+    weight-3 logical-X and logical-Z
     representatives of the [[7,1,3]] Steane code already cross on a single data
     qubit; if a given representative pair does not, it is reduced over GF(2) by
     adding stabilizer rows (a logical-X support stays logical-X after XOR-ing any
@@ -163,8 +169,8 @@ def _steane_y_pair() -> tuple[CSSCode, np.ndarray, np.ndarray]:
 
     raise ValueError(
         "BLOCKED: no overlap-1 logical (x, z) pair reachable on the Steane code by "
-        "stabilizer-row reduction; the out-of-scope multi-overlap §3.7 path would be "
-        "required (Cross, He, Rall, Yoder arXiv:2407.18393 §3.7)"
+        "stabilizer-row reduction; the multi-overlap (|W|≥2) merge would be required "
+        "(Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D)"
     )
 
 
@@ -220,7 +226,8 @@ def _bb_y_pair(overlap: int = 1) -> tuple[CSSCode, np.ndarray, np.ndarray]:
 def _merged_incidence(
     g_x: GadgetLayout, g_z: GadgetLayout, x: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, int, int]:
-    """Merged graph incidence ∂_1 (arXiv:2410.02753 Eq.(66); main.tex §4.4).
+    """Merged graph incidence ∂_1 (Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 Eq.(66); docs/superpowers/docs/main.tex §4.4).
 
     Rows = vertices V_X ⊔ W ⊔ V_Z (data qubits of supp(x)/supp(z)); columns =
     edges (κ_X | κ_Z). ∂_1^x = g_x.incidence.T (rows=support, cols=κ_X); dual for
@@ -259,7 +266,8 @@ def _partial0_symplectic_rows(
     k_x: int,
     k_z: int,
 ) -> np.ndarray:
-    """∂_0 = ker(merged ∂_1) as symplectic rows (arXiv:2410.02753 Eq.(67)/(68)).
+    """∂_0 = ker(merged ∂_1) as symplectic rows (Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 Eq.(67)/(68); docs/superpowers/docs/main.tex §4.4).
 
     Column layout per half: [data (n) | κ_X | κ_Z]. A cycle c = (c_X | c_Z):
     its κ_X support enters as Z-part on κ_X (∂_0^(X)); its κ_Z support enters as

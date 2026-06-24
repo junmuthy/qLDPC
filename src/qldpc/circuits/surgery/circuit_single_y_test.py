@@ -1,10 +1,10 @@
 """Tests for the single logical-Y measurement circuit (Ȳ = iX̄Z̄).
 
 Task-4 acceptance: ``build_single_y_ppm_circuit`` builds a ``stim.Circuit``
-for the single-overlap Y-gadget merged code (Cross, He, Rall, Yoder
-arXiv:2407.18393 §3.7) and that circuit compiles to a
-``stim.DetectorErrorModel`` with the logical-Y eigenstate prep
-``data_init="Y+"``.
+for the homological Y-gadget merged code (Ide, Gowda, Nadkarni, Dauphinais
+arXiv:2410.02753 §III.C/§III.D; docs/superpowers/docs/main.tex §4) and that
+circuit compiles to a ``stim.DetectorErrorModel`` with the logical-Y
+eigenstate prep ``data_init="Y+"``.
 """
 
 from __future__ import annotations

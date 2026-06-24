@@ -470,8 +470,9 @@ def _steane_logical_y_eigenstate_prep(
     without transversal H/S this prep does not produce an Ȳ eigenstate, so we
     restrict it to the self-dual CSS case and raise otherwise.
 
-    Cross, He, Rall, Yoder arXiv:2407.18393 §3.7 (single-overlap Ȳ = iX̄Z̄);
-    the eigenstate prep is the standard transversal-Clifford state injection
+    Homological Ȳ = iX̄Z̄ measurement of Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.C/§III.D (docs/superpowers/docs/main.tex §4); the
+    eigenstate prep itself is the standard transversal-Clifford state injection
     of self-dual CSS codes.
     """
     code = yg.code
@@ -484,8 +485,8 @@ def _steane_logical_y_eigenstate_prep(
         raise ValueError(
             "data_init='Y+'/'Y-' transversal prep requires a self-dual CSS code "
             "(transversal H/S logical); got a non-self-dual code. Provide an "
-            "explicit Ȳ-eigenstate prep for this code (Cross, He, Rall, Yoder "
-            "arXiv:2407.18393 §3.7)."
+            "explicit Ȳ-eigenstate prep for this code (Ide, Gowda, Nadkarni, "
+            "Dauphinais arXiv:2410.02753 §III.C)."
         )
     ids = list(real_data_ids)
     circuit = stim.Circuit()
@@ -505,13 +506,14 @@ def build_single_y_ppm_circuit(
 ) -> stim.Circuit:
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
-    Builds the syndrome-extraction circuit for the single-overlap Y-gadget
-    merged code of Cross, He, Rall, Yoder arXiv:2407.18393 §3.7 / §4.1. The
+    Builds the syndrome-extraction circuit for the homological Y-gadget merged
+    code of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D
+    (docs/superpowers/docs/main.tex §4). The
     merged code ``yg.merged_code`` is a ``QuditCode`` whose stabilizers are the
     original code's X-checks and Z-checks (dual-extended onto the κ_x / κ_z
-    ancillas) plus ONE mixed Y-type check ``q1`` (= the ``yg.Y_stab`` row), the
-    Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 cross-merge of the χ_X and
-    χ_Z rows anchored at the crossing qubit ``q0``.
+    ancillas) plus the ``|W|`` mixed Y-type checks ``y_v`` (= the ``yg.Y_stab``
+    rows), the Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 cross-merge of the
+    χ_X and χ_Z rows anchored at each crossing qubit ``v ∈ W``.
 
     The emission reuses the split-schedule machinery of
     ``_build_joint_ppm_circuit_mixed_basis`` (this function's joint-PPM
@@ -529,8 +531,8 @@ def build_single_y_ppm_circuit(
          (per-``Y_stab``-row CX/CY/CZ → MX) schedule. Splitting the X- and
          Z-type extractions into non-overlapping phases keeps the individual
          gauge outcomes deterministic in the subsystem-code sense (Cohen, Kim,
-         Bartlett, Brown arXiv:2110.10794 §II.B.2; Cross, He, Rall, Yoder
-         arXiv:2407.18393 Theorem 20). Round-1 detectors are emitted only for
+         Bartlett, Brown arXiv:2110.10794 §II.B.2; Ide, Gowda, Nadkarni,
+         Dauphinais arXiv:2410.02753 §III.C/§III.D). Round-1 detectors are emitted only for
          stabilizer-center rows that are deterministic on the prepared state;
          later rounds get round-to-round difference detectors for all center
          rows.
@@ -567,10 +569,11 @@ def build_single_y_ppm_circuit(
     choice raises ``ValueError``. ``None`` (default) emits nothing, leaving the
     circuit byte-identical to the no-memory build.
 
-    Bell/flag scope (Cross, He, Rall, Yoder arXiv:2407.18393 §4.1). The brief's
-    fault-tolerance refinement — splitting the ``q1`` ancilla into a Bell/flag
+    Bell/flag scope (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
+    docs/superpowers/docs/main.tex §4). The brief's
+    fault-tolerance refinement — splitting each ``y_v`` ancilla into a Bell/flag
     cell — is NOT built here. This function emits a straightforward Y-phase
-    extraction of ``q1`` (one ancilla, RX → CX/CY/CZ → MX) that compiles to a
+    extraction of each ``y_v`` (one ancilla, RX → CX/CY/CZ → MX) that compiles to a
     DEM, which is the Task-4 acceptance. The Bell/flag cell is a distance
     refinement validated by the operational-distance task; it is added only if
     that task finds the operational distance has collapsed to 1.
@@ -600,9 +603,10 @@ def build_single_y_ppm_circuit(
     cannot carry a constant offset to normalise it). The complementary obs1 reads
     the SAME product off the final destructive readouts (V_X data MX ⊕ V_Z data M
     ⊕ W data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check, carrying the
-    un-inverted eigenvalue (Y+ → 0, Y- → 1). The §3.7 bridge (Cross, He, Rall,
-    Yoder arXiv:2407.18393 Remark 23) is a separate FAULT-DISTANCE refinement,
-    deferred to its own task; it is not needed for this readout.
+    un-inverted eigenvalue (Y+ → 0, Y- → 1). The per-system Cheeger boost
+    (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
+    docs/superpowers/docs/main.tex §4.7) is the FAULT-DISTANCE refinement, applied
+    inside ``build_y_gadget``; it is not needed for this readout.
     """
     merged_code = yg.merged_code
     field = merged_code.field
@@ -834,8 +838,8 @@ def build_single_y_ppm_circuit(
     # Same construction as the mixed-basis final detectors: emit a detector for
     # each center row directly compatible with the destructive readout basis,
     # and for readout-compatible null-space combinations of the remaining rows
-    # whose readout-incompatible parts cancel (Cross, He, Rall, Yoder
-    # arXiv:2407.18393 §3.7 / §4.1).
+    # whose readout-incompatible parts cancel (Ide, Gowda, Nadkarni, Dauphinais
+    # arXiv:2410.02753 §III.C/§III.D; docs/superpowers/docs/main.tex §4).
     center_idx = [orig for orig in row_to_check if center_mask[orig]]
     if center_idx:
         import galois as _galois
@@ -991,6 +995,9 @@ def build_single_y_ppm_circuit(
         row = LZ[memory_logical]  # (2*n_q,) symplectic [x | z]
         xpart, zpart = row[:n_q], row[n_q:]
         # readout-compatible survivor: pure-Z, no κ_z support (κ_z is read in X).
+        # ``xpart.any()`` is a defensive guard: a ``get_logical_ops(Pauli.Z)`` row
+        # is already pure-Z, so it never fires in practice, but it pins the
+        # contract should a non-pure-Z representative ever be passed.
         if xpart.any() or zpart[n_code + k_x :].any():
             raise ValueError(
                 f"merged Z-logical {memory_logical} is not Z-readout-compatible"
@@ -1020,8 +1027,9 @@ def _observable_is_deterministic(
     noiseless at this point) and asks stim whether it compiles: a
     non-deterministic observable makes ``detector_error_model()`` raise. We
     catch that to decide whether obs0 can be emitted. Used to gate obs0 in the
-    degenerate single-overlap regime where the Ȳ readout has an unpinned
-    κ-gauge residual (Cross, He, Rall, Yoder arXiv:2407.18393 §4.1).
+    regime where the Ȳ readout has an unpinned κ-gauge residual (Ide, Gowda,
+    Nadkarni, Dauphinais arXiv:2410.02753 §III.C; docs/superpowers/docs/main.tex
+    §4).
     """
     probe = circuit.copy()
     probe.append("OBSERVABLE_INCLUDE", obs_targets, 0)
