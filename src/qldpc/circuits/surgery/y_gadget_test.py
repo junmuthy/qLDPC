@@ -158,3 +158,34 @@ def test_partial0_steane_w1_is_pure_css_no_crossing():
         has_x = r[:nm].any()
         has_z = r[nm:].any()
         assert not (has_x and has_z), "unexpected crossing (non-CSS) row at |W|=1"
+
+
+def _kerdim(M):
+    M = np.asarray(M).astype(int)
+    return 0 if M.size == 0 else np.asarray(GF2(M).null_space()).shape[0]
+
+
+# crossing_dim = dim(ker merged ∂_1) − dim(ker ∂_1^x) − dim(ker ∂_1^z) is the
+# BASIS-INDEPENDENT count of genuine crossing cycles. (The number of mixed ROWS
+# in any particular ∂_0 basis is NOT invariant — do not assert on it.)
+@pytest.mark.parametrize("overlap, crossing_dim_expected", [(1, 0), (3, 2)])
+def test_bb_merged_structure_and_crossing_dim(overlap, crossing_dim_expected):
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair, _merged_incidence
+
+    code, x, z = _bb_y_pair(overlap=overlap)
+    yg = build_y_gadget(code, x=x, z=z)
+    assert yg.merged_code.dimension == 7  # 8 logicals − 1 measured
+    D1, k_x, k_z = _merged_incidence(yg.g_x, yg.g_z, x, z)
+    d1x = np.asarray(yg.g_x.incidence).astype(int).T
+    d1z = np.asarray(yg.g_z.incidence).astype(int).T
+    crossing_dim = _kerdim(D1) - _kerdim(d1x) - _kerdim(d1z)
+    assert crossing_dim == crossing_dim_expected  # 0 at |W|=1, |W|−1 at |W|=3
+
+
+def test_bb_w1_distance_not_collapsed():
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    d = yg.merged_code.get_distance(bound=12)  # decoder upper bound
+    assert d >= 4  # collapse below d_data=4 would make the bound return < 4
