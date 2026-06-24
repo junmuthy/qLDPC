@@ -1,16 +1,14 @@
-# Ȳ emitter decomposition — design
+# Ȳ emitter decomposition + H̃-faithful construction — design
 
 **Date:** 2026-06-25
 **Status:** approved (design)
-**Scope:** `src/qldpc/circuits/surgery/` — the single logical-Ȳ measurement emitter.
+**Scope:** `src/qldpc/circuits/surgery/` — the single logical-Ȳ measurement
+construction (`y_gadget.py`) and emitter (`circuit.py` → new `y_circuit.py`).
 
 ## Motivation
 
 After the Z̄⊗X̄ deletion and the `_surgery_*_joint` merge (done earlier on this
-branch — mixed-basis joint code, `joint_layout.py`, and the forbidden
-`hadamard_dual`/`cohen` paths removed; the joint and single CSS emitters now
-share unified `_surgery_*` helpers via a `joint=` parameter), the surgery
-module has three emitters:
+branch), the surgery module has three emitters:
 
 | Emitter | Lines | Shape |
 |---|---|---|
@@ -18,119 +16,160 @@ module has three emitters:
 | `_build_joint_ppm_circuit_same_basis` (X̄X̄/Z̄Z̄) | ~98 | CSS, thin — same `_surgery_*` helpers |
 | `build_single_y_ppm_circuit` (Ȳ) | ~635 | non-CSS, fully inline |
 
-The two CSS emitters are already small and share everything. The outlier is the
-**635-line Ȳ emitter**, a single function in a 2003-line `circuit.py`. Its
-internal phases parallel the CSS `_surgery_*` helpers, but its algorithm — a
-split X/Z/Y syndrome schedule over a non-CSS merged code — is genuinely
-different from the CSS single-pass.
+Two problems: (1) the 635-line Ȳ emitter is one opaque function in a 2003-line
+`circuit.py`; (2) the merged-code construction in `y_gadget.py` uses names
+(`hx_ext_kz`, `chi_x`, `partial0`) that **cannot be recognised against the
+paper's check matrix** $\tilde H$, so the code is not verifiable against the
+math.
 
-This refactor decomposes that one function into named phases and isolates the
-non-CSS path in its own module. It is **behaviour-preserving** except for the
-deliberate removal of two untested bring-up observables (§3).
+This refactor (a) makes the construction directly correspond to $\tilde H$ —
+formula-faithful names, explicit per-block stabilizer construction, rows
+assembled in formula order; and (b) decomposes the emitter into named phases,
+each annotated with the $\tilde H$ blocks it processes. It is
+**behaviour-preserving at the DEM/observable level**, with two deliberate
+exceptions (pruned obs1/benchmark_y; renumbered check IDs from formula-order
+assembly).
 
-## Key finding: the Ȳ subsystem is already self-contained
+## §0 — Reference: the merged-code check matrix H̃
 
-Every private helper the Ȳ emitter uses is called **only** by the Ȳ emitter
-(verified by grep over `circuit.py`):
+The Ȳ merged code (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
+main.tex §4) is the symplectic check matrix `[X-part | Z-part]`, each half with
+column blocks `[ data (n) | κ_x (k_x) | κ_z (k_z) ]`:
 
-- `_steane_logical_y_eigenstate_prep`
-- `_split_quditcode_into_virtual_cssc`
-- `_mixed_basis_qubit_coords`
-- `_compute_stabilizer_center_mask`
-- `_observable_is_deterministic`
+```
+        |   X-part (data | κ_x | κ_z)        |   Z-part (data | κ_x | κ_z)
+H̃ =     |------------------------------------|------------------------------------
+ row 1  |  H_X     0        π_{C₀^Z}^T        |   ·       ·        ·          X-checks
+ row 2  |  π_{V_X} ∂₁ˣ|_{V_X}  0              |   ·       ·        ·          χ_X on V_X
+ row 3  |  π_W     ∂₁ˣ|_W   0                 |  π_W      0       ∂₁ᶻ|_W       Y on W (mixed)
+ row 4  |  ·       ·        ·                 |  H_Z    π_{C₀^X}^T  0          Z-checks
+ row 5  |  ·       ·        ·                 |  π_{V_Z}  0       ∂₁ᶻ|_{V_Z}    χ_Z on V_Z
+ row 6  |  0       0        ∂₀^Z              |   0      ∂₀^X      0           cycles ∂₀
+```
 
-The emitter imports **nothing** from the CSS path — no `_surgery_*`, no
-`_check_lane_index_map`. The state-prep (|Ȳ±⟩ injection + transversal S) and
-detach (mixed-basis MX/M/MY destructive readout) are genuinely Ȳ-specific, not
-shared structure. Therefore the right move is **extract + decompose**, not
-force-merge with CSS (which would be the rejected "CSS as degenerate no-Y case"
-option A).
+### Block → name → construction
 
-## §1 — Module structure
+| Block | $\tilde H$ symbol | Python name | Constructed as |
+|---|---|---|---|
+| 1 | `H_X` | `H_X` | `code.matrix_x` |
+| 1 | `π_{C₀^Z}^T` | `pi_C0z_T` | H_X's κ_z extension (`g_z` selection onto C₀^Z) |
+| 2 | `π_{V_X}` | `pi_VX` | support-projection of χ_X (identity at V_X cols) |
+| 2 | `∂₁ˣ\|_{V_X}` | `d1x_VX` | `g_x.incidence` restricted to V_X (κ_x cols of χ_X) |
+| 3 | `π_W` | `pi_W` | support-projection at W cols (X- and Z-part) |
+| 3 | `∂₁ˣ\|_W`, `∂₁ᶻ\|_W` | `d1x_W`, `d1z_W` | incidence restricted to W (via `apply_mixed_basis_merge`) |
+| 4 | `H_Z` | `H_Z` | `code.matrix_z` |
+| 4 | `π_{C₀^X}^T` | `pi_C0x_T` | H_Z's κ_x extension (`g_x` selection onto C₀^X) |
+| 5 | `π_{V_Z}` | `pi_VZ` | support-projection of χ_Z |
+| 5 | `∂₁ᶻ\|_{V_Z}` | `d1z_VZ` | `g_z.incidence` restricted to V_Z (κ_z cols of χ_Z) |
+| 6 | `∂₀^Z`, `∂₀^X` | `d0_Z`, `d0_X` | cycle basis `ker(merged ∂₁)` (`_partial0_symplectic_rows`) |
 
-Create `src/qldpc/circuits/surgery/y_circuit.py`. Move the whole Ȳ subsystem
-there: `build_single_y_ppm_circuit`, the five private helpers above, the
-currently-nested `_row_paulis` helper, and the new phase helpers (§2).
+`gadget.py`'s Cain-named internals (`incidence`, `incidence_tilde`, the χ/G
+split) are **mapped** to these symbols at the `y_gadget.py` use sites
+(`d1x_VX = g_x.incidence[...]  # ∂₁ˣ|_{V_X}`), **not renamed** — `gadget.py` is
+shared with the CSS path and keeps its Cain/Webster conventions.
 
-Update the single re-export in `surgery/__init__.py`
-(`build_single_y_ppm_circuit` moves from `.circuit` to `.y_circuit`).
+## §1 — H̃-faithful construction (`y_gadget.py`)
 
-Result:
-- `circuit.py`: 2003 → ~1100 lines (pure CSS: single + joint + stitch +
-  shared `_surgery_*`).
-- `y_circuit.py`: ~640 lines (the non-CSS path, isolated).
+Rewrite the assembly inside `build_y_gadget` (currently
+`y_gadget.py:676-738`) so each $\tilde H$ block is a **named local variable**
+constructed explicitly, then stacked **in formula order**:
 
-`y_circuit.py` imports its low-level deps directly from their sources
-(`qldpc.circuits.bookkeeping`, `qldpc.circuits.memory.syndrome_measurement`,
-`qldpc.circuits.noise_model`, `qldpc.codes.common`, `qldpc.objects`,
-`.y_gadget`) — not from `.circuit`.
+```python
+# Each block named + built per §0; symplectic width 2*n_merged.
+Xcheck_rows = _row([H_X,    zeros, pi_C0z_T], [])               # block 1
+chiX_rows   = _row([pi_VX,  d1x_VX, zeros],   [])               # block 2
+Ymix_rows   = Y_stab                                            # block 3 (mixed)
+Zcheck_rows = _row([], [H_Z,   pi_C0x_T, zeros])               # block 4
+chiZ_rows   = _row([], [pi_VZ, zeros,    d1z_VZ])              # block 5
+cycle_rows  = _row([zeros, zeros, d0_Z], [zeros, d0_X, zeros]) # block 6
+H_sym = np.vstack([Xcheck_rows, chiX_rows, Ymix_rows,
+                   Zcheck_rows, chiZ_rows, cycle_rows])
+```
 
-## §2 — Phase decomposition
+(`_row(x_blocks, z_blocks)` is a small local that hstacks the `[data|κ_x|κ_z]`
+column blocks for each half, padding empties with zeros — replacing the current
+`_embed` helper.)
 
-`build_single_y_ppm_circuit` becomes a thin orchestrator (~40 lines) that wires
-together named phase functions. Phase boundaries follow the existing inline
-section comments, so each becomes a function with an explicit signature:
+**Assembly order changes** from today's grouped `[HX_out | HZ_out | Y_stab |
+∂₀]` to the formula's `1,2,3,4,5,6`. Consequences:
+
+- `_ybar_obs0_rows`, `_split_quditcode_into_virtual_cssc`, and check-ID
+  assignment all derive families/indices **from `H_sym`**, so they adapt to the
+  new order automatically (family_index is the row's position within its Pauli
+  family in `H_sym`).
+- Check IDs and detector coordinates are **renumbered**. The DEM and observables
+  are unchanged up to this relabelling, so logical tests pass; tests asserting
+  exact check IDs / circuit text need updating (§4).
+
+`build_y_gadget`'s docstring reproduces the §0 $\tilde H$ block and the
+block→construction table.
+
+## §2 — Module structure (`y_circuit.py`)
+
+The entire Ȳ subsystem is already self-contained and **Ȳ-only** (all five
+private helpers — `_steane_logical_y_eigenstate_prep`,
+`_split_quditcode_into_virtual_cssc`, `_mixed_basis_qubit_coords`,
+`_compute_stabilizer_center_mask`, `_observable_is_deterministic` — are called
+only by the Ȳ emitter, which imports nothing from the CSS path).
+
+Create `src/qldpc/circuits/surgery/y_circuit.py`; move
+`build_single_y_ppm_circuit` + those five helpers + the nested `_row_paulis` +
+the new phase helpers there. Update the one re-export in `surgery/__init__.py`.
+
+Result: `circuit.py` 2003 → ~1100 lines (pure CSS); `y_circuit.py` ~640 lines.
+
+## §3 — Phase decomposition (`build_single_y_ppm_circuit`)
+
+The 635-line body becomes a ~40-line orchestrator over named phases, each
+documented with the $\tilde H$ blocks it touches:
 
 ```
 build_single_y_ppm_circuit(yg, *, rounds, noise_model, data_init,
                            memory_logical, force_obs0) -> stim.Circuit
   ├─ _y_state_prep            setup (split virtual CSSc, qubit-id arrays,
   │                           coords) + |Ȳ±⟩ injection + κ_x/κ_z init
-  ├─ _y_qec_cycle             split X/Z/Y schedule + round-1 reliable
-  │                           detectors + repeat block   ← non-CSS strategy
+  ├─ _y_qec_cycle             split X/Z/Y schedule + round-1 reliable detectors
+  │                             X-phase → blocks 1,2 (+ ∂₀^Z of 6)
+  │                             Z-phase → blocks 4,5 (+ ∂₀^X of 6)
+  │                             Y-phase → block 3 (y_v)
   ├─ _y_detach_and_readout    mixed-basis MX/M/MY destructive readout
-  ├─ _y_final_detectors       stabilizer-center rows reconstructed from
-  │                           final destructive readouts
-  ├─ _y_emit_obs0             Ȳ eigenvalue product (force_obs0 /
-  │                           Y±-deterministic gate)
+  ├─ _y_final_detectors       stabilizer-center rows from final readouts
+  ├─ _y_emit_obs0             Ȳ eigenvalue product (force_obs0 / Y±-deterministic)
   └─ _y_emit_survivor_memory  survivor-Z̄ logical-memory observable
 ```
 
-The orchestrator owns the shared state that crosses phases (the merged code,
-`QubitIDs`, the id arrays `real_data_ids`/`kx_ids`/`kz_ids`/`y_ancilla_ids`,
-`center_mask`, the `MeasurementRecord`) and threads it explicitly into each
-phase — no module-level or closure state. Each phase appends to and returns
-`stim.Circuit` fragments (matching the `_surgery_*` convention).
+The orchestrator owns cross-phase state (merged code, `QubitIDs`, the id arrays,
+`center_mask`, `MeasurementRecord`) and threads it explicitly — no closure/module
+state. `_y_qec_cycle` is the explicit non-CSS counterpart to `_surgery_qec_cycle`;
+the two stay separate (the chosen "two syndrome-schedule strategies" design).
 
-`_y_qec_cycle` is the explicit non-CSS counterpart to `_surgery_qec_cycle`; the
-two stay separate functions (the user's "two explicit syndrome-schedule
-strategies" decision). No attempt is made to share a round-loop skeleton.
+## §4 — Prune (deliberate behaviour change)
 
-## §3 — Prune (the only behaviour change)
-
-Remove, during extraction:
-
-- the `benchmark_y` parameter and its emission block (obs0 ⊕ obs1 LER
-  benchmark) — not referenced by any surviving test;
-- the `obs1` destructive-cross-check block (documented "NOT a physical
-  protocol") — not referenced by any surviving test.
-
-Keep `obs0` (real FT readout) and the survivor-memory observable (tested,
-real decodability check). `_observable_is_deterministic` stays — still used by
-`_y_emit_obs0` and `_y_emit_survivor_memory`.
-
-The CSS emitters' own `obs1` (in `_surgery_observable`, tested by
+Remove during extraction: the `benchmark_y` parameter + its block (obs0⊕obs1 LER
+benchmark) and the `obs1` destructive-cross-check block — both untested, both
+bring-up scaffolding. Keep `obs0` and the survivor-memory observable.
+`_observable_is_deterministic` stays (used by both survivors). The CSS emitters'
+own `obs1` (`_surgery_observable`, tested by
 `circuit_test.py::test_build_joint_ppm_circuit_intercode_noiseless_observables_zero`)
-is **out of scope** and untouched.
+is untouched.
 
-## §4 — Success criteria & testing
+## §5 — Success criteria & testing
 
-- Behaviour-preserving for all kept paths: X̄/Z̄/X̄X̄/Z̄Z̄ circuits byte-identical
-  (CSS path untouched); Ȳ circuits identical except the removed obs1/benchmark_y
-  observables.
-- The surviving 219-test surgery suite stays green. Only adjustment: any test
-  asserting on `obs1`/`benchmark_y` for the Ȳ emitter (currently none — verified
-  by grep). Net Ȳ test count unchanged.
-- Tests in `circuit_single_y_test.py` that import the Ȳ helpers update their
-  import path from `.circuit` to `.y_circuit`.
-- `ruff check` clean; no new public API.
+- CSS circuits (X̄/Z̄/X̄X̄/Z̄Z̄) byte-identical — `circuit.py` CSS path untouched.
+- Ȳ DEM + kept observables (obs0, survivor-memory) unchanged **as logical
+  objects**; check IDs / detector coordinates renumber from formula-order
+  assembly.
+- Tests to update (enumerate in the plan): any asserting exact Ȳ check IDs /
+  circuit text / detector coords; any importing the moved helpers (path
+  `.circuit` → `.y_circuit`); none assert obs1/benchmark_y for Ȳ (verified).
+  Logical/DEM/observable tests in `circuit_single_y_test.py` and
+  `y_gadget_test.py` stay green unchanged.
+- `ruff check` clean; no new public API; full surgery suite green.
 
 ## Out of scope
 
-- Any change to the CSS emitters (single/joint) or their `_surgery_*` helpers.
-- Sharing code between the CSS and Ȳ paths (the analysis shows minimal genuine
-  overlap; forcing it is rejected option A).
-- The Ȳ algorithm itself, the merged-code construction in `y_gadget.py`, or
-  `apply_mixed_basis_merge` in `merge.py`.
-- `docs/superpowers/docs/main.tex` cleanup of deleted Z̄⊗X̄ sections (separate
-  follow-up).
+- The CSS emitters (single/joint) and `_surgery_*` helpers.
+- Renaming `gadget.py`'s Cain/Webster internals (mapped, not renamed).
+- The Ȳ algorithm / merge math itself (`apply_mixed_basis_merge`,
+  `_partial0_symplectic_rows` logic) — only the assembly naming/order changes.
+- `docs/superpowers/docs/main.tex` cleanup of deleted Z̄⊗X̄ sections.
