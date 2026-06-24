@@ -538,11 +538,13 @@ def build_single_y_ppm_circuit(
       5. Final detectors for center rows reconstructable from the destructive
          readouts (single-row or readout-compatible null-space combinations,
          same construction as the mixed-basis final detectors).
-      6. obs0 — the Ȳ eigenvalue as the full §3.2 readout product (a single
-         merged-code stabilizer equal to Ȳ), read off the IN-CIRCUIT last-QEC-
-         round ancilla outcomes of the picked rows (the fault-tolerant readout);
-         emitted when deterministic. obs1 reads the SAME product off the final
-         destructive readouts (``yg.obs0_readout``) as a noiseless cross-check.
+      6. obs0 — the Ȳ eigenvalue as the §III.C readout product (a merged-code
+         stabilizer equal to Ȳ = [x|z] on data), read off the IN-CIRCUIT last-
+         QEC-round ancilla outcomes of the picked rows (the fault-tolerant
+         readout); emitted ONLY when that in-circuit XOR is deterministic on the
+         prepared state (gated by ``_observable_is_deterministic``). obs1 reads
+         the SAME product off the final destructive readouts (``yg.obs0_readout``)
+         as a noiseless cross-check.
 
     ``data_init`` options:
       * ``None`` (default): data |0⟩ (R). No Ȳ eigenstate is prepared.
@@ -557,29 +559,34 @@ def build_single_y_ppm_circuit(
     refinement validated by the operational-distance task; it is added only if
     that task finds the operational distance has collapsed to 1.
 
-    obs0 readout (full §3.2 product). Cross, He, Rall, Yoder arXiv:2407.18393
-    §3.2 (lines 562-563): the logical-measurement readout is the PARITY OF ALL
-    appended checks whose product is the logical. For Ȳ = iX̄Z̄ that product is
-    the surviving χ_X rows ⊕ surviving χ_Z rows ⊕ the q1 Y-stab row
-    (arXiv:2407.18393 line 2433: ``X̄_M Z̄_M`` = product of interface + module
-    checks). The picker ``_ybar_obs0_rows`` solves over GF(2) for the specific
-    such product that is (i) equal to Ȳ on the logical qubit and (ii) measurable
-    in the prep/readout EIGENBASIS of every qubit (Y on data, Z on κ_x, X on
-    κ_z) — without (ii) the bare χ_X ⊕ χ_Z ⊕ q1 product is non-deterministic and
-    obs0 would be suppressed. obs0 is the FAULT-TOLERANT readout: the XOR of
-    those rows' IN-CIRCUIT last-QEC-round ancilla outcomes (χ_X → ``checks_x``
-    M-record, χ_Z → ``checks_z`` M-record, q1 → ``y_ancilla`` MX-record), exactly
-    as the X/Z-measurement sibling ``_surgery_observable`` reads its merged
-    stabilizer off the final QEC round. This readout is DETERMINISTIC but
-    measures the SIGNED Pauli product −Ȳ (the GF(2) picker drops the ``i`` of
-    iX̄Z̄), so the raw obs0 bit is NOT(Ȳ eigenvalue bit): Y+ → 1, Y- → 0. That
-    inverted convention is documented and asserted honestly (no faked sign); a
-    stim OBSERVABLE_INCLUDE cannot carry a constant offset to normalise it. The
-    complementary obs1 reads the SAME product off the final destructive readouts
-    (data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check, carrying the
-    un-inverted eigenvalue (Y+ → 0, Y- → 1). No bridge and no Bell/flag cell are
-    needed for this readout. The §3.7 bridge (Remark 23) is a separate
-    FAULT-DISTANCE refinement, deferred to its own task; it is not needed here.
+    obs0 readout (§III.C product). Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.C: the obs0 eigenvalue is the XOR of the IN-CIRCUIT
+    ancilla records of the merged-code rows whose product equals Ȳ on the
+    original data columns. The picker ``_ybar_obs0_rows`` solves over GF(2) for
+    the product whose data restriction is the literal Ȳ support ``[x | z]`` (X on
+    V_X, Z on V_Z, Y on W) and is eigenbasis-compatible on the κ ancillas (Z-only
+    κ_x, X-only κ_z). obs0 is the FAULT-TOLERANT readout: the XOR of those rows'
+    IN-CIRCUIT last-QEC-round ancilla outcomes (χ_X → ``checks_x`` M-record, χ_Z →
+    ``checks_z`` M-record, q1 → ``y_ancilla`` MX-record), the same mechanism the
+    X/Z-measurement sibling ``_surgery_observable`` uses on the final QEC round.
+
+    Determinism gate. With the ``[x | z]`` representative the product carries bare
+    Pauli-X on V_X / Pauli-Z on V_Z data qubits, which are NOT measurable
+    in-circuit on a |Y±⟩ data prep, so this in-circuit XOR is generally
+    non-deterministic (the previous ALL-Y-on-data representative — deterministic
+    but infeasible on general codes such as BB [[36,8,4]] — is no longer
+    targeted; Task 5a). ``_observable_is_deterministic`` therefore gates obs0 OFF
+    whenever the XOR is not pinned by the prep; for the Steane fixture obs0 is not
+    emitted (its fault-tolerant readout is validated on BB by the Task 6 DEM
+    test). Where obs0 IS deterministic it measures the SIGNED Pauli product −Ȳ
+    (the GF(2) picker drops the ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit):
+    Y+ → 1, Y- → 0 — a documented, honest convention (a stim OBSERVABLE_INCLUDE
+    cannot carry a constant offset to normalise it). The complementary obs1 reads
+    the SAME product off the final destructive readouts (V_X data MX ⊕ V_Z data M
+    ⊕ W data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check, carrying the
+    un-inverted eigenvalue (Y+ → 0, Y- → 1). The §3.7 bridge (Cross, He, Rall,
+    Yoder arXiv:2407.18393 Remark 23) is a separate FAULT-DISTANCE refinement,
+    deferred to its own task; it is not needed for this readout.
     """
     merged_code = yg.merged_code
     field = merged_code.field
@@ -885,42 +892,35 @@ def build_single_y_ppm_circuit(
                 if val:
                     emitted_for.add(center_idx[s2])
 
-    # --- obs0: the Ȳ eigenvalue (full §3.2 IN-CIRCUIT readout product) ---------
-    # Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 (lines 562-563): output the
-    # PARITY OF ALL appended checks whose product is the logical. For Ȳ = iX̄Z̄
-    # that product is the surviving χ_X rows ⊕ surviving χ_Z rows ⊕ q1
-    # (line 2433: X̄_M Z̄_M = product of interface + module checks), rotated by
-    # code stabilizers into the prep/readout eigenbasis. The picker
-    # ``_ybar_obs0_rows`` solved this over GF(2): it is a single merged-code
-    # stabilizer equal to Ȳ on the logical qubit. ``yg.obs0_xor_map`` records,
-    # per selected row, its merged-code (``H_sym``) row index plus its Pauli
-    # family (``"X"`` χ/stab row, ``"Z"`` χ/stab row, or the ``"Y"`` q1 row) and
-    # its index within that family.
-    #
-    # This is the FAULT-TOLERANT physical readout: each selected row is measured
-    # IN-CIRCUIT every QEC round, and obs0 is the XOR of those rows' LAST-round
-    # ancilla outcomes — exactly as the X/Z-measurement sibling ``_surgery_
-    # observable`` reads its merged stabilizer off the final-round meas-check
-    # records. The family→ancilla map is the same one the round circuit uses
-    # (``_split_quditcode_into_virtual_cssc`` partitions ``merged_code.matrix``
-    # in the SAME row order as ``H_sym``, so family_index is the slot in
+    # --- obs0: the Ȳ eigenvalue (§III.C IN-CIRCUIT readout product) ------------
+    # Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C: the obs0
+    # eigenvalue is the XOR of the IN-CIRCUIT ancilla records of the merged-code
+    # rows whose product equals Ȳ on the original data columns. The picker
+    # ``_ybar_obs0_rows`` solves this over GF(2): the selected rows' product
+    # restricts to the literal Ȳ support ``[x | z]`` on data (X on V_X, Z on V_Z,
+    # Y on W) and is eigenbasis-compatible on the κ ancillas (Z-only κ_x, X-only
+    # κ_z). ``yg.obs0_xor_map`` records, per selected row, its merged-code
+    # (``H_sym``) row index plus its Pauli family (``"X"`` χ/stab row, ``"Z"``
+    # χ/stab row, or the ``"Y"`` q1 row) and its index within that family. The
+    # family→ancilla map is the same one the round circuit uses
+    # (``_split_quditcode_into_virtual_cssc`` partitions ``merged_code.matrix`` in
+    # the SAME row order as ``H_sym``, so family_index is the slot in
     # ``checks_x`` / ``checks_z`` / ``y_ancilla_ids``):
     #   family "X" → ``qubit_ids.checks_x[family_index]``   (X-phase, M record)
     #   family "Z" → ``qubit_ids.checks_z[family_index]``   (Z-phase, M record)
     #   family "Y" → ``y_ancilla_ids[family_index]``        (Y-phase, MX record)
     #
-    # SIGN CONVENTION. The in-circuit readout is DETERMINISTIC, but it measures
-    # the SIGNED Pauli product of the chosen rows, which for Ȳ = iX̄Z̄ is −Ȳ: the
-    # GF(2) picker tracks only Pauli SUPPORT and drops the ``i`` phase, so the
-    # signed product of the selected rows carries sign −1 (intrinsic to iX̄Z̄,
-    # verified for every eigenbasis-compatible representative). Hence the raw
-    # obs0 bit is the eigenvalue bit of −Ȳ = NOT(Ȳ eigenvalue bit): on |+i⟩_L
-    # (Ȳ = +1) raw obs0 = 1, on |−i⟩_L (Ȳ = −1) raw obs0 = 0. This inverted
-    # convention is the honest physical outcome; the truth table asserts these
-    # real values (Y+ → 1, Y- → 0). A stim OBSERVABLE_INCLUDE carries no constant
-    # offset, so we do not (and cannot, without a deterministically-1 reference
-    # record) normalise the sign here. No bridge and no Bell/flag cell are needed
-    # for this readout.
+    # DETERMINISM GATE. With the literal ``[x | z]`` representative, the product
+    # carries bare Pauli-X on V_X and Pauli-Z on V_Z data qubits, which are NOT
+    # measurable in-circuit on a |Y±⟩ data prep (each selected row's ancilla
+    # record is individually non-deterministic). The previous ALL-Y-on-data
+    # representative, which gave a deterministic in-circuit obs0, exists only on
+    # special codes (Steane) and is infeasible on general codes (BB [[36,8,4]]),
+    # so it is no longer targeted (Task 5a). ``_observable_is_deterministic``
+    # therefore gates obs0 OFF whenever the in-circuit XOR is not pinned by the
+    # prep — e.g. for the Steane fixture, where no obs0 OBSERVABLE_INCLUDE is
+    # emitted. Where it IS deterministic, the SIGN convention follows the −Ȳ
+    # GF(2)-product phase documented on ``YGadgetLayout.obs0_xor_map``.
     # obs0 is the Ȳ eigenvalue only when an Ȳ eigenstate was prepared (data_init
     # Y+/Y-). With the default |0⟩ prep no Ȳ eigenvalue exists, so it is omitted.
     if data_init in ("Y+", "Y-"):
@@ -937,18 +937,20 @@ def build_single_y_ppm_circuit(
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
 
     # --- obs1: destructive cross-check (NOT a physical protocol) ----------------
-    # Read the SAME §3.2 product (``yg.obs0_readout``) off the FINAL DESTRUCTIVE
-    # readouts: data Y-support → MY, κ_x Z-support → M, κ_z X-support → MX. This
-    # destructively collapses the data, so it is not the fault-tolerant readout;
-    # it is the noiseless cross-check sibling of ``_surgery_observable``'s obs1.
-    # Its record signs ARE the physical Pauli-eigenvalue convention, so its raw
-    # bit is the un-inverted Ȳ eigenvalue (Y+ → 0, Y- → 1) — the complement of
+    # Read the SAME §III.C product (``yg.obs0_readout``) off the FINAL DESTRUCTIVE
+    # readouts. With the literal ``[x | z]`` Ȳ representative the data support is
+    # MIXED: V_X data → MX, V_Z data → M, W data → MY; κ_x Z-support → M, κ_z
+    # X-support → MX (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
+    # This destructively collapses the data, so it is not the fault-tolerant
+    # readout; it is the noiseless cross-check sibling of ``_surgery_observable``'s
+    # obs1. Its record signs ARE the physical Pauli-eigenvalue convention, so its
+    # raw bit is the un-inverted Ȳ eigenvalue (Y+ → 0, Y- → 1) — the complement of
     # the in-circuit obs0, by the −Ȳ sign documented above. Keep obs1 only as a
     # cross-check; for any LER/noisy run keep ONLY obs0 (keep_only_observable).
     if data_init in ("Y+", "Y-"):
         plan = yg.obs0_readout
         obs1_recs: list[stim.GateTarget] = []
-        for q in plan.data_y:  # data column q, read MY
+        for q in (*plan.data_x, *plan.data_z, *plan.data_y):  # V_X→MX, V_Z→M, W→MY
             obs1_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
         for q in plan.kx_z:  # κ_x column q, read M (Z)
             obs1_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))

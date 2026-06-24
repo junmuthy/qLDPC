@@ -284,13 +284,12 @@ def _partial0_symplectic_rows(
 class Obs0Row:
     """One merged-code check row contributing to the Ȳ readout product (obs0).
 
-    Per Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 (lines 562-563): the
-    logical-measurement readout is the parity of ALL appended checks whose
-    product is the logical operator. For Ȳ = iX̄Z̄ that product is the surviving
-    χ_X rows ⊕ surviving χ_Z rows ⊕ the q1 Y-stab row (arXiv:2407.18393 line
-    2433: ``X̄_M Z̄_M`` is the product of all interface + module checks), plus
-    code stabilizers chosen so the product is measurable in the prepared/readout
-    eigenbasis (see :func:`_ybar_obs0_rows`).
+    Per Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C: the obs0
+    eigenvalue is the XOR of the in-circuit ancilla records of the merged-code
+    rows whose product equals Ȳ on the original data columns. The picker
+    :func:`_ybar_obs0_rows` solves over GF(2) for the rows whose product restricts
+    to the literal Ȳ support ``[x | z]`` on data (X on V_X, Z on V_Z, Y on W) and
+    is eigenbasis-compatible on the κ ancillas.
 
     Fields:
         sym_row — index of this row in ``YGadgetLayout.H_sym`` (equivalently in
@@ -320,13 +319,15 @@ class Obs0ReadoutPlan:
     the selected rows' IN-CIRCUIT last-QEC-round ancilla outcomes (see
     :class:`Obs0Row` / :func:`_ybar_obs0_rows`). This plan describes the
     DESTRUCTIVE cross-check (``obs1``), the noiseless sibling of
-    ``_surgery_observable``'s obs1: it reads the SAME §3.2 product off the final
+    ``_surgery_observable``'s obs1: it reads the SAME §III.C product off the final
     destructive readouts. It is kept only as a cross-check (it collapses the
     data and is not a physical protocol on k>1 codes).
 
-    The §3.2 readout product (Cross, He, Rall, Yoder arXiv:2407.18393 §3.2 lines
-    562-563) is a single merged-code stabilizer equal to Ȳ on the logical qubit.
-    Two facts (verified empirically on the Steane fixture) shape how it is read:
+    The §III.C readout product (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753
+    §III.C) is a single merged-code stabilizer whose restriction to the original
+    data columns equals the literal Ȳ support ``[x | z]``: Pauli X on
+    ``V_X = supp(x) \\ W``, Pauli Z on ``V_Z = supp(z) \\ W``, and Pauli Y on
+    ``W = supp(x) ∩ supp(z)``. Two facts shape how it is read:
 
       1. Sign / phase. ``Ȳ = iX̄Z̄`` carries an ``i``; the GF(2) row product
          only tracks Pauli SUPPORT, so the *signed* Pauli product of the chosen
@@ -340,21 +341,26 @@ class Obs0ReadoutPlan:
          un-inverted eigenvalue (Y+ → 0, Y− → 1) — the complement of ``obs0``.
 
       2. Eigenbasis. The product is deterministic only if every qubit's Pauli in
-         it matches that qubit's prep/destructive-readout eigenbasis: data → Y
-         (the Ȳ eigenstate, read ``MY``), κ_x → Z (``|0⟩``, read ``M``), κ_z → X
-         (``|+⟩``, read ``MX``). :func:`_ybar_obs0_rows` solves over GF(2) for a
-         row product meeting exactly this constraint (an "all-Y on data"
-         representative).
+         it matches that qubit's prep/destructive-readout eigenbasis. With the
+         ``[x | z]`` representative the data support is MIXED: V_X data → X (read
+         ``MX``), V_Z data → Z (read ``M``), W data → Y (the Ȳ eigenstate, read
+         ``MY``); κ_x → Z (``|0⟩``, read ``M``), κ_z → X (``|+⟩``, read ``MX``).
+         :func:`_ybar_obs0_rows` solves over GF(2) for a row product meeting
+         exactly this constraint.
 
     This plan stores, per data/ancilla qubit in the product's support, the Pauli
     to read there; the circuit maps each to its destructive record for ``obs1``.
 
     Fields:
-        data_y   — original-data column indices read with ``MY`` (Pauli Y).
+        data_x   — original-data column indices read with ``MX`` (Pauli X, V_X).
+        data_z   — original-data column indices read with ``M``  (Pauli Z, V_Z).
+        data_y   — original-data column indices read with ``MY`` (Pauli Y, W).
         kx_z     — κ_x column indices (within ``[n0, n0+k_x)``) read with ``M`` (Z).
         kz_x     — κ_z column indices (within ``[n0+k_x, n_merged)``) read ``MX`` (X).
     """
 
+    data_x: tuple[int, ...]
+    data_z: tuple[int, ...]
     data_y: tuple[int, ...]
     kx_z: tuple[int, ...]
     kz_x: tuple[int, ...]
@@ -362,7 +368,6 @@ class Obs0ReadoutPlan:
 
 def _ybar_obs0_rows(
     H_sym: np.ndarray,
-    code: CSSCode,
     x: np.ndarray,
     z: np.ndarray,
     *,
@@ -375,23 +380,24 @@ def _ybar_obs0_rows(
     Solves over GF(2) for a row combination ``c`` such that the merged-code
     stabilizer ``S = cᵀ · H_sym``:
 
-      * equals Ȳ = iX̄Z̄ on the original logical qubit — i.e. its restriction to
-        the original data columns is a logical-Y representative (commutes with
-        every code Z-stabilizer, anticommutes with the logical-Z support ``z``);
-      * is measurable in the prepared/readout EIGENBASIS of every qubit, so the
-        readout is DETERMINISTIC: data → Y (the Ȳ eigenstate), κ_x → Z (``|0⟩``),
-        κ_z → X (``|+⟩``). Concretely ``S``'s symplectic vector obeys
-        ``x_q == z_q`` on data (all-Y), ``x_q == 0`` on κ_x (Z-only),
-        ``z_q == 0`` on κ_z (X-only).
+      * restricted to the original data columns equals the LITERAL Ȳ symplectic
+        support ``[x | z]`` — Pauli X on ``V_X = supp(x) \\ W``, Pauli Z on
+        ``V_Z = supp(z) \\ W``, Pauli Y on ``W = supp(x) ∩ supp(z)``. Because
+        ``x`` is a logical-X representative and ``z`` a logical-Z representative,
+        this product is automatically a logical-Y of the original qubit, so the
+        old logical-Y commute/anticommute conditions are IMPLIED and dropped;
+      * is measurable in the prepared/readout EIGENBASIS of every ANCILLA: κ_x
+        carries Z only (``x_q == 0``, read ``|0⟩``), κ_z carries X only
+        (``z_q == 0``, read ``|+⟩``), so the readout is DETERMINISTIC. The data
+        eigenbasis is then mixed (X on V_X, Z on V_Z, Y on W) — the §III.C
+        in-circuit readout, NOT an all-Y representative.
 
-    This is the §3.2 readout rule (Cross, He, Rall, Yoder arXiv:2407.18393 §3.2
-    lines 562-563: output the parity of all appended checks whose product is the
-    logical; arXiv:2407.18393 line 2433: ``X̄_M Z̄_M`` = product of interface +
-    module checks), made concrete: the selected rows are the surviving χ_X / χ_Z
-    rows, the q1 Y-stab row, AND whatever code stabilizers are needed to rotate
-    the product into the eigenbasis. WITHOUT the eigenbasis constraint the bare
-    χ_X ⊕ χ_Z ⊕ q1 product is non-deterministic (a Y representative that mixes
-    X/Z paulis on Y-eigenbasis data qubits) and would suppress obs0.
+    This is the §III.C readout rule of Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.C: the obs0 eigenvalue is the XOR of the in-circuit
+    ancilla records of the merged-code rows whose product equals Ȳ on the data.
+    The all-Y constraint used previously was a Steane |Y±⟩-prep artifact that is
+    infeasible on general codes (e.g. BB ``[[36,8,4]]``); the literal ``[x | z]``
+    support is feasible whenever Ȳ lies in the merged stabilizer center.
 
     Returns
     -------
@@ -411,43 +417,26 @@ def _ybar_obs0_rows(
     n_rows = H.shape[0]
     Hx = H[:, :n_merged]
     Hz = H[:, n_merged:]
-    HZc = np.asarray(code.matrix_z).astype(np.uint8)  # code Z-stabilizers (m_z, n0)
 
     # Assemble the GF(2) constraint system  A c = b  on the row-selection c.
     a_rows: list[np.ndarray] = []
     b_vals: list[int] = []
-
-    # Eigenbasis constraints on S = c·H:
-    #   data q in [0, n0):       x_q == z_q   →  (Hx[:,q] ^ Hz[:,q]) · c = 0
-    #   κ_x  q in [n0, n0+k_x):  x_q == 0     →  Hx[:,q] · c = 0
-    #   κ_z  q in [n0+k_x, n):   z_q == 0     →  Hz[:,q] · c = 0
+    # Data part of S must equal the literal Ȳ support [x | z] — X on V_X, Z on
+    # V_Z, Y on W — the §III.C in-circuit readout (NOT all-Y on data). The
+    # logical-Y commute/anticommute conditions are then IMPLIED (x is a logical-X
+    # rep, z a logical-Z rep), so they are dropped.
     for q in range(n0):
-        a_rows.append(Hx[:, q] ^ Hz[:, q])
-        b_vals.append(0)
+        a_rows.append(Hx[:, q].copy())
+        b_vals.append(int(x[q]))  # data X-part == x_q
+        a_rows.append(Hz[:, q].copy())
+        b_vals.append(int(z[q]))  # data Z-part == z_q
+    # Ancilla eigenbasis: κ_x carries only Z (X-part 0); κ_z only X (Z-part 0).
     for q in range(n0, n0 + k_x):
         a_rows.append(Hx[:, q].copy())
         b_vals.append(0)
     for q in range(n0 + k_x, n_merged):
         a_rows.append(Hz[:, q].copy())
         b_vals.append(0)
-
-    # Logical-Y constraints on the data X-part w_q = x_q of S (= z_q there):
-    #   commute with every code Z-stabilizer:  HZc · w = 0
-    #   anticommute with logical-Z support z:  z · w = 1   (so S is a logical-Y,
-    #                                                        not a stabilizer/identity)
-    for r in range(HZc.shape[0]):
-        coef = np.zeros(n_rows, dtype=np.uint8)
-        for q in range(n0):
-            if HZc[r, q]:
-                coef ^= Hx[:, q]
-        a_rows.append(coef)
-        b_vals.append(0)
-    coef = np.zeros(n_rows, dtype=np.uint8)
-    for q in range(n0):
-        if z[q]:
-            coef ^= Hx[:, q]
-    a_rows.append(coef)
-    b_vals.append(1)
 
     A = GF2(np.array(a_rows, dtype=np.uint8))
     b = GF2(np.array(b_vals, dtype=np.uint8).reshape(-1, 1))
@@ -460,29 +449,34 @@ def _ybar_obs0_rows(
             if rref[r, n_rows] == 1:
                 raise ValueError(
                     "BLOCKED: no eigenbasis-compatible merged-code row product equals "
-                    "Ȳ = iX̄Z̄; the §3.2 deterministic readout does not exist (Cross, "
-                    "He, Rall, Yoder arXiv:2407.18393 §3.2)"
+                    "Ȳ = iX̄Z̄ on the original data columns; the §III.C deterministic "
+                    "readout does not exist (Ide, Gowda, Nadkarni, Dauphinais "
+                    "arXiv:2410.02753 §III.C)"
                 )
             continue
         c[lead[0]] = rref[r, n_rows]
 
-    # Resolve the product S = c·H and certify it (eigenbasis + Ȳ-on-data).
+    # Resolve the product S = c·H and certify it (data == [x|z] + κ eigenbasis).
     S = (c @ H) % 2
     sx = S[:n_merged]
     sz = S[n_merged:]
-    # data X-part must equal data Z-part (all-Y) and be a logical-Y representative.
-    if not np.array_equal(sx[:n0], sz[:n0]):
-        raise ValueError("internal: obs0 product is not all-Y on data")
-    if ((HZc @ sx[:n0]) % 2 != 0).any() or int(np.dot(sx[:n0], z)) % 2 != 1:
-        raise ValueError("internal: obs0 product data part is not a logical-Y representative")
+    # Data part of S must equal the literal Ȳ support [x | z].
+    if not (np.array_equal(sx[:n0], x) and np.array_equal(sz[:n0], z)):
+        raise ValueError("internal: obs0 product data part != Ȳ support [x|z]")
     if sx[n0 : n0 + k_x].any() or sz[n0 + k_x :].any():
-        raise ValueError("internal: obs0 product is not eigenbasis-compatible on κ ancillas")
+        raise ValueError("internal: obs0 product not eigenbasis-compatible on κ ancillas")
 
-    # Build the destructive-readout plan from the product's support.
-    data_y = tuple(int(q) for q in range(n0) if sx[q])
+    # Build the destructive-readout plan from the product's support. The data
+    # support is now MIXED (data == [x|z]): X-only → V_X (MX), Z-only → V_Z (M),
+    # both X and Z → W (MY, the literal Pauli Y of Ȳ = iX̄Z̄).
+    data_x = tuple(int(q) for q in range(n0) if sx[q] and not sz[q])
+    data_z = tuple(int(q) for q in range(n0) if sz[q] and not sx[q])
+    data_y = tuple(int(q) for q in range(n0) if sx[q] and sz[q])
     kx_z = tuple(int(q) for q in range(n0, n0 + k_x) if sz[q])
     kz_x = tuple(int(q) for q in range(n0 + k_x, n_merged) if sx[q])
-    plan = Obs0ReadoutPlan(data_y=data_y, kx_z=kx_z, kz_x=kz_x)
+    plan = Obs0ReadoutPlan(
+        data_x=data_x, data_z=data_z, data_y=data_y, kx_z=kx_z, kz_x=kz_x
+    )
 
     # Per-row provenance, classified the same way the circuit re-partitions the
     # merged-code matrix (``_split_quditcode_into_virtual_cssc``).
@@ -565,18 +559,25 @@ class YGadgetLayout:
                       :func:`build_single_y_ppm_circuit` emits the FAULT-TOLERANT
                       ``obs0`` as the XOR of these rows' IN-CIRCUIT last-QEC-round
                       ancilla outcomes (family_index → ``checks_x`` / ``checks_z``
-                      / ``y_ancilla_ids`` slot). That readout is DETERMINISTIC but
-                      measures −Ȳ (the GF(2) product drops the ``i`` of iX̄Z̄), so
-                      the raw obs0 bit is NOT(Ȳ bit): Y+ → 1, Y− → 0 — handled by
-                      a documented sign convention.
+                      / ``y_ancilla_ids`` slot) — but ONLY when that XOR is
+                      deterministic on the prepared state. With the ``[x | z]``
+                      representative the product carries bare X on V_X / Z on V_Z
+                      data, which is non-deterministic on a |Y±⟩ prep, so obs0 is
+                      gated off on such codes (e.g. Steane); the all-Y
+                      representative that made obs0 deterministic is infeasible on
+                      general codes (BB) and no longer targeted (Task 5a). Where
+                      obs0 IS emitted it measures −Ȳ (the GF(2) product drops the
+                      ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit): Y+ → 1,
+                      Y− → 0 — handled by a documented sign convention.
         obs0_readout— :class:`Obs0ReadoutPlan`: the DESTRUCTIVE cross-check
                       (``obs1``, NOT the physical readout). Per support-qubit it
-                      gives the Pauli to read off the final destructive readout
-                      (data → Y, κ_x → Z, κ_z → X). Those record signs carry the
-                      physical Ȳ = iX̄Z̄ phase, so :func:`build_single_y_ppm_circuit`
-                      emits it as ``obs1`` with the un-inverted eigenvalue
-                      (Y+ → 0, Y− → 1) — the complement of the in-circuit ``obs0``
-                      (whose signed product is −Ȳ; see ``obs0_xor_map``).
+                      gives the Pauli to read off the final destructive readout:
+                      V_X data → X, V_Z data → Z, W data → Y, κ_x → Z, κ_z → X.
+                      Those record signs carry the physical Ȳ = iX̄Z̄ phase, so
+                      :func:`build_single_y_ppm_circuit` emits it as ``obs1`` with
+                      the un-inverted eigenvalue (Y+ → 0, Y− → 1) — the complement
+                      of the in-circuit ``obs0`` (whose signed product is −Ȳ; see
+                      ``obs0_xor_map``).
     """
 
     code: CSSCode
@@ -726,7 +727,7 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     merged_code = QuditCode(field(H_sym), is_subsystem_code=bool(comm.any()))
 
     obs0_rows, obs0_readout = _ybar_obs0_rows(
-        H_sym, code, x, z, n0=n, n_merged=n_merged, k_x=k_x
+        H_sym, x, z, n0=n, n_merged=n_merged, k_x=k_x
     )
     return YGadgetLayout(
         code=code,
