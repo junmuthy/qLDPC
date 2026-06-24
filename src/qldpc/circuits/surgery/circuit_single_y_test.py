@@ -51,6 +51,90 @@ def test_single_y_circuit_rejects_product_state_init() -> None:
         build_single_y_ppm_circuit(yg, rounds=3, data_init="0")
 
 
+def test_single_y_survivor_memory_observable_compiles() -> None:
+    """memory_logical=0 emits exactly one deterministic survivor-Z̄ observable.
+
+    The Ȳ measurement preserves the other 7 logicals; their Z̄ are deterministic
+    on |0̄…0̄⟩. Emitting one as an OBSERVABLE_INCLUDE gives a DEM with a single
+    observable (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
+    """
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    circuit = build_single_y_ppm_circuit(
+        yg, rounds=3, data_init=None, memory_logical=0
+    )
+    dem = circuit.detector_error_model()
+    assert dem.num_observables == 1, (
+        f"expected exactly the survivor-Z̄ observable, got {dem.num_observables}"
+    )
+
+
+def test_single_y_memory_logical_none_unchanged() -> None:
+    """memory_logical=None (default) emits no observable: byte-identical circuit."""
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    default = build_single_y_ppm_circuit(yg, rounds=3, data_init=None)
+    explicit_none = build_single_y_ppm_circuit(
+        yg, rounds=3, data_init=None, memory_logical=None
+    )
+    assert str(default) == str(explicit_none)
+    assert default.detector_error_model().num_observables == 0
+
+
+@pytest.mark.slow
+def test_bb_survivor_memory_ler_monotone_in_p() -> None:
+    """BB Ȳ-surgery preserves a surviving logical: survivor-memory LER grows with p.
+
+    obs0 (the random Ȳ outcome) stays gated off; we score decoding against a
+    surviving logical Z̄ (deterministic on |0̄…0̄⟩), demonstrating the merge is
+    decodable and fault-tolerant for the other logicals (Ide, Gowda, Nadkarni,
+    Dauphinais arXiv:2410.02753 §III.C).
+    """
+    import sinter
+
+    from qldpc import decoders
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    error_rates = [0.001, 0.005, 0.02]
+    tasks = []
+    for p in error_rates:
+        circ = build_single_y_ppm_circuit(
+            yg,
+            rounds=3,
+            data_init=None,
+            memory_logical=0,
+            noise_model=DepolarizingNoiseModel(p),
+        )
+        tasks.append(sinter.Task(circuit=circ, json_metadata={"p": float(p)}))
+    results = sinter.collect(
+        tasks=tasks,
+        decoders=["custom"],
+        custom_decoders={"custom": decoders.SinterDecoder()},
+        num_workers=4,
+        max_shots=2000,
+        max_errors=30,
+        print_progress=False,
+    )
+    by_p = {r.json_metadata["p"]: r.errors / max(r.shots, 1) for r in results}
+    sorted_p = sorted(by_p)
+    ler = [by_p[p] for p in sorted_p]
+    print("survivor-memory LER:", list(zip(sorted_p, ler)))
+    for i in range(len(ler) - 1):
+        assert ler[i] <= ler[i + 1] * 1.5, (
+            f"LER not monotone: {list(zip(sorted_p, ler))}"
+        )
+
+
 # RETIRED (Task 5a): test_single_y_noiseless_truth_table and
 # test_single_y_dem_has_no_undetectable_observable_error are superseded by the BB
 # DEM test (Task 6). Both asserted on the Steane IN-CIRCUIT obs0, which was only

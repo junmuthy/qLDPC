@@ -501,6 +501,7 @@ def build_single_y_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | None = None,
+    memory_logical: int | None = None,
 ) -> stim.Circuit:
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
@@ -550,6 +551,21 @@ def build_single_y_ppm_circuit(
       * ``None`` (default): data |0⟩ (R). No Ȳ eigenstate is prepared.
       * ``"Y+"`` / ``"Y-"``: transversal logical-Y eigenstate prep |±i⟩_L for a
         self-dual CSS code (see ``_steane_logical_y_eigenstate_prep``).
+
+    ``memory_logical`` (survivor-memory mode). The Ȳ-on-q0 measurement preserves
+    the other logicals of the code; their Z̄ are deterministic on the |0̄…0̄⟩ prep
+    (``data_init=None``). When ``memory_logical`` is an int and ``data_init is
+    None``, this emits a single ``OBSERVABLE_INCLUDE`` (index 0 — obs0/obs1 are
+    gated off in this mode, so the DEM carries exactly one observable) tracking
+    the ``memory_logical``-th merged-code Z-logical as a surviving logical-memory
+    observable read off the final destructive readouts.
+    This is the standard logical-memory decodability check of the surgery (Ide,
+    Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C): it sidesteps the random
+    Ȳ outcome (obs0 stays gated off — no Ȳ-eigenstate prep on |0̄…0̄⟩) by scoring
+    a SURVIVING logical Z̄ instead. The chosen logical must be readout-compatible
+    (pure-Z, no support on the κ_z ancillas, which are read in X); a non-compatible
+    choice raises ``ValueError``. ``None`` (default) emits nothing, leaving the
+    circuit byte-identical to the no-memory build.
 
     Bell/flag scope (Cross, He, Rall, Yoder arXiv:2407.18393 §4.1). The brief's
     fault-tolerance refinement — splitting the ``q1`` ancilla into a Bell/flag
@@ -958,6 +974,36 @@ def build_single_y_ppm_circuit(
             obs1_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
         if obs1_recs and _observable_is_deterministic(circuit, obs1_recs):
             circuit.append("OBSERVABLE_INCLUDE", obs1_recs, 1)
+
+    # --- survivor-memory observable --------------------------------------------
+    # The Ȳ-on-q0 measurement preserves the other logicals; their Z̄ are
+    # deterministic on the |0̄…0̄⟩ prep (data_init is None). Track one such
+    # SURVIVING logical Z̄ off the final destructive readouts as a logical-memory
+    # observable — the standard decodability check of the surgery (Ide, Gowda,
+    # Nadkarni, Dauphinais arXiv:2410.02753 §III.C). This sidesteps the random Ȳ
+    # outcome (obs0 stays gated off) by scoring a survivor instead. Gated on
+    # ``data_init is None`` — mutually exclusive with the Y+/Y- obs0/obs1
+    # emissions above — so index 0 is free; emitting there keeps the DEM at
+    # exactly one observable (no phantom always-False obs0/obs1 padding). Gated by
+    # determinism, emitted before the noise block so the noise model wraps it.
+    if memory_logical is not None and data_init is None:
+        LZ = np.asarray(merged_code.get_logical_ops(Pauli.Z)).astype(np.uint8)
+        row = LZ[memory_logical]  # (2*n_q,) symplectic [x | z]
+        xpart, zpart = row[:n_q], row[n_q:]
+        # readout-compatible survivor: pure-Z, no κ_z support (κ_z is read in X).
+        if xpart.any() or zpart[n_code + k_x :].any():
+            raise ValueError(
+                f"merged Z-logical {memory_logical} is not Z-readout-compatible"
+            )
+        mem_recs: list[stim.GateTarget] = []
+        for q in range(n_code):  # data Z -> M record
+            if zpart[q]:
+                mem_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
+        for q in range(k_x):  # κ_x Z -> M record (detach)
+            if zpart[n_code + q]:
+                mem_recs.append(measurement_record.get_target_rec(kx_ids[q]))
+        if mem_recs and _observable_is_deterministic(circuit, mem_recs):
+            circuit.append("OBSERVABLE_INCLUDE", mem_recs, 0)
 
     if noise_model is not None:
         circuit = noise_model.noisy_circuit(circuit)
