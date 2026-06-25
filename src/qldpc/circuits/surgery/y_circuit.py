@@ -56,6 +56,8 @@ class _YCtx:
     # Logical-representative column support (flat column indices into data qubits).
     x_cols: tuple[int, ...]
     z_cols: tuple[int, ...]
+    # Cross-phase values populated by _y_emit_obs0; consumed by the benchmark_y block.
+    obs0_recs: list = dataclasses.field(default_factory=list)
 
 
 def _steane_logical_y_eigenstate_prep(
@@ -312,7 +314,7 @@ def _y_qec_cycle(
     data_init: str | None,
     rounds: int,
     benchmark_y: bool,
-) -> tuple[stim.Circuit, MeasurementRecord]:
+) -> tuple[stim.Circuit, MeasurementRecord, dict[int, int], dict[int, Pauli]]:
     """Emit the split X/Z/Y multi-round QEC schedule and return the circuit +
     measurement record.
 
@@ -324,8 +326,10 @@ def _y_qec_cycle(
         detectors for all center rows).
 
     Returns a fresh ``stim.Circuit`` (the QEC rounds only, to be concatenated
-    into the main circuit by the orchestrator) and the corresponding
-    ``MeasurementRecord`` covering all emitted measurements.
+    into the main circuit by the orchestrator), the corresponding
+    ``MeasurementRecord`` covering all emitted measurements, the
+    ``row_to_check`` map (merged-code row index → ancilla qubit ID), and the
+    ``qubit_final_meas`` map (qubit ID → destructive readout ``Pauli``).
     """
     qubit_ids = ctx.qubit_ids
     virtual_cssc_X = ctx.virtual_cssc_X
@@ -522,11 +526,7 @@ def _y_qec_cycle(
         circuit.append(stim.CircuitRepeatBlock(rounds - 1, repeat))
         measurement_record.append(round_measurement_record, repeat=rounds - 2)
 
-    # Store computed cross-phase state in ctx for downstream phases.
-    ctx.row_to_check = row_to_check  # type: ignore[attr-defined]
-    ctx.qubit_final_meas = qubit_final_meas  # type: ignore[attr-defined]
-
-    return circuit, measurement_record
+    return circuit, measurement_record, row_to_check, qubit_final_meas
 
 
 def _y_detach_and_readout(
@@ -591,6 +591,8 @@ def _y_detach_and_readout(
 def _y_final_detectors(
     ctx: _YCtx,
     *,
+    row_to_check: dict[int, int],
+    qubit_final_meas: dict[int, Pauli],
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
     """Emit final detectors for center rows reconstructable from destructive readouts.
@@ -609,8 +611,6 @@ def _y_final_detectors(
     n_q = ctx.n_q
     center_mask = ctx.center_mask
     H_full = ctx.H_full
-    row_to_check: dict[int, int] = ctx.row_to_check  # type: ignore[attr-defined]
-    qubit_final_meas: dict[int, Pauli] = ctx.qubit_final_meas  # type: ignore[attr-defined]
 
     circuit = stim.Circuit()
 
@@ -763,7 +763,7 @@ def _y_emit_obs0(
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
 
     # Store obs0_recs in ctx for benchmark_y block (which XORs obs0 ⊕ obs1).
-    ctx.obs0_recs = obs0_recs  # type: ignore[attr-defined]
+    ctx.obs0_recs = obs0_recs
 
 
 def _y_emit_survivor_memory(
@@ -964,7 +964,7 @@ def build_single_y_ppm_circuit(
     k_x = ctx.k_x
 
     # --- Phase 2: split X/Z/Y QEC cycle (H̃ blocks 1,2 / 4,5 / 3) ------------
-    qec_circuit, measurement_record = _y_qec_cycle(
+    qec_circuit, measurement_record, row_to_check, qubit_final_meas = _y_qec_cycle(
         ctx, yg, data_init=data_init, rounds=rounds, benchmark_y=benchmark_y
     )
     circuit += qec_circuit
@@ -977,7 +977,12 @@ def build_single_y_ppm_circuit(
     circuit += readout_circuit
 
     # --- Phase 4: final detectors ---------------------------------------------
-    circuit += _y_final_detectors(ctx, measurement_record=measurement_record)
+    circuit += _y_final_detectors(
+        ctx,
+        row_to_check=row_to_check,
+        qubit_final_meas=qubit_final_meas,
+        measurement_record=measurement_record,
+    )
 
     # --- Phase 5a: obs0 (Ȳ eigenvalue, §III.C IN-CIRCUIT readout product) ----
     _y_emit_obs0(
@@ -985,7 +990,7 @@ def build_single_y_ppm_circuit(
         data_init=data_init, force_obs0=force_obs0,
         measurement_record=measurement_record,
     )
-    obs0_recs: list[stim.GateTarget] = ctx.obs0_recs  # type: ignore[attr-defined]
+    obs0_recs: list[stim.GateTarget] = ctx.obs0_recs
 
     # --- benchmark_y: obs0 ⊕ obs1 (surgery Ȳ readout vs destructive Ȳ readout) --
     # Direct benchmark of the Ȳ MEASUREMENT itself (Ide, Gowda, Nadkarni,
@@ -1033,7 +1038,7 @@ def build_single_y_ppm_circuit(
             circuit.append("OBSERVABLE_INCLUDE", obs1_recs, 1)
 
     # --- Phase 5b: survivor-memory observable ---------------------------------
-    if memory_logical is not None:
+    if memory_logical is not None and data_init is None:
         _y_emit_survivor_memory(
             ctx, circuit,
             memory_logical=memory_logical, data_init=data_init,
