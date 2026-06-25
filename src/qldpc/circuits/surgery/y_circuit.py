@@ -1,6 +1,6 @@
 """Single logical-Ȳ (Ȳ = iX̄Z̄) measurement circuit — non-CSS homological
-surgery (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D;
-docs/superpowers/docs/main.tex §4). Emits the split X/Z/Y syndrome schedule
+surgery (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D).
+Emits the split X/Z/Y syndrome schedule
 over the merged code H̃ (see y_gadget.build_y_gadget for the H̃ block layout)."""
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def _steane_logical_y_eigenstate_prep(
     NOT a codeword: the original code stabilizers are random on it). The
     distinction is decisive for the Ȳ readout: on the physical product the bare
     Ȳ representative ``[x | z]`` (= the product of the merged code's new
-    χ_X·χ_Z·y_v rows) is non-deterministic, because ``[x | z]`` differs from an
+    S_X'·S_Z'·y_v rows) is non-deterministic, because ``[x | z]`` differs from an
     all-Y representative by code stabilizers that are random there. On the
     proper codeword every code stabilizer is +1, so all Ȳ representatives agree
     and the in-circuit ``[x | z]`` readout is DETERMINISTIC. The bare support is
@@ -102,9 +102,8 @@ def _steane_logical_y_eigenstate_prep(
     Transversal S is a logical operation only for a self-dual CSS code (its X-
     and Z-stabilizer row spaces coincide); we restrict to that case and raise
     otherwise. Homological Ȳ = iX̄Z̄ measurement of Ide, Gowda, Nadkarni,
-    Dauphinais arXiv:2410.02753 §III.C/§III.D (docs/superpowers/docs/main.tex
-    §4); the eigenstate prep is the standard transversal-Clifford state
-    injection of self-dual CSS codes.
+    Dauphinais arXiv:2410.02753 §III.C/§III.D; the eigenstate prep is the standard
+    transversal-Clifford state injection of self-dual CSS codes.
 
     Args:
         yg: the Y-gadget layout (provides the underlying self-dual CSS ``code``).
@@ -487,7 +486,7 @@ def _y_qec_cycle(
 
     # The merge (lattice surgery proper). On a Y±-eigenstate prep the data is the
     # exact |Ȳ±⟩ codeword (prepared by _steane_logical_y_eigenstate_prep above),
-    # so the bare new-stabilizer product ∏(χ_X·χ_Z·y_v) = [x | z] first-measures
+    # so the bare new-stabilizer product ∏(S_X'·S_Z'·y_v) = [x | z] first-measures
     # on a codeword and is the deterministic Ȳ readout (Ide, Gowda, Nadkarni,
     # Dauphinais arXiv:2410.02753 §III.C).
     circuit += one_round
@@ -571,8 +570,7 @@ def _y_final_detectors(
     as the mixed-basis final detectors — a detector for each center row directly
     compatible with the destructive readout basis, and for readout-compatible
     null-space combinations of the remaining rows whose readout-incompatible
-    parts cancel (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D;
-    docs/superpowers/docs/main.tex §4).
+    parts cancel (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D).
 
     Returns the new circuit fragment.  ``measurement_record`` is read but not
     mutated.
@@ -685,11 +683,11 @@ def _y_emit_obs0(
     # eigenvalue is the XOR of the IN-CIRCUIT ancilla records of the merged-code
     # rows whose product equals Ȳ on the original data columns. The picker
     # ``_ybar_obs0_rows`` solves this over GF(2): the selected rows' product is
-    # the BARE new-stabilizer product ∏(χ_X·χ_Z·y_v), restricting to the literal
+    # the BARE new-stabilizer product ∏(S_X'·S_Z'·y_v), restricting to the literal
     # Ȳ support ``[x | z]`` on data (X on V_X, Z on V_Z, Y on W) and eigenbasis-
     # compatible on the κ ancillas (Z-only κ_x, X-only κ_z). ``yg.obs0_xor_map``
     # records, per selected row, its merged-code (``H_sym``) row index plus its
-    # Pauli family (``"X"`` χ_X row, ``"Z"`` χ_Z row, or the ``"Y"`` y_v row) and
+    # Pauli family (``"X"`` S_X' row, ``"Z"`` S_Z' row, or the ``"Y"`` y_v row) and
     # its index within that family. The family→ancilla map is the same one the
     # round circuit uses (``_split_quditcode_into_virtual_cssc`` partitions
     # ``merged_code.matrix`` in the SAME row order as ``H_sym``, so family_index
@@ -800,13 +798,12 @@ def build_single_y_ppm_circuit(
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
     Builds the syndrome-extraction circuit for the homological Y-gadget merged
-    code of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D
-    (docs/superpowers/docs/main.tex §4). The
-    merged code ``yg.merged_code`` is a ``QuditCode`` whose stabilizers are the
+    code of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D.
+    The merged code ``yg.merged_code`` is a ``QuditCode`` whose stabilizers are the
     original code's X-checks and Z-checks (dual-extended onto the κ_x / κ_z
     ancillas) plus the ``|W|`` mixed Y-type checks ``y_v`` (= the ``yg.Y_stab``
     rows), the Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 cross-merge of the
-    χ_X and χ_Z rows anchored at each crossing qubit ``v ∈ W``.
+    S_X' and S_Z' rows anchored at each crossing qubit ``v ∈ W``.
 
     The emission runs the split X / Z / Y syndrome schedule (the X-ancillas
     collapse before the Z-phase fires; the mixed Y-checks are measured last)
@@ -866,8 +863,8 @@ def build_single_y_ppm_circuit(
     choice raises ``ValueError``. ``None`` (default) emits nothing, leaving the
     circuit byte-identical to the no-memory build.
 
-    Bell/flag scope (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
-    docs/superpowers/docs/main.tex §4). The brief's
+    Bell/flag scope (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D).
+    The brief's
     fault-tolerance refinement — splitting each ``y_v`` ancilla into a Bell/flag
     cell — is NOT built here. This function emits a straightforward Y-phase
     extraction of each ``y_v`` (one ancilla, RX → CX/CY/CZ → MX) that compiles to a
@@ -882,7 +879,7 @@ def build_single_y_ppm_circuit(
     the product whose data restriction is the literal Ȳ support ``[x | z]`` (X on
     V_X, Z on V_Z, Y on W) and is eigenbasis-compatible on the κ ancillas (Z-only
     κ_x, X-only κ_z). obs0 is the FAULT-TOLERANT readout: the XOR of those rows'
-    IN-CIRCUIT last-QEC-round ancilla outcomes (χ_X → ``checks_x`` M-record, χ_Z →
+    IN-CIRCUIT last-QEC-round ancilla outcomes (S_X' → ``checks_x`` M-record, S_Z' →
     ``checks_z`` M-record, q1 → ``y_ancilla`` MX-record), the same mechanism the
     X/Z-measurement sibling ``_surgery_observable`` uses on the final QEC round.
 
@@ -899,8 +896,8 @@ def build_single_y_ppm_circuit(
     and ``iX̄Z̄ = +X₂X₄Z₁Z₃Y₅``), so the raw obs0 bit is the Ȳ eigenvalue bit:
     obs0 = 0 ↔ Ȳ = +1 (|Ȳ+⟩), obs0 = 1 ↔ Ȳ = −1 (|Ȳ-⟩). The per-system Cheeger
     boost
-    (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
-    docs/superpowers/docs/main.tex §4.7) is the FAULT-DISTANCE refinement, applied
+    (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D) is the
+    FAULT-DISTANCE refinement, applied
     inside ``build_y_gadget``; it is not needed for this readout.
     """
     # Alias resolution (backward-compatible names; must happen before _y_state_prep).
@@ -966,8 +963,7 @@ def _observable_is_deterministic(
     non-deterministic observable makes ``detector_error_model()`` raise. We
     catch that to decide whether obs0 can be emitted. Used to gate obs0 in the
     regime where the Ȳ readout has an unpinned κ-gauge residual (Ide, Gowda,
-    Nadkarni, Dauphinais arXiv:2410.02753 §III.C; docs/superpowers/docs/main.tex
-    §4).
+    Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
     """
     probe = circuit.copy()
     probe.append("OBSERVABLE_INCLUDE", obs_targets, 0)
@@ -992,7 +988,7 @@ def _split_quditcode_into_virtual_cssc(
       * pure-X rows (HX block): data X-stabilizers + comp-side rows.
       * pure-Z rows (HZ block): symmetric on Z side.
       * mixed Y rows (Y_stab block): one per merge qubit from the Webster
-        cross-merge. Their X-part comes from a χ_l row, Z-part from a χ_r
+        cross-merge. Their X-part comes from an S_X' row, Z-part from an S_Z'
         row, with single-{q} adapter support on each side.
 
     This helper builds a "virtual" CSSCode from the pure-X / pure-Z subsets
@@ -1011,7 +1007,7 @@ def _split_quditcode_into_virtual_cssc(
         Pure-Z rows as a Z-only matrix (shape (n_z, n_qudits)).
     x_row_indices
         Indices into ``joint_code.matrix`` of the pure-X rows, in insertion
-        order — used to locate χ_l ancilla IDs in the resulting qubit_ids.
+        order — used to locate S_X' ancilla IDs in the resulting qubit_ids.
     z_row_indices
         Indices of the pure-Z rows.
     mixed_row_indices

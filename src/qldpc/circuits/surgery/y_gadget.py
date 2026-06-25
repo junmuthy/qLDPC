@@ -2,7 +2,7 @@
 
 Building blocks for measuring a logical Y operator via lattice surgery, following
 the homological measurement construction of Ide, Gowda, Nadkarni, Dauphinais
-arXiv:2410.02753 §III.C/§III.D (see also docs/superpowers/docs/main.tex §4). The
+arXiv:2410.02753 §III.C/§III.D. The
 logical-Y support is the set ``W = supp(x) ∩ supp(z)`` of data qubits where the
 logical-X string and the logical-Z string cross; ``|W|`` is odd (the strings
 anticommute) and may be any size, so the merge handles general ``|W| ≥ 1``.
@@ -44,8 +44,7 @@ def _in_rowspace_gf2(M: np.ndarray, v: np.ndarray) -> bool:
     Used to certify that the symplectic vector ``[x | z]`` of Ȳ = iX̄Z̄ is a
     product of the merged-code stabilizers restricted to the original data
     qubits, the core correctness guarantee of the homological logical-Y merge of
-    Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D (see also
-    docs/superpowers/docs/main.tex §4).
+    Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D.
     """
     M2 = GF2(np.asarray(M).astype(np.uint8))
     A = GF2(np.vstack([np.asarray(M).astype(np.uint8), np.asarray(v).astype(np.uint8)[None, :]]))
@@ -58,7 +57,7 @@ def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
     Legacy ``|W|=1`` helper retained as a test fixture; the general-``|W|`` merge
     uses :func:`_locate_overlaps`. The single-overlap special case of the
     Ȳ-overlap ``W = supp(x) ∩ supp(z)`` of Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 §III.D (docs/superpowers/docs/main.tex §4.1): Ȳ = iX̄Z̄ is
+    arXiv:2410.02753 §III.D: Ȳ = iX̄Z̄ is
     realised cleanly when the X̄ and Z̄ strings cross on exactly one data qubit.
 
     Validates, raising ``ValueError`` otherwise:
@@ -106,8 +105,7 @@ def _locate_overlap(code: CSSCode, x: np.ndarray, z: np.ndarray) -> int:
 def _locate_overlaps(code: CSSCode, x: np.ndarray, z: np.ndarray) -> tuple[int, ...]:
     """Return W = supp(x) ∩ supp(z), the physical Pauli-Y qubits of Ȳ = iX̄Z̄.
 
-    Validates (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
-    docs/superpowers/docs/main.tex §4.1):
+    Validates (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D):
       * x is a logical-X representative: H_Z @ x == 0 (mod 2),
       * z is a logical-Z representative: H_X @ z == 0 (mod 2),
       * x and z anticommute: x · z is odd (so |W| is odd, ≥ 1).
@@ -131,7 +129,7 @@ def _steane_y_pair() -> tuple[CSSCode, np.ndarray, np.ndarray]:
 
     This is the clean single-overlap (``|W|=1``) fixture for the Ȳ-overlap
     ``W = supp(x) ∩ supp(z)`` of Ȳ = iX̄Z̄ (Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 §III.D; docs/superpowers/docs/main.tex §4.1). The canonical
+    arXiv:2410.02753 §III.D). The canonical
     weight-3 logical-X and logical-Z
     representatives of the [[7,1,3]] Steane code already cross on a single data
     qubit; if a given representative pair does not, it is reduced over GF(2) by
@@ -184,7 +182,7 @@ def _bb_y_pair(overlap: int = 1) -> tuple[CSSCode, np.ndarray, np.ndarray]:
 
     overlap=1: canonical reps (already single-overlap). overlap=3: add stabilizer
     rows (deterministic seed) until supp(x)∩supp(z) has size 3 — the |W|≥2
-    crossing-cycle regime of arXiv:2410.02753 §III.D / main.tex §4.
+    crossing-cycle regime of arXiv:2410.02753 §III.D.
     """
     import sympy
 
@@ -227,7 +225,7 @@ def _merged_incidence(
     g_x: GadgetLayout, g_z: GadgetLayout, x: np.ndarray, z: np.ndarray
 ) -> tuple[np.ndarray, int, int]:
     """Merged graph incidence ∂_1 (Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 Eq.(66); docs/superpowers/docs/main.tex §4.4).
+    arXiv:2410.02753 Eq.(66)).
 
     Rows = vertices V_X ⊔ W ⊔ V_Z (data qubits of supp(x)/supp(z)); columns =
     edges (κ_X | κ_Z). ∂_1^x = g_x.incidence.T (rows=support, cols=κ_X); dual for
@@ -267,7 +265,7 @@ def _partial0_symplectic_rows(
     k_z: int,
 ) -> np.ndarray:
     """∂_0 = ker(merged ∂_1) as symplectic rows (Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 Eq.(67)/(68); docs/superpowers/docs/main.tex §4.4).
+    arXiv:2410.02753 Eq.(67)/(68)).
 
     Column layout per half: [data (n) | κ_X | κ_Z]. A cycle c = (c_X | c_Z):
     its κ_X support enters as Z-part on κ_X (∂_0^(X)); its κ_Z support enters as
@@ -404,7 +402,7 @@ def _ybar_obs0_rows(
     This is the §III.C readout rule of Ide, Gowda, Nadkarni, Dauphinais
     arXiv:2410.02753 §III.C: the obs0 eigenvalue is the XOR of the in-circuit
     ancilla records of the merged-code rows whose product equals Ȳ on the data.
-    The selected rows are exactly the new merge stabilizers (χ_X on V_X, χ_Z on
+    The selected rows are exactly the new merge stabilizers (S_X' on V_X, S_Z' on
     V_Z, y_v on W), so obs0 is their BARE product. This literal ``[x | z]``
     support is feasible whenever Ȳ lies in the merged stabilizer center, and is
     deterministic in-circuit on a proper Ȳ-eigenstate codeword prep (the
@@ -433,7 +431,7 @@ def _ybar_obs0_rows(
     if n0 != code.num_qudits:
         raise ValueError(f"n0={n0} != code.num_qudits={code.num_qudits}")
 
-    # obs0 = the BARE product of the new merge stabilizers (χ_X on V_X, χ_Z on
+    # obs0 = the BARE product of the new merge stabilizers (S_X' on V_X, S_Z' on
     # V_Z, y_v on W) = the literal [x | z] = iX̄Z̄ support. Solve A c = b for the
     # row-selection c such that the selected rows' product restricts to [x | z] on
     # data (X on V_X, Z on V_Z, Y on W) and is eigenbasis-compatible on the κ
@@ -516,27 +514,27 @@ class YGadgetLayout:
     """Merged code for a logical-Y measurement Ȳ = iX̄Z̄ (general ``|W|``).
 
     Output of :func:`build_y_gadget`, realising the homological logical-Y merge
-    of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D (see also
-    docs/superpowers/docs/main.tex §4). The X-measurement system (the L=1 gadget
+    of Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C/§III.D. The
+    X-measurement system (the L=1 gadget
     of X̄) and the Z-measurement system (the L=1 gadget of Z̄) of ONE logical
     qubit are glued along the physical Y-support ``W = supp(x) ∩ supp(z)``: each
     ``v ∈ W`` carries a mixed-type check ``y_v`` obtained by the §III.D
-    cross-merge of the χ_X row and the χ_Z row anchored at ``v``. The
+    cross-merge of the S_X' row and the S_Z' row anchored at ``v``. The
     ``Y_stab`` rows are exactly these ``|W|`` symplectic Y rows.
 
-    Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D). Each
+    Per-system Cheeger boost (arXiv:2410.02753 §III.D). Each
     per-system gadget ``g_x`` / ``g_z`` is boosted (combinatorially) to boundary
     Cheeger constant ≥ 1 BEFORE merging, so the per-system distance argument
     holds. The boosted gadgets are stored, so ``k_x = len(g_x.Q_prime)``
     matches the merged-code width.
 
     ∂_0 block (no bridge). The merged check matrix appends ``∂_0 = ker(merged
-    ∂_1)`` (arXiv:2410.02753 §III.D Eq.(66)/(67); main.tex §4.4), the cycle basis
+    ∂_1)`` (arXiv:2410.02753 §III.D Eq.(66)/(67)), the cycle basis
     of the glued graph, in place of any per-system gauge blocks. At ``|W|=1`` the
     glued graph contributes no crossing cycle (0 ∂_0 rows); at ``|W|≥2`` it
     contributes ``|W|−1`` crossing rows. There is NO SkipTree adapter / bridge.
 
-    Stabilizer code. The only pre-merge anticommutations — (χ_X, χ_Z) at each
+    Stabilizer code. The only pre-merge anticommutations — (S_X', S_Z') at each
     ``v ∈ W``, whose data supports cross — are consumed by the cross-merge into
     the ``y_v`` rows. The merged code is then a genuine STABILIZER code
     (``is_subsystem_code=False`` for Steane) encoding ``code.dimension − 1``
@@ -614,26 +612,26 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     """Assemble the homological logical-Y merged code for Ȳ = iX̄Z̄ (general ``|W|``).
 
     Implements the Eq.(68) merged code of Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 §III.C/§III.D (see also docs/superpowers/docs/main.tex §4):
+    arXiv:2410.02753 §III.C/§III.D:
     glue the X-measurement L=1 gadget of ``x`` and the Z-measurement L=1 gadget
     of ``z`` (both Webster, Smith, Cohen arXiv:2511.15989 §II.A) along the
-    physical Y-support ``W = supp(x) ∩ supp(z)``. At each ``v ∈ W`` the χ_X row
-    and χ_Z row anchored there are fused into one explicit mixed check ``y_v``
+    physical Y-support ``W = supp(x) ∩ supp(z)``. At each ``v ∈ W`` the S_X' row
+    and S_Z' row anchored there are fused into one explicit mixed check ``y_v``
     via the §III.D cross-merge (NOT a single-qubit basis-change rotation — the
     non-CSS content lives in the ``y_v`` rows).
 
-    Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D: per-system
+    Per-system Cheeger boost (arXiv:2410.02753 §III.D: per-system
     distance argument). Each gadget is boosted to boundary Cheeger constant ≥ 1
     BEFORE merging; the boosted gadgets are returned so the merged-code width
     ``n + k_x + k_z`` is consistent with ``len(g_x.Q_prime)``.
 
     The merged symplectic column space is ``[data (n) | κ_x | κ_z]``. The two
     systems share the data qubits, so the original code stabilizers appear ONCE:
-    H_X is extended onto κ_z so it commutes with χ_Z, and H_Z onto κ_x so it
-    commutes with χ_X (the dual-extension of Webster §II.A step 3). NO per-system
+    H_X is extended onto κ_z so it commutes with S_Z', and H_Z onto κ_x so it
+    commutes with S_X' (the dual-extension of Webster §II.A step 3). NO per-system
     gauge rows are appended; instead ``∂_0 = ker(merged ∂_1)`` (the cycle basis
     of the glued graph, §III.D Eq.(66)/(67)) is appended. The only pairs that
-    anticommute before the merge are (χ_X, χ_Z) at each ``v ∈ W``; fusing them
+    anticommute before the merge are (S_X', S_Z') at each ``v ∈ W``; fusing them
     removes that anticommutation, so the merged code is a genuine stabilizer code
     encoding ``code.dimension − 1`` logicals with Ȳ = iX̄Z̄ in its stabilizer
     group.
@@ -646,19 +644,19 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
         |   X-part (data | κ_x | κ_z)         |   Z-part (data | κ_x | κ_z)
         |--------------------------------------|------------------------------------
         |  H_X     0       π_{C₀^Z}^T         |   ·       ·        ·          block 1 (X-checks)
-        |  π_{V_X} ∂₁ˣ|_{V_X}  0              |   ·       ·        ·          block 2 (χ_X on V_X)
+        |  π_{V_X} ∂₁ˣ|_{V_X}  0              |   ·       ·        ·          block 2 (S_X' on V_X)
         |  π_W     ∂₁ˣ|_W   0                 |  π_W      0       ∂₁ᶻ|_W      block 3 (Y on W, mixed)
         |  ·       ·        ·                 |  H_Z    π_{C₀^X}^T  0         block 4 (Z-checks)
-        |  ·       ·        ·                 |  π_{V_Z}  0       ∂₁ᶻ|_{V_Z}  block 5 (χ_Z on V_Z)
+        |  ·       ·        ·                 |  π_{V_Z}  0       ∂₁ᶻ|_{V_Z}  block 5 (S_Z' on V_Z)
         |  0       0        ∂₀^Z              |   0      ∂₀^X      0          block 6 (cycles ∂₀)
 
     Named-block mapping (each is a local variable in the assembly)::
 
         Xcheck_rows = HX_out[:m_x]   # block 1: H_X ext onto κ_z = π_{C₀^Z}^T
-        chiX_rows   = HX_out[m_x:]   # block 2: π_{V_X} | ∂₁ˣ|_{V_X} | 0
-        Ymix_rows   = Y_stab         # block 3: mixed χ@W rows (apply_mixed_basis_merge)
+        SXprime_rows = HX_out[m_x:]  # block 2: π_{V_X} | ∂₁ˣ|_{V_X} | 0
+        Ymix_rows   = Y_stab         # block 3: mixed S'@W rows (apply_mixed_basis_merge)
         Zcheck_rows = HZ_out[:m_z]   # block 4: H_Z ext onto κ_x = π_{C₀^X}^T
-        chiZ_rows   = HZ_out[m_z:]   # block 5: π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}
+        SZprime_rows = HZ_out[m_z:]  # block 5: π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}
         cycle_rows  = partial0        # block 6: ker(merged ∂₁) = ∂₀^Z / ∂₀^X
 
     Args:
@@ -675,8 +673,8 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     z = np.asarray(z).astype(np.uint8)
     W = _locate_overlaps(code, x, z)
 
-    # Per-system L=1 gadgets, each Cheeger-boosted to ≥1 (main.tex §4.7 /
-    # arXiv:2410.02753 §III.D: per-system distance argument).
+    # Per-system L=1 gadgets, each Cheeger-boosted to ≥1
+    # (arXiv:2410.02753 §III.D: per-system distance argument).
     from .cheeger import boost_gadget, cheeger_constant
 
     g_x = build_gadget(code, x, basis=Pauli.X)
@@ -694,11 +692,11 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     k_z = len(g_z.Q_prime)
     n_merged = n + k_x + k_z
 
-    # χ / extension blocks (Webster §II.A step 3 decomposition).
-    chi_x = np.asarray(g_x.HX_merged[m_x:]).astype(np.uint8)  # (|V0x|, n+k_x)
-    hz_ext_kx = np.asarray(g_x.HZ_merged[:m_z]).astype(np.uint8)  # [H_Z | F̃_x]
-    chi_z = np.asarray(g_z.HZ_merged[m_z:]).astype(np.uint8)  # (|V0z|, n+k_z)
-    hx_ext_kz = np.asarray(g_z.HX_merged[:m_x]).astype(np.uint8)  # [H_X | F̃_z]
+    # S_X' / S_Z' generator + extension blocks (Webster §II.A step 3 decomposition).
+    SX_prime = np.asarray(g_x.HX_merged[m_x:]).astype(np.uint8)  # (|V0x|, n+k_x)
+    hz_ext_kx = np.asarray(g_x.HZ_merged[:m_z]).astype(np.uint8)  # [H_Z | f_0^x]
+    SZ_prime = np.asarray(g_z.HZ_merged[m_z:]).astype(np.uint8)  # (|V0z|, n+k_z)
+    hx_ext_kz = np.asarray(g_z.HX_merged[:m_x]).astype(np.uint8)  # [H_X | f_0^z]
 
     def _embed(rows, *, data=None, kx=None, kz=None):
         out = np.zeros((rows, n_merged), dtype=np.uint8)
@@ -710,22 +708,22 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
             out[:, n + k_x :] = kz
         return out
 
-    # X-type rows: H_X extended onto κ_z; χ_X on [data | κ_x]. (NO per-system gauge.)
+    # X-type rows: H_X extended onto κ_z; S_X' on [data | κ_x]. (NO per-system gauge.)
     HX_all = np.vstack(
         [
             _embed(m_x, data=hx_ext_kz[:, :n], kz=hx_ext_kz[:, n:]),
-            _embed(chi_x.shape[0], data=chi_x[:, :n], kx=chi_x[:, n:]),
+            _embed(SX_prime.shape[0], data=SX_prime[:, :n], kx=SX_prime[:, n:]),
         ]
     ).astype(np.uint8)
-    # Z-type rows: H_Z extended onto κ_x; χ_Z on [data | κ_z].
+    # Z-type rows: H_Z extended onto κ_x; S_Z' on [data | κ_z].
     HZ_all = np.vstack(
         [
             _embed(m_z, data=hz_ext_kx[:, :n], kx=hz_ext_kx[:, n:]),
-            _embed(chi_z.shape[0], data=chi_z[:, :n], kz=chi_z[:, n:]),
+            _embed(SZ_prime.shape[0], data=SZ_prime[:, :n], kz=SZ_prime[:, n:]),
         ]
     ).astype(np.uint8)
 
-    # Merge χ_X@v / χ_Z@v into one mixed y_v row for every v ∈ W (§III.D / §4.3).
+    # Merge S_X'@v / S_Z'@v into one mixed y_v row for every v ∈ W (§III.D).
     HX_out, HZ_out, Y_stab, _obs0_y, _xl, _zl = apply_mixed_basis_merge(
         HX_all,
         HZ_all,
@@ -755,20 +753,20 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     def _sym_z(rows: np.ndarray) -> np.ndarray:  # Z-only rows → [0 | Z]
         return np.hstack([np.zeros_like(rows), rows]).astype(np.int_)
 
-    # apply_mixed_basis_merge removed the χ@W rows into Y_stab, so:
+    # apply_mixed_basis_merge removed the S'@W rows into Y_stab, so:
     Xcheck_rows = HX_out[:m_x]   # block 1: [H_X | 0 | π_{C₀^Z}^T]
-    chiX_rows   = HX_out[m_x:]   # block 2: [π_{V_X} | ∂₁ˣ|_{V_X} | 0]
+    SXprime_rows = HX_out[m_x:]  # block 2: [π_{V_X} | ∂₁ˣ|_{V_X} | 0]
     Ymix_rows   = Y_stab         # block 3: [π_W|∂₁ˣ|_W|0 ‖ π_W|0|∂₁ᶻ|_W]
     Zcheck_rows = HZ_out[:m_z]   # block 4: [H_Z | π_{C₀^X}^T | 0]
-    chiZ_rows   = HZ_out[m_z:]   # block 5: [π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}]
+    SZprime_rows = HZ_out[m_z:]  # block 5: [π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}]
     cycle_rows  = partial0       # block 6: [0|0|∂₀^Z ‖ 0|∂₀^X|0]
 
     blocks = [
         _sym_x(Xcheck_rows),
-        _sym_x(chiX_rows),
+        _sym_x(SXprime_rows),
         Ymix_rows.astype(np.int_),
         _sym_z(Zcheck_rows),
-        _sym_z(chiZ_rows),
+        _sym_z(SZprime_rows),
         cycle_rows.astype(np.int_),
     ]
     H_sym = (

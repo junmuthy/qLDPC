@@ -192,8 +192,8 @@ def test_bb_w1_distance_not_collapsed():
 
 
 def test_h_sym_rows_in_h_tilde_block_order() -> None:
-    """H_sym rows follow the H̃ formula order: block1 H_X(X), block2 χ_X(X),
-    block3 Y(mixed), block4 H_Z(Z), block5 χ_Z(Z), block6 cycles
+    """H_sym rows follow the H̃ formula order: block1 H_X(X), block2 S_X'(X),
+    block3 Y(mixed), block4 H_Z(Z), block5 S_Z'(Z), block6 cycles
     (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D)."""
     code, x, z = _steane_y_pair()
     yg = build_y_gadget(code, x=x, z=z)
@@ -203,12 +203,12 @@ def test_h_sym_rows_in_h_tilde_block_order() -> None:
     zparts = (H[:, n:] != 0).any(axis=1)
     m_x = code.matrix_x.shape[0]
     n_w = len(yg.W)
-    # block 1 (H_X) + block 2 (χ_X on V_X) are pure-X and come first
+    # block 1 (H_X) + block 2 (S_X' on V_X) are pure-X and come first
     assert xparts[: m_x].all() and not zparts[: m_x].any(), "block 1 not pure-X-first"
     # block 3 (Y on W) is mixed and follows the pure-X blocks
     y0 = m_x + (yg.g_x.HX_merged.shape[0] - m_x - n_w)  # m_x + |V_X|
     assert (xparts[y0 : y0 + n_w] & zparts[y0 : y0 + n_w]).all(), "block 3 not mixed"
-    # blocks 4+5 (H_Z pure-Z, χ_Z on V_Z pure-Z) start immediately after Y
+    # blocks 4+5 (H_Z pure-Z, S_Z' on V_Z pure-Z) start immediately after Y
     m_z = code.matrix_z.shape[0]
     v_z = yg.g_z.HZ_merged.shape[0] - m_z - n_w  # |V_Z|
     z45_start = y0 + n_w
