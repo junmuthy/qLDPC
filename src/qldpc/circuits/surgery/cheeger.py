@@ -24,14 +24,14 @@ from .gadget import GadgetLayout
 def _exact_boundary_cheeger(incidence: galois.FieldArray) -> tuple[float, np.ndarray]:
     """Exact boundary Cheeger constant of F per Webster §II.A Definition 1.
 
-    Cain mapping: V → support; C → data_checks; F → incidence.
+    Symbols: V → support; C → data_checks; F → incidence.
 
     Helper / sanity-check tool. Used by ``boost_gadget_cheeger_combinatorial``
     (which follows Williamson & Yoder / Webster, Smith, Cohen: random edge addition + distance
     verification). Also kept for diagnostic use to debug the cut structure
     when a boost run is unexpectedly long.
 
-    For bipartite incidence F: V -> C (V = X-check χ_i indices, C = κ_j
+    For bipartite incidence F: V -> C (V = S_X' vertex-check indices, C = κ_j
     indices), the boundary ∂v of v ⊆ V is the subset of C with an odd
     number of neighbours in v. The boundary Cheeger constant is
 
@@ -96,7 +96,7 @@ def _exact_boundary_cheeger(incidence: galois.FieldArray) -> tuple[float, np.nda
 def _spectral_cheeger_lower_bound(incidence: galois.FieldArray) -> float:
     """Spectral lower bound on the boundary Cheeger constant of F.
 
-    Cain mapping: F → incidence; V_0 → support; C_0 → data_checks.
+    Symbols: F → incidence; V_0 → support; C_0 → data_checks.
 
     Returns ``lambda_2(F_float @ F_float.T) / 2.0``, where F_float =
     F.astype(np.float64). This is a tractable lower bound based on the
@@ -121,7 +121,7 @@ def _spectral_cheeger_lower_bound(incidence: galois.FieldArray) -> float:
 def cheeger_constant(g: GadgetLayout) -> float:
     """Boundary Cheeger constant of a gadget's F matrix (Webster §II.A Def 1).
 
-    Cain mapping: F → incidence; V_0 → support.
+    Symbols: F → incidence; V_0 → support.
 
     Returns the exact h(F) when |V_0| ≤ 26 (Gray-code subset enumeration),
     otherwise the spectral lower bound. Either way:
@@ -194,7 +194,7 @@ def boost_gadget_cheeger_combinatorial(
 ) -> GadgetLayout:
     """Greedy combinatorial Cheeger boost — deterministic distance guarantee.
 
-    Cain mapping: F → incidence; V_0 → support; κ → ancilla.
+    Symbols: F → incidence; V_0 → support; κ → ancilla.
 
     Computes the exact boundary Cheeger constant h(F) via subset enumeration
     (Webster Def 1 / Cross Def 3). When h < target_h, identifies the worst
@@ -340,7 +340,7 @@ def boost_gadget_distance(
     """Distance-verifying gadget boost (Williamson & Yoder arXiv:2410.02213 /
     Webster, Smith, Cohen arXiv:2511.15989).
 
-    Cain mapping: F → incidence; κ' → new ancilla qubits.
+    Symbols: F → incidence; κ' → new ancilla qubits.
 
     Iteratively add small random batches of degree-2 edges to F, use BP+OSD
     upper bound on merged code distance to fast-reject any augmentation whose

@@ -128,8 +128,7 @@ def _surgery_qubit_coordinates(
 ) -> stim.Circuit:
     """Emit QUBIT_COORDS in surgery's per-role semantic lane layout.
 
-    Cain mapping: V_0 → support; κ ancillas → Q' qubits (Q_prime);
-    S'_meas ancillas (= S_X' rows); S'_comp ancillas (= G rows).
+    Symbols: V₀ → support; ancillas Q' → Q_prime; S'_meas rows (= S_X'); S'_comp rows (= H_Z' gauge G).
 
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
@@ -1133,7 +1132,7 @@ def _surgery_detach_and_readout(
     bridge_ids: tuple[int, ...],
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
-    """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
+    """Detach + final data measure (surgery step 3). Mκ then SHIFT_COORDS then Mdata."""
     circuit = stim.Circuit()
     detach_qubits = list(ancilla_ids) + list(bridge_ids)
     ancilla_op = "M" if gadget.basis is Pauli.X else "MX"

@@ -268,10 +268,10 @@ def _build_aux_graph_strict(incidence: np.ndarray) -> tuple[nx.Graph, dict[tuple
     which assigns T_s zero columns on those same rows. So
         (T_s · F_aug)[c, v] = Σ_{k: weight-2 row} T_s[c,k] · F_aug[k, v]
                             = H_R[c, label(v)] · [v ∈ port]      (SkipTree identity)
-    and the hyperedge rows contribute 0 regardless of F_aug[r, v]. χ_v · cycle_c
+    and the hyperedge rows contribute 0 regardless of F_aug[r, v]. S'_v · cycle_c
     on the κ side cancels the adapter side, CSS commutation holds. The hyperedge
     κ qubit itself stays in F_aug, so the gadget (G_aug = ker(F_aug^T), deformed
-    check c → c · X(κ_r), χ_v) is untouched. Paper Eq. 9's perfect-matching
+    check c → c · X(κ_r), S'_v) is untouched. Paper Eq. 9's perfect-matching
     decomposition (§II.C) is not applied; structural Theorem 12 distance
     argument is replaced by empirical LER smoke tests.
 
@@ -400,7 +400,7 @@ def _run_skiptree_on_port_subgraph(
         # Load-bearing skip: T_s gets zero columns on hyperedge rows (weight ≥ 3)
         # and on rows whose endpoints are outside the port subgraph. Paired with
         # _build_aux_graph_strict's matching skip; together they make hyperedge κ
-        # qubits invisible to (T_s · F_aug), so χ_v · cycle_c commutation reduces
+        # qubits invisible to (T_s · F_aug), so S'_v · cycle_c commutation reduces
         # to the weight-2 sub-incidence SkipTree identity. See bridge.py docstring
         # for _build_aux_graph_strict for the proof sketch.
         if len(cols) != 2:
