@@ -15,10 +15,10 @@ from .cheeger import boost_gadget, cheeger_constant
 from .circuit import (
     build_joint_ppm_circuit,
     build_single_ppm_circuit,
-    build_single_y_ppm_circuit,
     keep_only_observable,
     logical_state_init,
 )
+from .y_circuit import build_single_y_ppm_circuit
 from .gadget import GadgetLayout, build_gadget
 from .y_gadget import YGadgetLayout, build_y_gadget
 
