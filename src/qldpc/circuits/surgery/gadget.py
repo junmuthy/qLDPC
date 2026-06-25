@@ -45,7 +45,7 @@ class GadgetLayout:
         data_checks   = C₀  (complementary-basis check indices touching V₀;
                              -1 sentinels indicate boost-added Q' with no backing check)
         incidence     = ∂_1^T  (|C₀|×|V₀| edge×vertex matrix; ∂_1 = incidence.T)
-        gauge         = ∂_0    (basis of ker(∂_1) over GF(2); field renamed next task)
+        partial_0     = ∂_0    (basis of ker(∂_1) over GF(2))
         Q_prime       = Q' (κ qubits, indexed after the n data qubits)
     """
 
@@ -54,7 +54,7 @@ class GadgetLayout:
     support: tuple[int, ...]
     data_checks: tuple[int, ...]
     incidence: np.ndarray
-    gauge: np.ndarray
+    partial_0: np.ndarray
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
     Q_prime: tuple[int, ...]  # Q' ancilla qubit IDs
@@ -154,14 +154,14 @@ def _step3_assemble(
     support: tuple[int, ...],
     data_checks: tuple[int, ...],
     incidence: np.ndarray,
-    gauge: np.ndarray,
+    partial_0: np.ndarray,
     *,
     basis: PauliXZ = Pauli.X,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Block assembly of HX_merged, HZ_merged (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
     Cain et al. arXiv:2603.28627 §B.1).
 
-    S'_meas rows go into the measurement-basis merged matrix; ∂_0=gauge rows go into
+    S'_meas rows go into the measurement-basis merged matrix; ∂_0 rows go into
     the complementary-basis merged matrix. f_0 = π_{C₀}^T extends original checks onto Q'.
 
     basis=X (default): S'_meas rows added to HX_merged; ∂_0 rows added to HZ_merged.
@@ -172,7 +172,7 @@ def _step3_assemble(
     n = code.num_qudits
     mX, mZ = HX.shape[0], HZ.shape[0]
     nC = len(data_checks)
-    r = gauge.shape[0]
+    r = partial_0.shape[0]
 
     # f_0 = π_{C₀}^T : extends the original Z-checks (basis=X) onto the new Q' ancillas.
     # _projection's sentinel rule zeroes the columns of boost-added Q' (data_checks == -1).
@@ -187,7 +187,7 @@ def _step3_assemble(
         HZ_merged = np.block(
             [
                 [HZ, f_0],
-                [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
+                [np.zeros((r, n), dtype=np.uint8), partial_0.astype(np.uint8)],
             ]
         ).astype(np.uint8)
     else:
@@ -196,7 +196,7 @@ def _step3_assemble(
         HX_merged = np.block(
             [
                 [HX, f_0],
-                [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
+                [np.zeros((r, n), dtype=np.uint8), partial_0.astype(np.uint8)],
             ]
         ).astype(np.uint8)
 
@@ -229,8 +229,8 @@ def build_gadget(
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
 
     support, data_checks, incidence = _step1_restriction(code, x, basis=basis)
-    gauge = _step2_gauge_fix(incidence)
-    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, gauge, basis=basis)
+    partial_0 = _step2_gauge_fix(incidence)
+    HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, partial_0, basis=basis)
     Q_prime = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))  # Q' ancilla qubit IDs
     return GadgetLayout(
         code=code,
@@ -238,7 +238,7 @@ def build_gadget(
         support=support,
         data_checks=data_checks,
         incidence=incidence,
-        gauge=gauge,
+        partial_0=partial_0,
         HX_merged=HX_m,
         HZ_merged=HZ_m,
         Q_prime=Q_prime,
@@ -279,7 +279,7 @@ def build_gadget_augmented(
         raise ValueError(f"incidence_extra rows {bad} have weight != 2; required weight 2.")
 
     incidence_aug = np.vstack([incidence, incidence_extra]).astype(np.uint8)
-    gauge_aug = _step2_gauge_fix(incidence_aug)
+    partial_0_aug = _step2_gauge_fix(incidence_aug)
 
     # _step3_assemble builds f_0 = π_{C₀}^T; we need C₀_aug to include -1 sentinels
     # for the new κ qubits so their f_0 columns are all-zero (no original check maps
@@ -291,7 +291,7 @@ def build_gadget_augmented(
         support,
         data_checks_aug,
         incidence_aug,
-        gauge_aug,
+        partial_0_aug,
         basis=basis,
     )
     Q_prime_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))  # Q' ancilla qubit IDs
@@ -301,7 +301,7 @@ def build_gadget_augmented(
         support=support,
         data_checks=data_checks_aug,
         incidence=incidence_aug,
-        gauge=gauge_aug,
+        partial_0=partial_0_aug,
         HX_merged=HX_aug,
         HZ_merged=HZ_aug,
         Q_prime=Q_prime_aug,

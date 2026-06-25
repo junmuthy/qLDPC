@@ -32,7 +32,7 @@ class Bridge:
 
     where H_R is the canonical repetition-code parity-check matrix stored in
     ``Bridge.H_R``.  This identity guarantees CSS commutation between the adapter
-    ancillas and the merged-code gauge generators.
+    ancillas and the merged-code ∂_0 generators.
 
     Cheeger-distance preservation (same-basis) is guaranteed by
     Cross et al. arXiv:2407.18393 Thm 6.  Port-subgraph cellulation (to cap
@@ -393,7 +393,7 @@ def _run_skiptree_on_port_subgraph(
     # cancel mod 2 → SkipTree identity fails on codes like BB [[36, 8]] whose
     # restricted incidence has duplicate weight-2 rows. Assigning T only to the
     # FIRST matching row preserves T·F_aug = H_R (duplicate κ qubits remain in
-    # the gauge group, untouched by the cycle).
+    # the ∂_0 group, untouched by the cycle).
     assigned_edges: set[tuple[int, int]] = set()
     for r in range(incidence_aug.shape[0]):
         cols = np.flatnonzero(incidence_aug[r])

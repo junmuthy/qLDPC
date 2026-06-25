@@ -167,7 +167,7 @@ def _surgery_qubit_coordinates(
     m_X_l = g_l.code.matrix_x.shape[0]
     m_Z_l = g_l.code.matrix_z.shape[0]
     n_meas_l = len(g_l.support)
-    n_gauge_l = g_l.gauge.shape[0]
+    n_gauge_l = g_l.partial_0.shape[0]
     k_l = len(g_l.Q_prime)
 
     # Sizes for right side (joint+intercode only — intracode shares data).
@@ -177,13 +177,13 @@ def _surgery_qubit_coordinates(
         m_X_r = g_r.code.matrix_x.shape[0]
         m_Z_r = g_r.code.matrix_z.shape[0]
         n_meas_r = len(g_r.support)
-        n_gauge_r = g_r.gauge.shape[0]
+        n_gauge_r = g_r.partial_0.shape[0]
     elif joint is not None:  # intracode: data shared, ancillas separate per gadget
         assert g_r is not None
         n_r = 0
         m_X_r = m_Z_r = 0  # data checks not duplicated for intracode
         n_meas_r = len(g_r.support)
-        n_gauge_r = g_r.gauge.shape[0]
+        n_gauge_r = g_r.partial_0.shape[0]
     else:
         n_r = 0
         m_X_r = m_Z_r = 0
@@ -300,7 +300,7 @@ def _check_lane_index_map(
         m_X_total = gadget.code.matrix_x.shape[0]
         m_Z_total = gadget.code.matrix_z.shape[0]
         n_meas_total = len(gadget.support)
-        n_gauge_total = gadget.gauge.shape[0]
+        n_gauge_total = gadget.partial_0.shape[0]
     else:
         g_r, bridge, intercode = joint
         m_X_total = gadget.code.matrix_x.shape[0]
@@ -309,7 +309,7 @@ def _check_lane_index_map(
             m_X_total += g_r.code.matrix_x.shape[0]
             m_Z_total += g_r.code.matrix_z.shape[0]
         n_meas_total = len(gadget.support) + len(g_r.support)
-        n_gauge_total = gadget.gauge.shape[0] + g_r.gauge.shape[0]
+        n_gauge_total = gadget.partial_0.shape[0] + g_r.partial_0.shape[0]
 
     result: dict[int, tuple[int, int]] = {}
 
@@ -466,7 +466,7 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
     k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n_l + n_r + k_l + k_r + w
-    r_l, r_r = g_l_aug.gauge.shape[0], g_r_aug.gauge.shape[0]
+    r_l, r_r = g_l_aug.partial_0.shape[0], g_r_aug.partial_0.shape[0]
 
     cl_data = slice(0, n_l)
     cr_data = slice(n_l, n_l + n_r)
@@ -564,7 +564,7 @@ def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
     k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
     w = bridge.width
     n_merged = n + k_l + k_r + w
-    r_l, r_r = g_l_aug.gauge.shape[0], g_r_aug.gauge.shape[0]
+    r_l, r_r = g_l_aug.partial_0.shape[0], g_r_aug.partial_0.shape[0]
 
     c_data = slice(0, n)
     Ql_prime = slice(n, n + k_l)

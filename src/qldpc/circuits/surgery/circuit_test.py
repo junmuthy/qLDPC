@@ -83,7 +83,7 @@ def test_classify_reliable_round1_checks_basis_x() -> None:
     m_Z = code.matrix_z.shape[0]
     # Reliable X-checks: first m_X of checks_x (the original data H_X rows)
     expected_x_reliable = set(qubit_ids.checks_x[:m_X])
-    # Reliable Z-checks: last g.gauge.shape[0] of checks_z (the gauge-fix G rows)
+    # Reliable Z-checks: last g.partial_0.shape[0] of checks_z (the gauge-fix G rows)
     expected_z_reliable = set(qubit_ids.checks_z[m_Z:])
     expected = expected_x_reliable | expected_z_reliable
     assert set(reliable) == expected, f"reliable={set(reliable)}, expected={expected}"
@@ -112,7 +112,7 @@ def test_classify_reliable_round1_checks_basis_z() -> None:
     reliable = _classify_reliable_round1_checks(g, qubit_ids)
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
-    # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last g.gauge.shape[0] X-checks
+    # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last g.partial_0.shape[0] X-checks
     expected_z_reliable = set(qubit_ids.checks_z[:m_Z])
     expected_x_reliable = set(qubit_ids.checks_x[m_X:])
     expected = expected_z_reliable | expected_x_reliable
