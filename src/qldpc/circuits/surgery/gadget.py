@@ -4,7 +4,7 @@ Cain et al. arXiv:2603.28627 §B.1).
 Three explicit named steps that map 1:1 to the paper:
     _step1_restriction  — restriction: V₀=supp(x), C₀=checks touching V₀,
                           ∂_1 = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`)
-    _step2_gauge_fix    — gauge fix: ∂_0 = ker(∂_1) over GF(2) (stored as `gauge`)
+    _step2_gauge_fix    — gauge fix: ∂_0 = ker(∂_1) over GF(2) (stored as `partial_0`)
     _step3_assemble     — block assembly of HX_merged, HZ_merged
 """
 
