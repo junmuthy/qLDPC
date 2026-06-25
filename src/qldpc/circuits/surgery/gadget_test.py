@@ -596,3 +596,38 @@ def test_build_gadget_augmented_rejects_non_weight_2_rows() -> None:
     bad_extra = np.array([[1, 0, 0]], dtype=np.uint8)
     with pytest.raises(ValueError, match="weight"):
         build_gadget_augmented(code, x, bad_extra, basis=Pauli.X)
+
+
+def test_projection_basic_selection() -> None:
+    from qldpc.circuits.surgery.gadget import _projection
+
+    pi = _projection((0, 2), 4)
+    assert pi.dtype == np.uint8
+    assert pi.shape == (2, 4)
+    assert np.array_equal(pi, np.array([[1, 0, 0, 0], [0, 0, 1, 0]], dtype=np.uint8))
+
+
+def test_projection_identity_pi_M_piT_is_submatrix() -> None:
+    """π_S M π_T^T == M[S, T] (numpy-style index), the helper's defining identity."""
+    from qldpc.circuits.surgery.gadget import _projection
+
+    rng = np.random.default_rng(0)
+    M = rng.integers(0, 2, size=(5, 6), dtype=np.uint8)
+    S, T = (1, 3), (0, 2, 5)
+    pi_S, pi_T = _projection(S, 5), _projection(T, 6)
+    lhs = (pi_S @ M @ pi_T.T) % 2
+    assert np.array_equal(lhs, M[np.ix_(S, T)])
+
+
+def test_projection_empty_indices() -> None:
+    from qldpc.circuits.surgery.gadget import _projection
+
+    assert _projection((), 4).shape == (0, 4)
+
+
+def test_projection_negative_sentinel_is_zero_row() -> None:
+    """Sentinel index (-1, from boost-added Q' with no backing check) → all-zero row."""
+    from qldpc.circuits.surgery.gadget import _projection
+
+    pi = _projection((0, -1, 2), 3)
+    assert np.array_equal(pi, np.array([[1, 0, 0], [0, 0, 0], [0, 0, 1]], dtype=np.uint8))

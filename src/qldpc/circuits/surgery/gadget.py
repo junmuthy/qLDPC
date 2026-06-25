@@ -1,9 +1,11 @@
-"""L=1 gadget construction (Webster, Smith, Cohen arXiv:2511.15989 §II.A).
+"""L=1 gadget construction (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+Cain et al. arXiv:2603.28627 §B.1).
 
 Three explicit named steps that map 1:1 to the paper:
-    _step1_restriction  — Webster §II.A step 1 (restriction)
-    _step2_gauge_fix    — Webster §II.A step 2 (gauge fix)
-    _step3_assemble     — Webster §II.A step 3 (block assembly)
+    _step1_restriction  — restriction: V₀=supp(x), C₀=checks touching V₀,
+                          H_X' = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`)
+    _step2_gauge_fix    — gauge fix: G = ker((H_X')^T) over GF(2) (stored as `gauge`)
+    _step3_assemble     — block assembly of HX_merged, HZ_merged
 """
 
 from __future__ import annotations
@@ -19,8 +21,34 @@ from qldpc.objects import Pauli, PauliXZ
 GF2 = galois.GF(2)
 
 
+def _projection(indices, N: int) -> np.ndarray:
+    """π_S ∈ F₂^{|S|×N}: row i is the unit vector e_{indices[i]}.
+
+    (π_S)_{i,j} = δ_{j, indices[i]}, so π_S M π_T^T = M[S, T] (numpy-style index).
+    Entries outside [0, N) (e.g. the -1 sentinels build_gadget_augmented uses for
+    boost-added Q' qubits with no backing check) give an all-zero row.
+    """
+    pi = np.zeros((len(indices), N), dtype=np.uint8)
+    for i, s in enumerate(indices):
+        if 0 <= s < N:
+            pi[i, s] = 1
+    return pi
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class GadgetLayout:
+    """Frozen result of a single L=1 gadget construction.
+
+    Symbol mapping (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    Cain et al. arXiv:2603.28627 §B.1):
+        support       = V₀  (qubit indices in supp(x))
+        data_checks   = C₀  (complementary-basis check indices touching V₀;
+                             -1 sentinels indicate boost-added Q' with no backing check)
+        incidence     = (H_X')^T  (|C₀|×|V₀| matrix; H_X' = π_{V₀}H_Z^Tπ_{C₀}^T)
+        gauge         = G   (basis of ker((H_X')^T) over GF(2))
+        ancilla_qubits = Q' (κ qubits, indexed after the n data qubits)
+    """
+
     code: CSSCode
     x: np.ndarray
     support: tuple[int, ...]
@@ -39,12 +67,14 @@ def _step1_restriction(
     *,
     basis: PauliXZ = Pauli.X,
 ) -> tuple[tuple[int, ...], tuple[int, ...], np.ndarray]:
-    """Webster §II.A step 1 — V_0 = supp(x); C_0 = checks touching V_0; F = H_complement[C_0, V_0].
+    """Single-gadget restriction (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    Cain et al. arXiv:2603.28627 §B.1).
 
-    Cain mapping: V_0 → support; C_0 → data_checks; F → incidence.
+    V₀ = support = supp(x); C₀ = data_checks = complementary-basis checks touching V₀;
+    H_X' = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`, shape |C₀|×|V₀|).
 
-    For basis=Pauli.X: incidence = H_Z[data_checks, support] (the complementary
-    basis to the measured logical). For basis=Pauli.Z: incidence = H_X[data_checks, support].
+    basis=Pauli.X: complementary matrix is H_Z (measuring X̄, restricting via Z-checks).
+    basis=Pauli.Z: complementary matrix is H_X (measuring Z̄, restricting via X-checks).
     """
     x = np.asarray(x).astype(np.uint8)
     if x.shape != (code.num_qudits,):
@@ -59,18 +89,22 @@ def _step1_restriction(
     data_checks = tuple(
         int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(support)].any()
     )
-    incidence = (
-        H_complement[np.ix_(data_checks, support)]
-        if data_checks and support
-        else np.zeros((len(data_checks), len(support)), dtype=np.uint8)
-    )
-    return support, data_checks, incidence.astype(np.uint8)
+    # H_X' = π_{V₀} H_Z^T π_{C₀}^T  (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    # Cain et al. arXiv:2603.28627 §B.1).  The stored `incidence` is its transpose —
+    # the |C₀|×|V₀| vertex-edge incidence (§4 y_gadget.py calls this ∂₁ˣ).
+    n = code.num_qudits
+    pi_V0 = _projection(support, n)                  # π_{V₀} = f_X' ∈ F₂^{|V₀|×n}
+    pi_C0 = _projection(data_checks, H_complement.shape[0])   # π_{C₀} ∈ F₂^{|C₀|×m_comp}
+    H_X_prime = (pi_V0 @ H_complement.T @ pi_C0.T) % 2        # |V₀|×|C₀|
+    incidence = H_X_prime.T.astype(np.uint8)         # |C₀|×|V₀|
+    return support, data_checks, incidence
 
 
 def _step2_gauge_fix(incidence: np.ndarray) -> np.ndarray:
-    """Webster §II.A step 2 — G whose rows form a canonical basis of ker(F.T) over GF(2).
+    """Gauge fix (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1).
 
-    Cain mapping: F → incidence; G → gauge.
+    G = gauge = canonical row basis of ker((H_X')^T) = ker(incidence^T) over GF(2).
+    `incidence` = (H_X')^T (|C₀|×|V₀|); returns G of shape (r, |C₀|) where r = |C₀| - rank(H_X').
 
     Uses galois ``left_null_space`` (row-reduced) so the basis is deterministic.
     """
@@ -85,31 +119,34 @@ def _assemble_HX_L1(
     support_indices: np.ndarray,
     incidence: np.ndarray,
 ) -> np.ndarray:
-    """L=1 HX-side block assembly: [[HX_data, 0], [E_V0, F^T]] over GF(2).
+    """L=1 X-side block assembly: [[HX_data, 0], [S_X']] over GF(2).
 
-    Cain mapping: V_0 → support; F → incidence.
+    S_X' = [f_X' | H_X'] where f_X' = π_{V₀} (indicator on data qubits) and
+    H_X' = incidence.T (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    Cain et al. arXiv:2603.28627 §B.1).
 
-    Used by _step3_assemble (initial gadget assembly) and
-    build_gadget_augmented (post-boost rebuild). The Z-side
-    assembly is NOT shared — the boost rebuild treats new κ' qubits as
-    pure-gauge (no data-Z extension), unlike the initial assembly.
+    Called by _step3_assemble (initial gadget assembly) and build_gadget_augmented
+    (post-boost rebuild, with augmented incidence). The Z-side assembly is NOT shared —
+    the boost rebuild treats new κ' qubits as pure-gauge (no data-Z extension).
 
     Args:
         HX_data: original code's X-check matrix, shape (mX, n), uint8.
-        support_indices: indices of V_0 within the n data qubits, shape (|V_0|,).
-        incidence: restriction matrix, shape (|C_0|, |V_0|), uint8.
+        support_indices: indices of V₀ within the n data qubits, shape (|V₀|,).
+        incidence: (H_X')^T, shape (|C₀|, |V₀|), uint8.
 
     Returns:
-        HX_merged: shape (mX + |V_0|, n + |C_0|), uint8.
+        HX_merged: shape (mX + |V₀|, n + |C₀|), uint8.
     """
     mX, n = HX_data.shape
     n_v0, n_c0 = int(incidence.shape[1]), int(incidence.shape[0])
     n_merged = n + n_c0
     top = np.hstack([HX_data, np.zeros((mX, n_c0), dtype=np.uint8)]).astype(np.uint8)
-    bot = np.zeros((n_v0, n_merged), dtype=np.uint8)
-    bot[np.arange(n_v0), np.asarray(support_indices)] = 1
-    bot[:, n:] = incidence.T
-    return np.vstack([top, bot]).astype(np.uint8)
+    # S_X' rows = [f_X' | H_X'] : f_X' = π_{V₀} on data, H_X' = incidence.T on Q'.
+    f_X_prime = np.zeros((n_v0, n), dtype=np.uint8)
+    f_X_prime[np.arange(n_v0), np.asarray(support_indices)] = 1
+    H_X_prime = incidence.T.astype(np.uint8)
+    S_X_prime = np.hstack([f_X_prime, H_X_prime]).astype(np.uint8)
+    return np.vstack([top, S_X_prime]).astype(np.uint8)
 
 
 def _step3_assemble(
@@ -121,12 +158,14 @@ def _step3_assemble(
     *,
     basis: PauliXZ = Pauli.X,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Webster §II.A step 3 — block assembly of HX_merged, HZ_merged.
+    """Block assembly of HX_merged, HZ_merged (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    Cain et al. arXiv:2603.28627 §B.1).
 
-    Cain mapping: χ → S'_meas (meas-basis ancilla rows); G → gauge.
+    S'_meas rows (χ) go into the measurement-basis merged matrix; G=gauge rows go into
+    the complementary-basis merged matrix. f_Z = π_{C₀}^T extends original checks onto Q'.
 
-    basis=X (default): χ rows added to HX_merged, G to HZ_merged.
-    basis=Z: χ rows added to HZ_merged, G to HX_merged (basis-symmetric dual).
+    basis=X (default): S'_meas rows added to HX_merged; G rows added to HZ_merged.
+    basis=Z: S'_meas rows added to HZ_merged; G rows added to HX_merged (basis-symmetric dual).
     """
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
@@ -135,15 +174,10 @@ def _step3_assemble(
     nC = len(data_checks)
     r = gauge.shape[0]
 
-    # incidence_tilde : (mZ_or_mX × nC) selection matrix — incidence_tilde[j, k] = 1 iff j == C_0[k]
-    if basis is Pauli.X:
-        incidence_tilde = np.zeros((mZ, nC), dtype=np.uint8)
-    else:
-        incidence_tilde = np.zeros((mX, nC), dtype=np.uint8)
-    for k, j in enumerate(data_checks):
-        if j < 0:
-            continue  # sentinel for extra-κ rows from build_gadget_augmented
-        incidence_tilde[j, k] = 1
+    # f_Z = π_{C₀}^T : extends the original Z-checks (basis=X) onto the new Q' ancillas.
+    # _projection's sentinel rule zeroes the columns of boost-added Q' (data_checks == -1).
+    m_comp = mZ if basis is Pauli.X else mX
+    f_Z = _projection(data_checks, m_comp).T.astype(np.uint8)   # (m_comp, |C₀|)
 
     support_arr = np.asarray(support, dtype=np.int_)
 
@@ -152,7 +186,7 @@ def _step3_assemble(
         HX_merged = _assemble_HX_L1(HX, support_arr, incidence)
         HZ_merged = np.block(
             [
-                [HZ, incidence_tilde],
+                [HZ, f_Z],
                 [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
             ]
         ).astype(np.uint8)
@@ -161,7 +195,7 @@ def _step3_assemble(
         HZ_merged = _assemble_HX_L1(HZ, support_arr, incidence)
         HX_merged = np.block(
             [
-                [HX, incidence_tilde],
+                [HX, f_Z],
                 [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
             ]
         ).astype(np.uint8)
@@ -175,12 +209,12 @@ def build_gadget(
     *,
     basis: PauliXZ,
 ) -> GadgetLayout:
-    """Webster L=1 gadget = steps 1+2+3 composed. Deterministic in (code, x, basis).
+    """Full L=1 gadget: steps 1+2+3 composed (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    Cain et al. arXiv:2603.28627 §B.1). Deterministic in (code, x, basis).
 
-    Cain mapping: κ qubits → ancilla_qubits; G → gauge.
-
-    basis=Pauli.X: measures a logical X (PPM of X̄). Validates H_Z @ x == 0.
-    basis=Pauli.Z: measures a logical Z (PPM of Z̄). Validates H_X @ x == 0.
+    Q' ancilla qubits (κ) are indexed contiguously after the n data qubits.
+    basis=Pauli.X: measures a logical X̄ (PPM of X̄). Validates H_Z @ x == 0 mod 2.
+    basis=Pauli.Z: measures a logical Z̄ (PPM of Z̄). Validates H_X @ x == 0 mod 2.
     """
     x = np.asarray(x).astype(np.uint8)
     if basis is Pauli.X:
@@ -219,21 +253,19 @@ def build_gadget_augmented(
     *,
     basis: PauliXZ,
 ) -> GadgetLayout:
-    """Rebuild a GadgetLayout with incidence augmented by extra weight-2 rows.
+    """Rebuild a GadgetLayout with (H_X')^T augmented by extra weight-2 rows
+    (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1).
 
-    Cain mapping: F → incidence; F_extra → incidence_extra; κ → ancilla qubits.
+    Each row of ``incidence_extra`` (weight 2) corresponds to a new Q' (κ) qubit not
+    backed by any original complementary-basis check. The function:
 
-    Each row of ``incidence_extra`` has weight 2 and corresponds to a new κ qubit not
-    backed by any original Z-check (basis=X) or X-check (basis=Z). The function:
-
-    1. Stacks incidence_aug = [incidence; incidence_extra].
+    1. Stacks incidence_aug = [(H_X')^T; incidence_extra] (augmented |C₀|×|V₀| matrix).
     2. Recomputes G_aug = ker(incidence_aug^T) via _step2_gauge_fix.
-    3. Calls _step3_assemble with the original V_0 / C_0 plus the new κ rows.
-       The extra columns of tilde_F are all zero (no original check sits on the
-       new κ qubits).
+    3. Calls _step3_assemble with -1 sentinels appended to C₀ for the new κ qubits
+       (their f_Z columns are zero, as no original check maps onto them).
 
-    The returned ``GadgetLayout.data_checks`` and ``ancilla_qubits`` are extended to cover
-    the new κ qubits; the new κ indices come after the original ones.
+    The returned ``GadgetLayout.data_checks`` and ``ancilla_qubits`` are extended to
+    cover the new κ qubits; new κ indices come after the original ones.
     """
     x = np.asarray(x).astype(np.uint8)
     support, data_checks, incidence = _step1_restriction(code, x, basis=basis)
@@ -249,10 +281,9 @@ def build_gadget_augmented(
     incidence_aug = np.vstack([incidence, incidence_extra]).astype(np.uint8)
     gauge_aug = _step2_gauge_fix(incidence_aug)
 
-    # _step3_assemble computes tilde_F by indexing into C_0; we need an extended
-    # C_0_aug that has the new rows as sentinels (their tilde_F columns must be 0).
-    # Trick: pass C_0_aug = C_0 + (-1, -1, ...) sentinels which fall outside [0, mZ),
-    # so the tilde_F loop sets nothing for those positions.
+    # _step3_assemble builds f_Z = π_{C₀}^T; we need C₀_aug to include -1 sentinels
+    # for the new κ qubits so their f_Z columns are all-zero (no original check maps
+    # onto them). _projection's sentinel rule handles indices outside [0, m_comp).
     n_extra = incidence_extra.shape[0]
     data_checks_aug = tuple(data_checks) + tuple([-1] * n_extra)
     HX_aug, HZ_aug = _step3_assemble(
