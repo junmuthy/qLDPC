@@ -137,8 +137,8 @@ def test_partial0_steane_w1_is_pure_css_no_crossing():
     g_x = build_gadget(code, x, basis=Pauli.X)
     g_z = build_gadget(code, z, basis=Pauli.Z)
     n = code.num_qudits
-    k_x = len(g_x.ancilla_qubits)
-    k_z = len(g_z.ancilla_qubits)
+    k_x = len(g_x.Q_prime)
+    k_z = len(g_z.Q_prime)
     D1, kx, kz = _merged_incidence(g_x, g_z, x, z)
     assert (kx, kz) == (k_x, k_z)
     # |W|=1 wedge: dim ker(merged) == dim ker(∂1x) + dim ker(∂1z)  (no crossing cycle)

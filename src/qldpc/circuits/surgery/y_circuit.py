@@ -196,8 +196,8 @@ def _y_state_prep(
     field = merged_code.field
     n_q = merged_code.num_qudits
     n_code = yg.code.num_qudits
-    k_x = len(yg.g_x.ancilla_qubits)
-    k_z = len(yg.g_z.ancilla_qubits)
+    k_x = len(yg.g_x.Q_prime)
+    k_z = len(yg.g_z.Q_prime)
     assert n_q == n_code + k_x + k_z, (
         f"merged code width {n_q} != n_code {n_code} + k_x {k_x} + k_z {k_z}"
     )

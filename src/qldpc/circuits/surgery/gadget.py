@@ -46,7 +46,7 @@ class GadgetLayout:
                              -1 sentinels indicate boost-added Q' with no backing check)
         incidence     = (H_X')^T  (|C₀|×|V₀| matrix; H_X' = π_{V₀}H_Z^Tπ_{C₀}^T)
         gauge         = G   (basis of ker((H_X')^T) over GF(2))
-        ancilla_qubits = Q' (κ qubits, indexed after the n data qubits)
+        Q_prime       = Q' (κ qubits, indexed after the n data qubits)
     """
 
     code: CSSCode
@@ -57,7 +57,7 @@ class GadgetLayout:
     gauge: np.ndarray
     HX_merged: np.ndarray
     HZ_merged: np.ndarray
-    ancilla_qubits: tuple[int, ...]
+    Q_prime: tuple[int, ...]  # Q' ancilla qubit IDs
     basis: PauliXZ
 
 
@@ -231,7 +231,7 @@ def build_gadget(
     support, data_checks, incidence = _step1_restriction(code, x, basis=basis)
     gauge = _step2_gauge_fix(incidence)
     HX_m, HZ_m = _step3_assemble(code, support, data_checks, incidence, gauge, basis=basis)
-    ancilla_qubits = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
+    Q_prime = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))  # Q' ancilla qubit IDs
     return GadgetLayout(
         code=code,
         x=x,
@@ -241,7 +241,7 @@ def build_gadget(
         gauge=gauge,
         HX_merged=HX_m,
         HZ_merged=HZ_m,
-        ancilla_qubits=ancilla_qubits,
+        Q_prime=Q_prime,
         basis=basis,
     )
 
@@ -264,7 +264,7 @@ def build_gadget_augmented(
     3. Calls _step3_assemble with -1 sentinels appended to C₀ for the new κ qubits
        (their f_Z columns are zero, as no original check maps onto them).
 
-    The returned ``GadgetLayout.data_checks`` and ``ancilla_qubits`` are extended to
+    The returned ``GadgetLayout.data_checks`` and ``Q_prime`` are extended to
     cover the new κ qubits; new κ indices come after the original ones.
     """
     x = np.asarray(x).astype(np.uint8)
@@ -294,7 +294,7 @@ def build_gadget_augmented(
         gauge_aug,
         basis=basis,
     )
-    ancilla_qubits_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))
+    Q_prime_aug = tuple(range(code.num_qudits, code.num_qudits + len(data_checks_aug)))  # Q' ancilla qubit IDs
     return GadgetLayout(
         code=code,
         x=x,
@@ -304,6 +304,6 @@ def build_gadget_augmented(
         gauge=gauge_aug,
         HX_merged=HX_aug,
         HZ_merged=HZ_aug,
-        ancilla_qubits=ancilla_qubits_aug,
+        Q_prime=Q_prime_aug,
         basis=basis,
     )

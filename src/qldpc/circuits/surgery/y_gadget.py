@@ -527,7 +527,7 @@ class YGadgetLayout:
     Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D). Each
     per-system gadget ``g_x`` / ``g_z`` is boosted (combinatorially) to boundary
     Cheeger constant ≥ 1 BEFORE merging, so the per-system distance argument
-    holds. The boosted gadgets are stored, so ``k_x = len(g_x.ancilla_qubits)``
+    holds. The boosted gadgets are stored, so ``k_x = len(g_x.Q_prime)``
     matches the merged-code width.
 
     ∂_0 block (no bridge). The merged check matrix appends ``∂_0 = ker(merged
@@ -625,7 +625,7 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     Per-system Cheeger boost (main.tex §4.7 / arXiv:2410.02753 §III.D: per-system
     distance argument). Each gadget is boosted to boundary Cheeger constant ≥ 1
     BEFORE merging; the boosted gadgets are returned so the merged-code width
-    ``n + k_x + k_z`` is consistent with ``len(g_x.ancilla_qubits)``.
+    ``n + k_x + k_z`` is consistent with ``len(g_x.Q_prime)``.
 
     The merged symplectic column space is ``[data (n) | κ_x | κ_z]``. The two
     systems share the data qubits, so the original code stabilizers appear ONCE:
@@ -690,8 +690,8 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     n = code.num_qudits
     m_x = int(np.asarray(code.matrix_x).shape[0])
     m_z = int(np.asarray(code.matrix_z).shape[0])
-    k_x = len(g_x.ancilla_qubits)
-    k_z = len(g_z.ancilla_qubits)
+    k_x = len(g_x.Q_prime)
+    k_z = len(g_z.Q_prime)
     n_merged = n + k_x + k_z
 
     # χ / extension blocks (Webster §II.A step 3 decomposition).

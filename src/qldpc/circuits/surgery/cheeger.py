@@ -451,7 +451,7 @@ def boost_gadget(
 
     Returns:
         A NEW GadgetLayout with boosted incidence, gauge, HX_merged, HZ_merged,
-        ancilla_qubits.
+        Q_prime.
     """
     if method == "combinatorial":
         return boost_gadget_cheeger_combinatorial(

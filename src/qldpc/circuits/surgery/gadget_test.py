@@ -34,7 +34,7 @@ def test_gadget_layout_is_frozen_dataclass() -> None:
         "gauge",
         "HX_merged",
         "HZ_merged",
-        "ancilla_qubits",
+        "Q_prime",
         "basis",
     }
     # Verify actually frozen: mutation must raise. None placeholders are fine here
@@ -48,7 +48,7 @@ def test_gadget_layout_is_frozen_dataclass() -> None:
         gauge=None,  # type: ignore[arg-type]
         HX_merged=None,  # type: ignore[arg-type]
         HZ_merged=None,  # type: ignore[arg-type]
-        ancilla_qubits=(),
+        Q_prime=(),
         basis=Pauli.X,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -238,7 +238,7 @@ def test_build_gadget_steane_returns_valid_layout() -> None:
     assert g.code is code
     assert np.array_equal(g.x, x)
     # κ qubits indexed contiguously after data qubits
-    assert g.ancilla_qubits == tuple(range(code.num_qudits, code.num_qudits + len(g.data_checks)))
+    assert g.Q_prime == tuple(range(code.num_qudits, code.num_qudits + len(g.data_checks)))
 
 
 def test_build_gadget_deterministic() -> None:
@@ -254,7 +254,7 @@ def test_build_gadget_deterministic() -> None:
     assert np.array_equal(g1.gauge, g2.gauge)
     assert np.array_equal(g1.HX_merged, g2.HX_merged)
     assert np.array_equal(g1.HZ_merged, g2.HZ_merged)
-    assert g1.ancilla_qubits == g2.ancilla_qubits
+    assert g1.Q_prime == g2.Q_prime
 
 
 def test_build_gadget_rejects_non_x_logical() -> None:
@@ -297,7 +297,7 @@ def test_webster_table_i_ancilla_meas_comp_exact(code_index: int, n_anc: int) ->
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data)
     g1 = build_gadget(code, x1, basis=Pauli.X)
-    n_ancilla = len(g1.ancilla_qubits)
+    n_ancilla = len(g1.Q_prime)
     n_meas_checks = int(g1.x.sum())  # |support|
     n_comp_checks = g1.gauge.shape[0]
     assert n_ancilla + n_meas_checks + n_comp_checks == n_anc, (
@@ -392,7 +392,7 @@ def test_webster_table_i_z_basis_ancilla_meas_comp_exact() -> None:
         c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
         z = _webster_z_bar_operator(d)
         g = build_gadget(c, z, basis=Pauli.Z)
-        n_ancilla = len(g.ancilla_qubits)
+        n_ancilla = len(g.Q_prime)
         n_meas_checks = len(g.support)
         n_comp_checks = g.gauge.shape[0]
         assert n_ancilla + n_meas_checks + n_comp_checks == expected, (
