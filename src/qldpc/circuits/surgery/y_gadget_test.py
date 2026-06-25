@@ -37,23 +37,20 @@ def test_build_y_gadget_no_bridge_field_and_boosted():
     )
 
 
-def test_locate_overlaps_steane_is_singleton():
+def test_steane_y_pair_has_single_overlap():
     from qldpc.circuits.surgery.y_gadget import _locate_overlaps
 
-    code, x, z = _steane_y_pair()
-    W = _locate_overlaps(code, x, z)
-    assert isinstance(W, tuple)
-    assert W == tuple(int(i) for i in np.where(x.astype(bool) & z.astype(bool))[0])
-    assert len(W) % 2 == 1  # anticommuting ⇒ odd overlap
-
-
-def test_steane_y_pair_has_single_overlap():
     code, x, z = _steane_y_pair()
     assert ((np.asarray(code.matrix_z) @ x) % 2 == 0).all()  # x is logical-X
     assert ((np.asarray(code.matrix_x) @ z) % 2 == 0).all()  # z is logical-Z
     overlap = np.where((x.astype(bool)) & (z.astype(bool)))[0]
     assert overlap.size == 1
     assert _locate_overlap(code, x, z) == int(overlap[0])
+    # _locate_overlaps (plural) returns the same singleton as a tuple; |W| odd.
+    W = _locate_overlaps(code, x, z)
+    assert isinstance(W, tuple)
+    assert W == tuple(int(i) for i in overlap)
+    assert len(W) % 2 == 1  # anticommuting ⇒ odd overlap
 
 
 def test_locate_overlap_rejects_multi_overlap():

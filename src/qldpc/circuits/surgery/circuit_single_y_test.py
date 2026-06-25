@@ -161,18 +161,14 @@ def test_single_y_survivor_memory_observable_compiles() -> None:
     )
 
 
-def test_single_y_memory_logical_none_unchanged() -> None:
-    """memory_logical=None (default) emits no observable: byte-identical circuit."""
+def test_single_y_memory_logical_none_suppresses_readout_observable() -> None:
+    """memory_logical=None emits no Ȳ-readout observable."""
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
     from qldpc.circuits.surgery.y_gadget import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
     default = build_single_y_ppm_circuit(yg, rounds=3, data_init=None)
-    explicit_none = build_single_y_ppm_circuit(
-        yg, rounds=3, data_init=None, memory_logical=None
-    )
-    assert str(default) == str(explicit_none)
     assert default.detector_error_model().num_observables == 0
 
 

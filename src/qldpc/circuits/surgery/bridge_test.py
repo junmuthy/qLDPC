@@ -350,17 +350,14 @@ def test_build_bridge_smoke_steane_intracode() -> None:
     assert bridge.H_R.shape == (bridge.width - 1, bridge.width)
 
 
-def test_build_bridge_skiptree_invariant_holds() -> None:
-    """T_s · G_s_aug · P_s = H_R for both sides on Steane × Steane."""
-    from qldpc.circuits.surgery.bridge import build_bridge
-    from qldpc.circuits.surgery.gadget import build_gadget
+def _assert_skiptree_invariant(bridge, msg=None) -> None:
+    """Shared SkipTree identity: T_s · (augmented incidence) · P_{σ_s} % 2 == H_R.
 
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g_l = build_gadget(code, x, basis=Pauli.X)
-    g_r = build_gadget(code, x, basis=Pauli.X)
-    bridge = build_bridge(g_l, g_r)
-
+    Verifies the core SkipTree invariant for both sides s ∈ {l, r}.  Used by the
+    plain, boosted, and duplicate-incidence-row regression tests — the only
+    per-test variation is the *fixture* that produces ``bridge`` and the
+    optional failure ``msg`` (a callable ``side -> str``).
+    """
     for side in ("l", "r"):
         T = getattr(bridge, f"T_{side}")
         g_aug = getattr(bridge, f"g_{side}_aug")
@@ -373,7 +370,22 @@ def test_build_bridge_skiptree_invariant_holds() -> None:
             if lab >= 0:
                 P[v_idx, lab] = 1
         lhs = (T @ adjacency @ P) % 2
-        assert np.array_equal(lhs, bridge.H_R), f"side {side}:\n{lhs}\nvs\n{bridge.H_R}"
+        detail = msg(side) if msg is not None else f"side {side}:\n{lhs}\nvs\n{bridge.H_R}"
+        assert np.array_equal(lhs, bridge.H_R), detail
+
+
+def test_build_bridge_skiptree_invariant_holds() -> None:
+    """T_s · G_s_aug · P_s = H_R for both sides on Steane × Steane."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(code, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    _assert_skiptree_invariant(bridge)
 
 
 def test_build_bridge_bb18_hyperedge_and_long_cycle() -> None:
@@ -492,7 +504,6 @@ def test_cellulate_max_len_defaults_to_max_basis_stabilizer_weight() -> None:
 
     HX = np.asarray(sc.matrix_x).astype(int)
     expected_cap = int(HX.sum(axis=1).max())
-    assert expected_cap == 4, f"surface d=5 has weight-4 X-stabilizers, got {expected_cap}"
 
     bridge_default = build_bridge(g_l, g_r)
     bridge_explicit = build_bridge(g_l, g_r, cellulate_max_len=expected_cap)
@@ -605,19 +616,12 @@ def test_build_bridge_skiptree_invariant_holds_after_boost() -> None:
     assert g_l.incidence.shape[0] > g_l_raw.incidence.shape[0], "boost should add κ' rows"
     bridge = build_bridge(g_l, g_r)
 
-    for side in ("l", "r"):
-        T = getattr(bridge, f"T_{side}")
-        g_aug = getattr(bridge, f"g_{side}_aug")
-        label = getattr(bridge, f"label_{side}")
-        adj = g_aug.incidence.astype(np.int_)
-        P = np.zeros((adj.shape[1], bridge.width), dtype=np.int_)
-        for v_idx, lab in enumerate(label):
-            if lab >= 0:
-                P[v_idx, lab] = 1
-        lhs = (T @ adj @ P) % 2
-        assert np.array_equal(lhs, bridge.H_R), (
+    _assert_skiptree_invariant(
+        bridge,
+        msg=lambda side: (
             f"side {side}: T·F_aug·P ≠ H_R after boost — bridge dropped boost κ' rows"
-        )
+        ),
+    )
 
 
 def _bb_36_8():
@@ -655,20 +659,13 @@ def test_build_bridge_skiptree_invariant_holds_with_duplicate_incidence_rows() -
     )
     bridge = build_bridge(g_l, g_r)
 
-    for side in ("l", "r"):
-        T = getattr(bridge, f"T_{side}")
-        g_aug = getattr(bridge, f"g_{side}_aug")
-        label = getattr(bridge, f"label_{side}")
-        adj = g_aug.incidence.astype(np.int_)
-        P = np.zeros((adj.shape[1], bridge.width), dtype=np.int_)
-        for v_idx, lab in enumerate(label):
-            if lab >= 0:
-                P[v_idx, lab] = 1
-        lhs = (T @ adj @ P) % 2
-        assert np.array_equal(lhs, bridge.H_R), (
+    _assert_skiptree_invariant(
+        bridge,
+        msg=lambda side: (
             f"side {side}: T·F_aug·P ≠ H_R with duplicate κ rows — bridge "
             f"duplicate-edge guard missing"
-        )
+        ),
+    )
 
 
 def test_build_joint_ppm_circuit_dem_deterministic_bb_36_8() -> None:

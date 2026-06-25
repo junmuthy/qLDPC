@@ -46,26 +46,22 @@ def test_boost_gadget_seed_reproducible() -> None:
     assert np.array_equal(a.HX_merged, b.HX_merged)
 
 
-@pytest.mark.parametrize("method", ["combinatorial", "distance"])
-def test_boost_gadget_preserves_css_commutation(method: str) -> None:
-    from qldpc.circuits.surgery.cheeger import boost_gadget
-    from qldpc.circuits.surgery.gadget import (
-        build_gadget,
-    )
+@pytest.mark.parametrize(
+    ("method", "basis"),
+    [
+        ("combinatorial", Pauli.X),
+        ("combinatorial", Pauli.Z),
+        ("distance", Pauli.X),
+    ],
+)
+def test_boost_gadget_preserves_css_commutation(method: str, basis: PauliXZ) -> None:
+    """boost_gadget preserves CSS commutation and the gadget basis.
 
-    # Webster code 0 — Steane causes distance-boost decoder to hang on k=0 merged.
-    data = load_webster_seed_set(0)
-    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x = _webster_x_bar_operator(data)
-    g = build_gadget(code, x, basis=Pauli.X)
-    boosted = boost_gadget(g, method=method, target=1.0, seed=0)
-    product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
-    assert np.array_equal(product, np.zeros_like(product))
-
-
-@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_boost_gadget_preserves_css_commutation_both_bases(basis: PauliXZ) -> None:
-    """boost_gadget on a basis=X or basis=Z gadget preserves CSS commutation."""
+    Parametrized over the distinct (method, basis) pairs; distance×Z is omitted
+    because the Webster JSON fixture ships no Z̄ logical (only X̄ operators).
+    Webster code 0 is used because Steane causes the distance-boost decoder to
+    hang on the k=0 merged code.
+    """
     from qldpc.circuits.surgery.cheeger import boost_gadget
     from qldpc.circuits.surgery.gadget import (
         build_gadget,
@@ -73,14 +69,14 @@ def test_boost_gadget_preserves_css_commutation_both_bases(basis: PauliXZ) -> No
 
     from ._webster_fixture import _webster_z_bar_operator
 
-    d = load_webster_seed_set(0)
-    c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
+    data = load_webster_seed_set(0)
+    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     if basis is Pauli.X:
-        op = _webster_x_bar_operator(d, "X_bar_1")
+        op = _webster_x_bar_operator(data, "X_bar_1")
     else:
-        op = _webster_z_bar_operator(d, "Z_bar_1")
-    g = build_gadget(c, op, basis=basis)
-    boosted = boost_gadget(g, method="combinatorial", target=1.0, seed=0)
+        op = _webster_z_bar_operator(data, "Z_bar_1")
+    g = build_gadget(code, op, basis=basis)
+    boosted = boost_gadget(g, method=method, target=1.0, seed=0)
     product = (boosted.HX_merged @ boosted.HZ_merged.T) % 2
     assert np.array_equal(product, np.zeros_like(product))
     assert boosted.basis is basis  # boost preserves basis
