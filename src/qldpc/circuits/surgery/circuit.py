@@ -128,7 +128,7 @@ def _surgery_qubit_coordinates(
 ) -> stim.Circuit:
     """Emit QUBIT_COORDS in surgery's per-role semantic lane layout.
 
-    Symbols: V₀ → support; ancillas Q' → Q_prime; S'_meas rows (= S_X'); S'_comp rows (= H_Z' gauge G).
+    Symbols: V₀ → support; ancillas Q' → Q_prime; S'_meas rows (= S_X'); S'_comp rows (= ∂_0).
 
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
@@ -477,16 +477,16 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
     # H̃_X^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
     #   row-block 0: H_X^(l) data check rows       (cols: Q_l)
     #   row-block 1: H_X^(r) data check rows       (cols: Q_r)
-    #   row-block 2: S_X'^l rows = [f_X'^l | H_X'^l | Π_l labels]  (cols: Q_l, Q'_l, 𝒜)
-    #   row-block 3: S_X'^r rows = [f_X'^r | H_X'^r | Π_r labels]  (cols: Q_r, Q'_r, 𝒜)
+    #   row-block 2: S_X'^l rows = [f_1^{l,T} | ∂_1^l | Π_l labels]  (cols: Q_l, Q'_l, 𝒜)
+    #   row-block 3: S_X'^r rows = [f_1^{r,T} | ∂_1^r | Π_r labels]  (cols: Q_r, Q'_r, 𝒜)
     M_meas = np.zeros(
         (m_meas_l_data + m_meas_r_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_meas[:m_meas_l_data, cl_data] = M_meas_l[:m_meas_l_data, :n_l]
     M_meas[m_meas_l_data : m_meas_l_data + m_meas_r_data, cr_data] = M_meas_r[:m_meas_r_data, :n_r]
-    S_prime_l = M_meas_l[m_meas_l_data:, :]  # S_X'^l rows = [f_X'^l | H_X'^l]
-    S_prime_r = M_meas_r[m_meas_r_data:, :]  # S_X'^r rows = [f_X'^r | H_X'^r]
+    S_prime_l = M_meas_l[m_meas_l_data:, :]  # S_X'^l rows = [f_1^{l,T} | ∂_1^l]
+    S_prime_r = M_meas_r[m_meas_r_data:, :]  # S_X'^r rows = [f_1^{r,T} | ∂_1^r]
     meas_start = m_meas_l_data + m_meas_r_data
     M_meas[meas_start : meas_start + len(g_l.support), cl_data] = S_prime_l[:, :n_l]
     M_meas[meas_start : meas_start + len(g_l.support), Ql_prime] = S_prime_l[:, n_l:]
@@ -500,8 +500,8 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
             M_meas[meas_start + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
     # H̃_Z^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
-    #   row-block 0: H_Z^(l) data check rows + f_Z^(l) ext. onto Q'_l  (cols: Q_l, Q'_l)
-    #   row-block 1: H_Z^(r) data check rows + f_Z^(r) ext. onto Q'_r  (cols: Q_r, Q'_r)
+    #   row-block 0: H_Z^(l) data check rows + f_0^(l) ext. onto Q'_l  (cols: Q_l, Q'_l)
+    #   row-block 1: H_Z^(r) data check rows + f_0^(r) ext. onto Q'_r  (cols: Q_r, Q'_r)
     #   row-block 2: G_l gauge rows                                      (cols: Q'_l)
     #   row-block 3: G_r gauge rows                                      (cols: Q'_r)
     #   row-block 4: bridge cycle rows [T_l | T_r | H_R]                (cols: Q'_l, Q'_r, 𝒜)
@@ -573,15 +573,15 @@ def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
 
     # H̃_X^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
     #   row-block 0: H_X data check rows (shared)                     (cols: Q)
-    #   row-block 1: S_X'^l rows = [f_X'^l | H_X'^l | Π_l labels]   (cols: Q, Q'_l, 𝒜)
-    #   row-block 2: S_X'^r rows = [f_X'^r | H_X'^r | Π_r labels]   (cols: Q, Q'_r, 𝒜)
+    #   row-block 1: S_X'^l rows = [f_1^{l,T} | ∂_1^l | Π_l labels]   (cols: Q, Q'_l, 𝒜)
+    #   row-block 2: S_X'^r rows = [f_1^{r,T} | ∂_1^r | Π_r labels]   (cols: Q, Q'_r, 𝒜)
     M_meas = np.zeros(
         (m_meas_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_meas[:m_meas_data, c_data] = M_meas_l[:m_meas_data, :n]  # shared
-    S_prime_l = M_meas_l[m_meas_data:, :]  # S_X'^l rows = [f_X'^l | H_X'^l]
-    S_prime_r = M_meas_r[m_meas_data:, :]  # S_X'^r rows = [f_X'^r | H_X'^r]
+    S_prime_l = M_meas_l[m_meas_data:, :]  # S_X'^l rows = [f_1^{l,T} | ∂_1^l]
+    S_prime_r = M_meas_r[m_meas_data:, :]  # S_X'^r rows = [f_1^{r,T} | ∂_1^r]
     M_meas[m_meas_data : m_meas_data + len(g_l.support), c_data] = S_prime_l[:, :n]
     M_meas[m_meas_data : m_meas_data + len(g_l.support), Ql_prime] = S_prime_l[:, n:]
     M_meas[m_meas_data + len(g_l.support) :, c_data] = S_prime_r[:, :n]
@@ -594,7 +594,7 @@ def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
             M_meas[m_meas_data + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
     # H̃_Z^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
-    #   row-block 0: H_Z data check rows + f_Z^(l) onto Q'_l + f_Z^(r) onto Q'_r
+    #   row-block 0: H_Z data check rows + f_0^(l) onto Q'_l + f_0^(r) onto Q'_r
     #                                                         (cols: Q, Q'_l, Q'_r)
     #   row-block 1: G_l gauge rows                           (cols: Q'_l)
     #   row-block 2: G_r gauge rows                           (cols: Q'_r)

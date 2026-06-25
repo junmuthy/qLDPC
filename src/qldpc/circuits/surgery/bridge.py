@@ -26,9 +26,9 @@ class Bridge:
     For each side s ∈ {l, r}, the SkipTree (Swaroop et al. arXiv:2410.03628 §III)
     produces a matrix T_s and a permutation P_{σ_s} acting on the port 𝒫_s.
     The port-label block π_{𝒫_s}^T P_{σ_s} selects and reorders the port columns
-    of the augmented incidence matrix H_X'^{s,aug}, satisfying the SkipTree identity:
+    of the augmented incidence matrix ∂_1^{s,aug}, satisfying the SkipTree identity:
 
-        T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
+        T_s (∂_1^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
 
     where H_R is the canonical repetition-code parity-check matrix stored in
     ``Bridge.H_R``.  This identity guarantees CSS commutation between the adapter
@@ -100,7 +100,7 @@ def _skip_tree(
 
     where G is the graph incidence matrix and H_R is the canonical rep-code
     parity-check matrix.  The port-label block π_{𝒫_s}^T P_{σ_s} selects
-    port columns of the augmented incidence H_X'^{s,aug} and reorders them to
+    port columns of the augmented incidence ∂_1^{s,aug} and reorders them to
     match H_R's column convention.
     """
     n = S.number_of_nodes()
@@ -353,10 +353,10 @@ def _run_skiptree_on_port_subgraph(
 
     The result satisfies the SkipTree identity on the port subgraph:
 
-        T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
+        T_s (∂_1^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
 
     where π_{𝒫_s} is the port-selection matrix (rows = port vertices of
-    H_X'^{s,aug}) and P_{σ_s} is the permutation returned by ``_skip_tree``
+    ∂_1^{s,aug}) and P_{σ_s} is the permutation returned by ``_skip_tree``
     encoding the SkipTree label assignment σ_s.
 
     Returns (T_full, labels) where T_full has shape (w-1, F_aug.shape[0]) and
@@ -449,9 +449,9 @@ def build_bridge(
       4. Run SkipTree (Swaroop et al. arXiv:2410.03628 §III) on the spanning
          tree of the port subgraph, yielding T_s and permutation P_{σ_s}.
          The port-label block π_{𝒫_s}^T P_{σ_s} selects and reorders port
-         columns of H_X'^{s,aug}, satisfying the SkipTree identity:
+         columns of ∂_1^{s,aug}, satisfying the SkipTree identity:
 
-             T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
+             T_s (∂_1^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
 
       5. Rebuild augmented gadgets g_l_aug / g_r_aug from the combined extras.
 
