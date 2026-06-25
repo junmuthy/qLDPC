@@ -56,8 +56,6 @@ class _YCtx:
     # Logical-representative column support (flat column indices into data qubits).
     x_cols: tuple[int, ...]
     z_cols: tuple[int, ...]
-    # Cross-phase values populated by _y_emit_obs0; consumed by the benchmark_y block.
-    obs0_recs: list = dataclasses.field(default_factory=list)
 
 
 def _steane_logical_y_eigenstate_prep(
@@ -313,7 +311,6 @@ def _y_qec_cycle(
     *,
     data_init: str | None,
     rounds: int,
-    benchmark_y: bool,
 ) -> tuple[stim.Circuit, MeasurementRecord, dict[int, int], dict[int, Pauli]]:
     """Emit the split X/Z/Y multi-round QEC schedule and return the circuit +
     measurement record.
@@ -450,18 +447,8 @@ def _y_qec_cycle(
         else (Pauli.X if data_init in ("+", "X-") else Pauli.Z)
     )
     qubit_final_meas: dict[int, Pauli] = {}
-    if benchmark_y:
-        # Destructive Ȳ readout (obs1): the obs0-product support on data is
-        # X on V_X (data_x), Z on V_Z (data_z), Y on W (data_y); other data → Z.
-        _bx = set(yg.obs0_readout.data_x)
-        _by = set(yg.obs0_readout.data_y)
-        for col, qid in enumerate(real_data_ids):
-            qubit_final_meas[qid] = (
-                Pauli.X if col in _bx else (Pauli.Y if col in _by else Pauli.Z)
-            )
-    else:
-        for qid in real_data_ids:
-            qubit_final_meas[qid] = data_final_pauli
+    for qid in real_data_ids:
+        qubit_final_meas[qid] = data_final_pauli
     for qid in kx_ids:
         qubit_final_meas[qid] = Pauli.Z
     for qid in kz_ids:
@@ -531,10 +518,8 @@ def _y_qec_cycle(
 
 def _y_detach_and_readout(
     ctx: _YCtx,
-    yg: YGadgetLayout,
     *,
     data_init: str | None,
-    benchmark_y: bool,
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
     """Emit mixed-basis MX/M/MY destructive readout of all qubits.
@@ -543,8 +528,7 @@ def _y_detach_and_readout(
       * κ_x ancillas → M (read in Z).
       * κ_z ancillas → MX (read in X).
       * SHIFT_COORDS tick.
-      * Data qubits → basis matching ``data_init`` (Y± → MY, X± → MX, Z± → M)
-        unless ``benchmark_y`` is set (then mixed MX/MY/M per obs0-readout plan).
+      * Data qubits → basis matching ``data_init`` (Y± → MY, X± → MX, Z± → M).
 
     Mutates ``measurement_record`` in-place with the new measurement slots.
     Returns the new circuit fragment.
@@ -563,27 +547,13 @@ def _y_detach_and_readout(
         circuit.append("MX", list(kz_ids))  # Z-system ancilla read in X
         measurement_record.append({q: i for i, q in enumerate(kz_ids)})
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
-    if benchmark_y:
-        # Per-qubit destructive Ȳ readout: MX on V_X, MY on W, M (Z) on the rest.
-        _bx = set(yg.obs0_readout.data_x)
-        _by = set(yg.obs0_readout.data_y)
-        mx_qids = [qid for col, qid in enumerate(real_data_ids) if col in _bx]
-        my_qids = [qid for col, qid in enumerate(real_data_ids) if col in _by]
-        mz_qids = [
-            qid for col, qid in enumerate(real_data_ids) if col not in _bx and col not in _by
-        ]
-        for op, qids in (("MX", mx_qids), ("MY", my_qids), ("M", mz_qids)):
-            if qids:
-                circuit.append(op, qids)
-                measurement_record.append({q: i for i, q in enumerate(qids)})
-    else:
-        data_meas_op = (
-            "MY"
-            if data_init in ("Y+", "Y-")
-            else ("MX" if data_init in ("+", "X-") else "M")
-        )
-        circuit.append(data_meas_op, list(real_data_ids))
-        measurement_record.append({q: i for i, q in enumerate(real_data_ids)})
+    data_meas_op = (
+        "MY"
+        if data_init in ("Y+", "Y-")
+        else ("MX" if data_init in ("+", "X-") else "M")
+    )
+    circuit.append(data_meas_op, list(real_data_ids))
+    measurement_record.append({q: i for i, q in enumerate(real_data_ids)})
 
     return circuit
 
@@ -762,8 +732,6 @@ def _y_emit_obs0(
         if obs0_recs and _observable_is_deterministic(circuit, obs0_recs):
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
 
-    # Store obs0_recs in ctx for benchmark_y block (which XORs obs0 ⊕ obs1).
-    ctx.obs0_recs = obs0_recs
 
 
 def _y_emit_survivor_memory(
@@ -795,9 +763,8 @@ def _y_emit_survivor_memory(
     # observable — the standard decodability check of the surgery (Ide, Gowda,
     # Nadkarni, Dauphinais arXiv:2410.02753 §III.C). This sidesteps the random Ȳ
     # outcome (obs0 stays gated off) by scoring a survivor instead. Gated on
-    # ``data_init is None`` — mutually exclusive with the Y+/Y- obs0/obs1
-    # emissions above — so index 0 is free; emitting there keeps the DEM at
-    # exactly one observable (no phantom always-False obs0/obs1 padding). Gated by
+    # ``data_init is None`` — obs0 is also gated off in this mode — so index 0 is
+    # free; emitting there keeps the DEM at exactly one observable. Gated by
     # determinism, emitted before the noise block so the noise model wraps it.
     if memory_logical is not None and data_init is None:
         LZ = np.asarray(merged_code.get_logical_ops(Pauli.Z)).astype(np.uint8)
@@ -830,7 +797,6 @@ def build_single_y_ppm_circuit(
     data_init: str | None = None,
     memory_logical: int | None = None,
     force_obs0: bool = False,
-    benchmark_y: bool = False,
 ) -> stim.Circuit:
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
@@ -872,9 +838,7 @@ def build_single_y_ppm_circuit(
          stabilizer equal to Ȳ = [x|z] on data), read off the IN-CIRCUIT last-
          QEC-round ancilla outcomes of the picked rows (the fault-tolerant
          readout); emitted ONLY when that in-circuit XOR is deterministic on the
-         prepared state (gated by ``_observable_is_deterministic``). obs1 reads
-         the SAME product off the final destructive readouts (``yg.obs0_readout``)
-         as a noiseless cross-check.
+         prepared state (gated by ``_observable_is_deterministic``).
 
     ``data_init`` options — the six logical Pauli-basis eigenstates, named by the
     operator they are a ± eigenstate of:
@@ -891,9 +855,9 @@ def build_single_y_ppm_circuit(
     ``memory_logical`` (survivor-memory mode). The Ȳ-on-q0 measurement preserves
     the other logicals of the code; their Z̄ are deterministic on the |0̄…0̄⟩ prep
     (``data_init=None``). When ``memory_logical`` is an int and ``data_init is
-    None``, this emits a single ``OBSERVABLE_INCLUDE`` (index 0 — obs0/obs1 are
-    gated off in this mode, so the DEM carries exactly one observable) tracking
-    the ``memory_logical``-th merged-code Z-logical as a surviving logical-memory
+    None``, this emits a single ``OBSERVABLE_INCLUDE`` (index 0 — obs0 is gated
+    off in this mode, so the DEM carries exactly one observable) tracking the
+    ``memory_logical``-th merged-code Z-logical as a surviving logical-memory
     observable read off the final destructive readouts.
     This is the standard logical-memory decodability check of the surgery (Ide,
     Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C): it sidesteps the random
@@ -934,10 +898,8 @@ def build_single_y_ppm_circuit(
     ``_observable_is_deterministic`` gates obs0 OFF unless ``force_obs0`` is set.
     The bare product equals Ȳ = iX̄Z̄ EXACTLY (for Steane ``[x | z] = X₂X₄Z₁Z₃Y₅``
     and ``iX̄Z̄ = +X₂X₄Z₁Z₃Y₅``), so the raw obs0 bit is the Ȳ eigenvalue bit:
-    obs0 = 0 ↔ Ȳ = +1 (|Ȳ+⟩), obs0 = 1 ↔ Ȳ = −1 (|Ȳ-⟩). The complementary obs1
-    reads the SAME product off the final destructive readouts (V_X data MX ⊕ V_Z
-    data M ⊕ W data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check. The
-    per-system Cheeger boost
+    obs0 = 0 ↔ Ȳ = +1 (|Ȳ+⟩), obs0 = 1 ↔ Ȳ = −1 (|Ȳ-⟩). The per-system Cheeger
+    boost
     (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
     docs/superpowers/docs/main.tex §4.7) is the FAULT-DISTANCE refinement, applied
     inside ``build_y_gadget``; it is not needed for this readout.
@@ -945,33 +907,23 @@ def build_single_y_ppm_circuit(
     # Alias resolution (backward-compatible names; must happen before _y_state_prep).
     data_init = {"Z+": None, "X+": "+"}.get(data_init, data_init)
 
-    if sum([bool(force_obs0), memory_logical is not None, bool(benchmark_y)]) > 1:
+    if sum([bool(force_obs0), memory_logical is not None]) > 1:
         raise ValueError(
-            "force_obs0, memory_logical, benchmark_y each use observable index 0; set at most one"
-        )
-    if benchmark_y and data_init in ("Y+", "Y-"):
-        raise ValueError(
-            "benchmark_y reads Ȳ without a Ȳ-eigenstate prep; use a Z̄/X̄ basis "
-            "data_init (None/'Z+', 'Z-', '+'/'X+', 'X-')"
+            "force_obs0 and memory_logical each use observable index 0; set at most one"
         )
 
     # --- Phase 1: QUBIT_COORDS + state prep -----------------------------------
     circuit, ctx = _y_state_prep(yg, data_init=data_init)
-    real_data_ids = ctx.real_data_ids
-    kx_ids = ctx.kx_ids
-    kz_ids = ctx.kz_ids
-    n_code = ctx.n_code
-    k_x = ctx.k_x
 
     # --- Phase 2: split X/Z/Y QEC cycle (H̃ blocks 1,2 / 4,5 / 3) ------------
     qec_circuit, measurement_record, row_to_check, qubit_final_meas = _y_qec_cycle(
-        ctx, yg, data_init=data_init, rounds=rounds, benchmark_y=benchmark_y
+        ctx, yg, data_init=data_init, rounds=rounds
     )
     circuit += qec_circuit
 
     # --- Phase 3: detach + destructive readout --------------------------------
     readout_circuit = _y_detach_and_readout(
-        ctx, yg, data_init=data_init, benchmark_y=benchmark_y,
+        ctx, data_init=data_init,
         measurement_record=measurement_record,
     )
     circuit += readout_circuit
@@ -990,52 +942,6 @@ def build_single_y_ppm_circuit(
         data_init=data_init, force_obs0=force_obs0,
         measurement_record=measurement_record,
     )
-    obs0_recs: list[stim.GateTarget] = ctx.obs0_recs
-
-    # --- benchmark_y: obs0 ⊕ obs1 (surgery Ȳ readout vs destructive Ȳ readout) --
-    # Direct benchmark of the Ȳ MEASUREMENT itself (Ide, Gowda, Nadkarni,
-    # Dauphinais arXiv:2410.02753 §III.C): obs0 reads Ȳ off the in-circuit checks;
-    # obs1 reads the SAME §III.C product (``yg.obs0_readout``) off the per-qubit
-    # destructive Ȳ readout (data_x → MX, data_z → M, data_y → MY; κ_x → M, κ_z →
-    # MX). Each alone is a random 50/50 outcome on a non-Ȳ-eigenstate prep, but
-    # their XOR is DETERMINISTIC (both equal Ȳ) — so it compiles to a DEM and a
-    # decoder scores P(obs0 ≠ obs1) = the measurement logical error rate. No Ȳ
-    # eigenstate prep is required (any input state works).
-    if benchmark_y:
-        plan = yg.obs0_readout
-        bench_recs: list[stim.GateTarget] = list(obs0_recs)
-        for q in (*plan.data_x, *plan.data_z, *plan.data_y):
-            bench_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
-        for q in plan.kx_z:
-            bench_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
-        for q in plan.kz_x:
-            bench_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
-        circuit.append("OBSERVABLE_INCLUDE", bench_recs, 0)
-
-    # --- obs1: destructive cross-check (NOT a physical protocol) ----------------
-    # Read the SAME §III.C product (``yg.obs0_readout``) off the FINAL DESTRUCTIVE
-    # readouts. With the literal ``[x | z]`` Ȳ representative the data support is
-    # MIXED: V_X data → MX, V_Z data → M, W data → MY; κ_x Z-support → M, κ_z
-    # X-support → MX (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
-    # This destructively collapses the data, so it is not the fault-tolerant
-    # readout; it is the noiseless cross-check sibling of ``_surgery_observable``'s
-    # obs1. It reads the SAME Ȳ = [x | z] product as obs0, so its raw bit is the
-    # same Ȳ eigenvalue (Y+ → 0, Y- → 1). It is emitted only when its destructive
-    # basis matches the readout — with the all-MY Y±-eigenstate readout the V_X/V_Z
-    # records are measured in Y, not X/Z, so it is gated OFF (``benchmark_y`` is the
-    # working destructive cross-check, splitting the readout MX/MY/M). Keep obs1
-    # only as a cross-check; for any LER/noisy run keep ONLY obs0.
-    if data_init in ("Y+", "Y-"):
-        plan = yg.obs0_readout
-        obs1_recs: list[stim.GateTarget] = []
-        for q in (*plan.data_x, *plan.data_z, *plan.data_y):  # V_X→MX, V_Z→M, W→MY
-            obs1_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
-        for q in plan.kx_z:  # κ_x column q, read M (Z)
-            obs1_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
-        for q in plan.kz_x:  # κ_z column q, read MX (X)
-            obs1_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
-        if obs1_recs and _observable_is_deterministic(circuit, obs1_recs):
-            circuit.append("OBSERVABLE_INCLUDE", obs1_recs, 1)
 
     # --- Phase 5b: survivor-memory observable ---------------------------------
     if memory_logical is not None and data_init is None:

@@ -18,8 +18,8 @@ from .circuit import (
     keep_only_observable,
     logical_state_init,
 )
-from .y_circuit import build_single_y_ppm_circuit
 from .gadget import GadgetLayout, build_gadget
+from .y_circuit import build_single_y_ppm_circuit
 from .y_gadget import YGadgetLayout, build_y_gadget
 
 __all__ = [
