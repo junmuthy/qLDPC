@@ -15,18 +15,6 @@ import stim
 from qldpc.circuits.surgery.y_gadget import _steane_y_pair, build_y_gadget
 
 
-def test_single_y_circuit_builds_and_compiles() -> None:
-    """Single-Y PPM circuit builds and compiles to a DEM (Y+ prep)."""
-    from qldpc.circuits.surgery import build_single_y_ppm_circuit
-
-    code, x, z = _steane_y_pair()
-    yg = build_y_gadget(code, x=x, z=z)
-    circuit = build_single_y_ppm_circuit(yg, rounds=3, data_init="Y+")
-    assert isinstance(circuit, stim.Circuit)
-    dem = circuit.detector_error_model()
-    assert dem is not None
-
-
 @pytest.mark.parametrize("data_init", [None, "Y+", "Y-"])
 @pytest.mark.parametrize("rounds", [1, 3])
 def test_single_y_circuit_compiles_all_inits(data_init: str | None, rounds: int) -> None:
@@ -99,7 +87,8 @@ def test_single_y_steane_obs0_deterministic_on_eigenstate() -> None:
             ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
         ]
         assert len(obs_lines) == 1, "obs0 must be emitted on a deterministic Ȳ eigenstate"
-        raw = circuit.compile_sampler().sample(shots=4000).astype(np.uint8)
+        # Deterministic ⇒ a handful of shots suffices (every shot is identical).
+        raw = circuit.compile_sampler().sample(shots=8).astype(np.uint8)
         n_meas = raw.shape[1]
         offs = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
         obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1)
@@ -107,15 +96,19 @@ def test_single_y_steane_obs0_deterministic_on_eigenstate() -> None:
         assert frac == want, f"data_init={data_init!r}: P(obs0=1)={frac}, expected {want}"
 
 
-def test_single_y_noiseless_random_outcome_on_0_and_plus() -> None:
-    """Noiseless Ȳ on |0̄⟩ / |+̄⟩ is a genuine 50/50 measurement (``force_obs0``).
+def test_single_y_outcome_nondeterministic_on_0_and_plus() -> None:
+    """Noiseless Ȳ on |0̄⟩ / |+̄⟩ is a genuine (non-deterministic) measurement.
 
     Ȳ = iX̄Z̄ anticommutes with Z̄ (on |0̄⟩) and with X̄ (on |+̄⟩), so the noiseless
-    readout outcome is maximally random. obs0 is non-deterministic here (the DEM
-    does not compile), so we raw-sample the forced obs0 and check it is ~50/50.
+    readout outcome is maximally random. Deterministic proof: build the circuit
+    with the forced Ȳ readout observable (``force_obs0``) and assert stim REFUSES
+    to compile a detector_error_model — it raises ``ValueError`` ("non-deterministic
+    observables"). This is the structural signature of a 50/50 measurement (no
+    sampling). Contrast with a Ȳ-eigenstate prep (``data_init="Y±"``), on which
+    the same ``force_obs0`` path DOES compile — see the Steane obs0 test above —
+    so the assertion below is not trivially true. Ide, Gowda, Nadkarni,
+    Dauphinais arXiv:2410.02753 §III.C.
     """
-    import numpy as np
-
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
     from qldpc.circuits.surgery.y_gadget import _bb_y_pair
 
@@ -129,12 +122,9 @@ def test_single_y_noiseless_random_outcome_on_0_and_plus() -> None:
             ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
         ]
         assert len(obs_lines) == 1, "force_obs0 should emit exactly one obs0 observable"
-        raw = circuit.compile_sampler().sample(shots=4000).astype(np.uint8)
-        n_meas = raw.shape[1]
-        offs = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
-        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1)
-        frac = float(obs0.mean())
-        assert 0.4 < frac < 0.6, f"data_init={data_init!r}: P(obs0=1)={frac:.3f}, expected ~0.5"
+        # Non-deterministic Ȳ outcome ⇒ stim refuses the observable in the DEM.
+        with pytest.raises(ValueError, match="non-deterministic observable"):
+            circuit.detector_error_model()
 
 
 def test_single_y_force_obs0_conflicts_with_memory_logical() -> None:

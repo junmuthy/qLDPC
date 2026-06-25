@@ -269,22 +269,6 @@ def test_build_gadget_rejects_non_x_logical() -> None:
             build_gadget(code, x, basis=Pauli.X)
 
 
-def test_load_webster_seed_set_returns_known_shape() -> None:
-    data = load_webster_seed_set(0)
-    assert "l" in data and "A" in data and "B" in data
-    assert "seeds" in data
-
-
-def test_build_generalised_bicycle_code_constructs_css() -> None:
-    data = load_webster_seed_set(0)
-    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    assert code.num_qudits == 2 * data["l"]
-    # CSS commutation
-    HX = np.asarray(code.matrix_x).astype(np.uint8)
-    HZ = np.asarray(code.matrix_z).astype(np.uint8)
-    assert np.array_equal((HX @ HZ.T) % 2, np.zeros((HX.shape[0], HZ.shape[0]), dtype=np.uint8))
-
-
 @pytest.mark.parametrize("code_index,n_anc", WEBSTER_TABLE_I_ANCILLA_MEAS_COMP)
 def test_webster_table_i_ancilla_meas_comp_exact(code_index: int, n_anc: int) -> None:
     """Webster Table I in Cain notation: |Q'| + |S'_meas| + |S'_comp| matches

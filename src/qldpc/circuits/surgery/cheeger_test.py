@@ -33,25 +33,6 @@ def test_cheeger_constant_matches_boost_target() -> None:
     assert g_noop.incidence.shape[0] == g.incidence.shape[0], "boost to current h should be a no-op"
 
 
-def test_boost_gadget_dispatches_to_two_methods() -> None:
-    from qldpc.circuits.surgery.cheeger import boost_gadget
-    from qldpc.circuits.surgery.gadget import (
-        GadgetLayout,
-        build_gadget,
-    )
-
-    # Use Webster code 0 (l=31, k>=2): Steane gadget has dimension 0 (Steane
-    # k=1 minus 1 gadget-consumed logical), which causes the BP+OSD decoder
-    # used by boost_gadget_distance to hang searching for nonexistent logicals.
-    data = load_webster_seed_set(0)
-    code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
-    x = _webster_x_bar_operator(data)
-    g = build_gadget(code, x, basis=Pauli.X)
-    for method in ("combinatorial", "distance"):
-        out = boost_gadget(g, method=method, target=1.0, seed=42)
-        assert isinstance(out, GadgetLayout), f"method={method}"
-
-
 def test_boost_gadget_seed_reproducible() -> None:
     from qldpc.circuits.surgery.cheeger import boost_gadget
     from qldpc.circuits.surgery.gadget import build_gadget

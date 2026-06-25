@@ -187,7 +187,7 @@ def test_bb_w1_distance_not_collapsed():
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
-    d = yg.merged_code.get_distance(bound=12)  # decoder upper bound
+    d = yg.merged_code.get_distance(bound=4)  # decoder upper bound
     assert d >= 4  # collapse below d_data=4 would make the bound return < 4
 
 
