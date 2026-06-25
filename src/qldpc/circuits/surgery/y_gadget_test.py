@@ -208,3 +208,16 @@ def test_h_sym_rows_in_h_tilde_block_order() -> None:
     # block 3 (Y on W) is mixed and follows the pure-X blocks
     y0 = m_x + (yg.g_x.HX_merged.shape[0] - m_x - n_w)  # m_x + |V_X|
     assert (xparts[y0 : y0 + n_w] & zparts[y0 : y0 + n_w]).all(), "block 3 not mixed"
+    # blocks 4+5 (H_Z pure-Z, χ_Z on V_Z pure-Z) start immediately after Y
+    m_z = code.matrix_z.shape[0]
+    v_z = yg.g_z.HZ_merged.shape[0] - m_z - n_w  # |V_Z|
+    z45_start = y0 + n_w
+    z45_end = z45_start + m_z + v_z  # exclusive
+    assert not xparts[z45_start:z45_end].any(), "blocks 4+5 not pure-Z"
+    assert zparts[z45_start:z45_end].all(), "blocks 4+5 not all-Z"
+    # block 6 (∂₀ cycle rows) is last; for |W|=1 there is 1 pure-Z cycle row
+    # (crossing cycles only arise at |W|≥3); the entire tail after blocks 4+5 is pure-Z
+    n_rows = H.shape[0]
+    if z45_end < n_rows:
+        assert not xparts[z45_end:].any(), "block 6 tail has unexpected X-part"
+        assert zparts[z45_end:].all(), "block 6 tail has unexpected non-Z rows"

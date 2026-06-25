@@ -733,7 +733,6 @@ def _y_emit_obs0(
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
 
 
-
 def _y_emit_survivor_memory(
     ctx: _YCtx,
     circuit: stim.Circuit,
