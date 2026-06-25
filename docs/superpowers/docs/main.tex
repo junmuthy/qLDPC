@@ -37,15 +37,15 @@ The next question is how to construct the lattice surgery? First we start with t
 \begin{equation}
     \tilde{H}_X = \begin{pmatrix}
         H_X & 0 \\
-        f_X' & H_X'
+        f_1^T & \partial_1
     \end{pmatrix},
     \qquad 
     \tilde{H}_Z=\begin{pmatrix}
-        H_Z & f_Z \\
-        0 & H_Z'
+        H_Z & f_0 \\
+        0 & \partial_0
     \end{pmatrix}.
 \end{equation}
-The goal is to provide the universal construction for these extra matrix element $f_X', H_X', f_Z, H_Z'$.
+The goal is to provide the universal construction for these extra matrix element $f_1, \partial_1, f_0, \partial_0$.
 
 The gadget construction is associated with the chosen logical operator. For a logical-$\bar X$ representative with support
   $x \in \mathbb{F}_2^n$ satisfying $H_Z x = 0$. We can defined several space. First, set $V_0$ is the physical qubit that logical operator $\bar{X}$ has support
@@ -62,9 +62,9 @@ Based on these two sets, we can define the projection to the sets. For any order
   \end{equation}
   We can find the projection $\pi_S M \pi_T^{T} = M[S,T]$ for arbitary matrix $M$ where $M[S,T]$ is the numpy style index.
   
-  Therefore we can construct a matrix how $Z$ stabilizers overlap with the logical $\bar{X}$, which is  $(H_X')_{i,j} =  (\pi_{V_0} H_Z^T \pi_{C_0}^{T})_{i,j} = (H_Z)_{c_j, v_i}$, with $H_X' \in \mathbb{F}_2^{|V_0|\times|C_0|}$. Beisdes, since the new introduced X stabilizer also should overlap with the original qubit $Q$, we can construct $f_X' = \pi_{V_0} \in \mathbb{F}_2^{|V_0|\times n}$. From here we find that we have $|V_0|$ new $S_X'$ ancilla stabilizer and $C_0$ new $Q'$ anciall qubits.
+  Therefore we can construct a matrix how $Z$ stabilizers overlap with the logical $\bar{X}$, the vertex--edge incidence  $(\partial_1)_{i,j} =  (\pi_{V_0} H_Z^T \pi_{C_0}^{T})_{i,j} = (H_Z)_{c_j, v_i}$, with $\partial_1 \in \mathbb{F}_2^{|V_0|\times|C_0|}$. We take $\partial_1$ in this vertex--edge orientation, so it enters $\tilde H_X$ untransposed; the cited arXiv:2410.02753 Eq.~(62) writes the edge--vertex $\partial_1$ and hence the transpose $\partial_1^T$. Besides, since the new introduced X stabilizer also should overlap with the original qubit $Q$, the data attachment is $f_1^T = \pi_{V_0} \in \mathbb{F}_2^{|V_0|\times n}$ (i.e.\ $f_1 = \pi_{V_0}^T$). From here we find that we have $|V_0|$ new $S_X'$ ancilla stabilizer and $C_0$ new $Q'$ anciall qubits.
 
-  Since we've introduced new ancilla qubits $Q'$, the original $S_Z$ should has more support $f_Z = \pi_{C_0}^T \in \mathbb{F}_2^{m_Z\times  |C_0|}$. Finally, to perform the gauge fixing, we have to introduce extra $S_Z'$ stabilizer $H_Z'$ such that $H_X' H_Z'^T = 0$. This is because we need to fix the extra logical qubits in the introducing of the ancilla qubits. To completely fix the gauge we have $\operatorname{row}( H_Z') =  \ker H_X' \in \mathbb{F}_2^{|C_0|}$. Without introducing $H_Z'$, the logical operator dim is $n+|C_0|-m_X-m_Z-|V_0|$. After introducing the $H_Z'$ with gauge fixing, the dimension is $n+|C_0|-m_X-m_Z-|V_0|-r$, where $r= \dim \operatorname{row} H_Z'=|C_0|-|V_0|+\dim \ker(H_X'^T)$. Therefore the final merged code logical dimension is $k-\dim \ker(H_X'^T)$. In the low-rate surgery we have $\dim \ker(H_X'^T)=1$, because $\ker(H_X'^T) \in \mathbb{F}_2^{|V_0|}$ means the linear independence of the stabilizer $S_X'$ on the ancilla qubits. 
+  Since we've introduced new ancilla qubits $Q'$, the original $S_Z$ should has more support $f_0 = \pi_{C_0}^T \in \mathbb{F}_2^{m_Z\times  |C_0|}$. Finally, to perform the gauge fixing, we have to introduce extra $S_Z'$ stabilizer $\partial_0$ such that $\partial_1 \partial_0^T = 0$. This is because we need to fix the extra logical qubits in the introducing of the ancilla qubits. To completely fix the gauge we have $\operatorname{row}( \partial_0) =  \ker \partial_1 \in \mathbb{F}_2^{|C_0|}$, i.e.\ $\partial_0$ spans the full subspace of ancilla $Z$-operators commuting with the new $X$-stabilizers (this gauge block is written $G$ in arXiv:2410.02753 Eq.~(62) and $\partial_0$ in Eq.~(68); we use $\partial_0 = \ker \partial_1$ throughout). Without introducing $\partial_0$, the logical operator dim is $n+|C_0|-m_X-m_Z-|V_0|$. After introducing the $\partial_0$ with gauge fixing, the dimension is $n+|C_0|-m_X-m_Z-|V_0|-r$, where $r= \dim \operatorname{row} \partial_0=|C_0|-|V_0|+\dim \ker(\partial_1^T)$. Therefore the final merged code logical dimension is $k-\dim \ker(\partial_1^T)$. In the low-rate surgery we have $\dim \ker(\partial_1^T)=1$, because $\ker(\partial_1^T) \in \mathbb{F}_2^{|V_0|}$ means the linear independence of the stabilizer $S_X'$ on the ancilla qubits. 
 
   
   Finally, the merged check matrix is
@@ -100,13 +100,13 @@ Based on these two sets, we can define the projection to the sets. For any order
 
 The new $X$ stabilizer is
   \begin{equation}
- (S_X')_i = \prod_{l=0}^{n-1} X_l^{(f_X')_{i,l}} \prod_{k=0}^{|C_0|-1} X_{\kappa_k}^{(H_X')_{i,k}}, \quad
+ (S_X')_i = \prod_{l=0}^{n-1} X_l^{(f_1^T)_{i,l}} \prod_{k=0}^{|C_0|-1} X_{\kappa_k}^{(\partial_1)_{i,k}}, \quad
   i=0,\dots,|V_0|-1.
   \end{equation}
 
 The exponent on each ancilla $\kappa_k$ in $\prod_i (S_X')_i$ is
   \begin{equation}
-  \sum_{i=0}^{|V_0|-1}(H_X')_{i,k}
+  \sum_{i=0}^{|V_0|-1}(\partial_1)_{i,k}
   = \bigl(\mathbf{1}^T \pi_{V_0} H_Z^T \pi_{C_0}^T\bigr)_k
   = (H_Z x)^T \pi_{C_0}^T \big|_k
   = 0,
@@ -119,16 +119,16 @@ The exponent on each ancilla $\kappa_k$ in $\prod_i (S_X')_i$ is
 
 \subsection{Boost}
 
-So far we have provided a concrete construction of the gadget only specify a logical operator $\bar{X}$ and the original check matrix. However, to make the merged code still has the distance $O(d)$, we have to randomly add more ancilla qubits and checks to obtain a better graph $G(V, E)$. Reading $H_X'$ as a vertex-edge incidence matrix defines an auxiliary
+So far we have provided a concrete construction of the gadget only specify a logical operator $\bar{X}$ and the original check matrix. However, to make the merged code still has the distance $O(d)$, we have to randomly add more ancilla qubits and checks to obtain a better auxiliary graph $G_{\mathrm{aux}}$. Reading $\partial_1$ as a vertex-edge incidence matrix defines an auxiliary
   graph $G_{\mathrm{aux}}$ with the dictionary: vertex $\leftrightarrow$ new $X$-stabilizer $(S_X')_i$,
   edge $\leftrightarrow$ ancilla $Q'$, cycle $\leftrightarrow$ new $Z$-stabilizer $(S_Z')_l$. 
   
   If the extended graph has the cheeger boundary constant $h \geq 1$ with
 \begin{equation}
-  h(G_{\mathrm{aux}}) = \min_{\substack{V \subset V_0 \\ 0 < |SV| \leq |V_0|/2}} |\partial
+  h(G_{\mathrm{aux}}) = \min_{\substack{V \subseteq V_0 \\ 0 < |V| \leq |V_0|/2}} |\partial
   V|/|V| \geq 1,
   \end{equation}
-  where $\partial V \subseteq E_{\mathrm{aux}}$ is the edge cut between $V$ and $V_0 \setminus V$. If initially the condition is not satisfied, we should randomly add weight-$2$ rows to $H_X'$, or equivalently, edges to $G_{\mathrm{aux}}$. Any $Z$-logical of the merged code is then supported on $|V|$ data qubits and
+  where $\partial V \subseteq E_{\mathrm{aux}}$ is the edge cut between $V$ and $V_0 \setminus V$. If initially the condition is not satisfied, we should randomly add weight-$2$ rows to $\partial_1$, or equivalently, edges to $G_{\mathrm{aux}}$. Any $Z$-logical of the merged code is then supported on $|V|$ data qubits and
   $|\partial V| \geq |V|$ ancillas, so its weight is $\Omega(d)$ and the original distance is preserved.
 
 \section{Joint logical PPM: universal adapter}
@@ -137,7 +137,7 @@ So far we have provided a concrete construction of the gadget only specify a log
 
   Given two CSS codes $\mathcal{C}_l$ and $\mathcal{C}_r$ with logical-$\bar X$ representatives $x_l, x_r$,
    we measure the joint Pauli $\bar X_l \otimes \bar X_r$ in a single coherent round. Apply the
-  single-gadget construction on each side to obtain $(V_0^s, C_0^s, f_X^{\prime s}, H_X^{\prime s}, f_Z^s, H_Z^{\prime s})$ with $s \in \{l, r\}$.
+  single-gadget construction on each side to obtain $(V_0^s, C_0^s, f_1^{s}, \partial_1^{s}, f_0^s, \partial_0^{s})$ with $s \in \{l, r\}$.
   
   Introduce a shared adapter $\mathcal{A} = (a_0, \dots, a_{w-1})$ of $w$ qubits carrying the parity-check
   matrix of the canonical $w$-qubit repetition code,
@@ -150,13 +150,13 @@ So far we have provided a concrete construction of the gadget only specify a log
   \subsection{Subroutines}
   We use two certain subroutine in the graph theory to modify the extended graph
   \begin{description}
-  \item[\textsc{Cellulation}.] Augments $H_X^{\prime s}$ with weight-$2$ rows until the port-induced
+  \item[\textsc{Cellulation}.] Augments $\partial_1^{s}$ with weight-$2$ rows until the port-induced
   subgraph of $G_{\mathrm{aux}}^s$ is connected and has bounded basis-cycle length.
-  \item[\textsc{SkipTree}.]     By Swaroop et al.\ Thm.~7, the input is the  the cellulated port subgraph $(H_X^{\prime s,\mathrm{aug}})^T$ and the output is a $(3,2)$-sparse
+  \item[\textsc{SkipTree}.]     By Swaroop et al.\ Thm.~7, the input is the  the cellulated port subgraph $(\partial_1^{s,\mathrm{aug}})^T$ and the output is a $(3,2)$-sparse
   matrix $T_s$ and permutation matrix $P_{\sigma_s}$ with
    \begin{equation}
   \underbrace{T_s}_{(w-1)\times m^s_{\mathrm{aug}}}
-  \Bigg(\underbrace{(H_X^{\prime s,\mathrm{aug}})^T}_{m^s_{\mathrm{aug}}\times|V_0^s|}
+  \Bigg(\underbrace{(\partial_1^{s,\mathrm{aug}})^T}_{m^s_{\mathrm{aug}}\times|V_0^s|}
   \underbrace{\pi_{\mathcal{P}_s}^T}_{|V_0^s|\times w}
   \Bigg)
   \underbrace{P_{\sigma_s}}_{w\times w}
@@ -185,17 +185,17 @@ So far we have provided a concrete construction of the gadget only specify a log
   \begin{pmatrix}
   H_X^l & 0 & 0 & 0 & 0 \\
   0 & H_X^r & 0 & 0 & 0 \\
-  f_X^{\prime l} & 0 & H_X^{\prime l,\mathrm{aug}} & 0 & \pi_{\mathcal{P}_l}^T P_{\sigma_l} \\
-  0 & \pi_{V_0^r} & 0 & H_X^{\prime r,\mathrm{aug}} & \pi_{\mathcal{P}_r}^T P_{\sigma_r}
+  f_1^{l,T} & 0 & \partial_1^{l,\mathrm{aug}} & 0 & \pi_{\mathcal{P}_l}^T P_{\sigma_l} \\
+  0 & f_1^{r,T} & 0 & \partial_1^{r,\mathrm{aug}} & \pi_{\mathcal{P}_r}^T P_{\sigma_r}
   \end{pmatrix},
   \end{equation}
   \begin{equation}
   \tilde H_Z^{\mathrm{joint}} =
   \begin{pmatrix}
-  H_Z^l & 0 & f_Z^l & 0 & 0 \\
-  0 & H_Z^r & 0 & f_Z^r & 0 \\
-  0 & 0 & H_Z^{\prime l,\mathrm{aug}} & 0 & 0 \\
-  0 & 0 & 0 & H_Z^{\prime r,\mathrm{aug}} & 0 \\
+  H_Z^l & 0 & f_0^l & 0 & 0 \\
+  0 & H_Z^r & 0 & f_0^r & 0 \\
+  0 & 0 & \partial_0^{l,\mathrm{aug}} & 0 & 0 \\
+  0 & 0 & 0 & \partial_0^{r,\mathrm{aug}} & 0 \\
   0 & 0 & T_l & T_r & H_R
   \end{pmatrix},
   \end{equation}
@@ -222,26 +222,26 @@ Expand $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T$ as a
   $5 \times 4$ block matrix indexed by the $\tilde H_X$ and $\tilde H_Z$.
   Most blocks are trivially zero. But we consider the extra term $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T[4,:]$, which involves the new introduced bridge check matrix. We find the new term is to invovles the 
   \begin{equation}
-  T_s (H_X^{\prime s,\mathrm{aug}})^T \;+\; H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s}.
+  T_s (\partial_1^{s,\mathrm{aug}})^T \;+\; H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s}.
   \end{equation}
   The SkipTree identity is
   \begin{equation}
-  T_s (H_X^{\prime s,\mathrm{aug}})^T \pi_{\mathcal{P}_s}^T = H_R\, P_{\sigma_s}^T.
+  T_s (\partial_1^{s,\mathrm{aug}})^T \pi_{\mathcal{P}_s}^T = H_R\, P_{\sigma_s}^T.
   \end{equation}
   Because
-  $T_s (H_X^{\prime s,\mathrm{aug}})^T$ is already zero on non-port columns of
+  $T_s (\partial_1^{s,\mathrm{aug}})^T$ is already zero on non-port columns of
   $V_0^s$, multiplying both sides on the right by $\pi_{\mathcal{P}_s}$ recovers
   the full matrix,
   \begin{equation}
-  T_s (H_X^{\prime s,\mathrm{aug}})^T = H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s},
+  T_s (\partial_1^{s,\mathrm{aug}})^T = H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s},
   \end{equation}
   so the two terms in the block are equal and cancel in $\mathbb{F}_2$. Therefore $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T = 0$.
 
   \subsection{Joint logical}
   Multiplying all $w-1$ bridge $X$-stabilizers cancels at every adapter qubit, since each $a_j$ appears in exactly
-  two consecutive rows of $H_R$ and every internal $H_X'^{s,\text{aug}}$ row, leaving
+  two consecutive rows of $H_R$ and every internal $\partial_1^{s,\mathrm{aug}}$ row, leaving
   \begin{equation}
-  \prod_{s=l,r}\prod_{i=0}^{|V_0|-1} (S_{X}'^s)_i = 
+  \prod_{s=l,r}\prod_{i=0}^{|V_0^s|-1} (S_{X}'^s)_i = 
    \bar X_l \otimes \bar X_r,
   \end{equation}
   so syndrome measurement returns the value of the joint Pauli.
@@ -253,452 +253,239 @@ Expand $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T$ as a
   h(G_{\mathrm{aux}}^s|_{\mathcal{P}_s}) = \min_{\substack{V \subseteq \mathcal{P}_s \\ 0 < |V| \leq w/2}} \frac{|\partial V|}{|V|}
   \;\geq\; 1,
   \end{equation}
-  achieved by randomized weight-$2$ boost rows in $H_X^{\prime s}$. The adapter $\mathcal{A}$ contributes a
+  achieved by randomized weight-$2$ boost rows in $\partial_1^{s}$. The adapter $\mathcal{A}$ contributes a
    fixed rep-code distance $w$, so we should choose the bridge length $w \geq \min(d_l, d_r)$ to suffice the distance requirement.
 
-\section{Mixed-basis joint PPM via cross-merge}
+\section{Single logical mixed-Pauli PPM: system merge}
 
-The same-basis construction of \S 3 measures $\bar X_l\otimes \bar X_r$ (or, by
-$X\leftrightarrow Z$ symmetry, $\bar Z_l\otimes\bar Z_r$). To measure
-$\bar Z_l\otimes\bar X_r$ (and likewise $\bar X_l\otimes\bar Z_r$), we apply the
-non-CSS merge of Cohen, Kim, Bartlett, Brown (arXiv:2110.10794 \S II.B.2) and
-Webster, Smith, Cohen (arXiv:2511.15989 \S II.B.2), which replaces the
-incompatible $X$-row / $Z$-row pair at each adapter qubit with a single Y-type
-symplectic row.
+To measure a single logical operator $\bar P$ that is a mixture of $\bar X$, $\bar Y$, and
+$\bar Z$ on one CSS code, we introduce \emph{no} $Y$-basis ancilla. Following Ide, Gowda,
+Nadkarni, and Dauphinais (arXiv:2410.02753, \S III D, Eqs.~(63)--(68)), we run the
+single-gadget construction of \S 2 twice---once for the $X$-part and once, in the dual basis,
+for the $Z$-part---and \emph{merge} the few stabilizer pairs that anticommute into single
+non-CSS rows. The $X/Z$ mixing then lives in a \emph{check}, not in a qubit's state, so every
+ancilla stays in a CSS eigenstate.
 
 \subsection{Setup}
-Run the single-gadget construction of \S 2 \emph{independently} on each side
-with opposite bases:
+Write $\bar P$ through two binary representatives $x, z \in \mathbb{F}_2^n$ (the $\bar X$- and
+$\bar Z$-shadows) with $H_Z x = 0$ and $H_X z = 0$. Up to an overall phase
+$\bar P \propto \bar X \bar Z$, where $\bar X = \prod_v X_v^{x_v}$ and
+$\bar Z = \prod_v Z_v^{z_v}$. The physical support splits into three disjoint sets,
 \begin{equation}
-V_0^l = \mathrm{supp}(z_l),\ C_0^l = \{j:(H_X^l)_{j,V_0^l}\neq 0\}\ \text{(Z-gadget on left)},
+V_X = \mathrm{supp}(x)\setminus\mathrm{supp}(z), \quad
+V_Z = \mathrm{supp}(z)\setminus\mathrm{supp}(x), \quad
+W   = \mathrm{supp}(x)\cap\mathrm{supp}(z),
 \end{equation}
-\begin{equation}
-V_0^r = \mathrm{supp}(x_r),\ C_0^r = \{j:(H_Z^r)_{j,V_0^r}\neq 0\}\ \text{(X-gadget on right)}.
-\end{equation}
-On the left, the -rows $(S_Z^{\prime l})_i$ are $Z$-type; on the right, the
--rows $(S_X^{\prime r})_i$ are $X$-type. The gauges $H_X^{\prime l},
-H_Z^{\prime r}$ are likewise basis-swapped. The adapter $\mathcal{A}$ of width
-$w$ and the SkipTree outputs $(T_l, P_{\sigma_l}, T_r, P_{\sigma_r})$ are built
-as in \S 3, each on its own basis.
+on which $\bar P$ acts as $X$, $Z$, and $Y$ respectively. The pure logical $\bar Y$ is the
+special case $V_X = V_Z = \varnothing$; a single-qubit $\bar Y$ overlap is $|W| = 1$. These three
+sets are not chosen directly: they are fixed by the representatives $x, z$, which are free up to
+$x \to x + (\text{$X$-stabilizer})$ and $z \to z + (\text{$Z$-stabilizer})$ (the same logical
+$\bar P$ up to stabilizers and sign). In particular $W = \mathrm{supp}(x)\cap\mathrm{supp}(z)$ is
+exactly the $Y$-support of $\bar P$. Choose the representatives for low weight and---for fault
+distance---so that $|W|\geq 2$ with both gadget graphs cyclic, which gives genuine crossing cycles
+in the merged graph $\partial_1$ of \S 4.4; the degenerate $|W|=1$ tree-join leaves
+$\ker \partial_1 = \ker\partial_1^{x} \oplus \ker\partial_1^{z}$ pure-CSS and is harder to keep
+distance-preserving.
 
-\subsection{Pre-merge joint check matrices}
-With the per-side data assembled, place all stabilizers in the qubit ordering
-$(Q_l\mid Q_r\mid Q'^l\mid Q'^r\mid \mathcal{A})$ of total size
-$N=n_l+n_r+m^l_{\mathrm{aug}}+m^r_{\mathrm{aug}}+w$. Because the left gadget is
-in the $Z$ basis its $S_Z^{\prime l}$ rows live in $\tilde H_Z$, and its gauge plus cycle
-rows live in $\tilde H_X$; the right gadget is the mirror image. The pre-merge
-block form is
+\subsection{Two gadgets}
+Apply \S 2 to the $\bar X$-shadow $x$ to build the $X$-system: ancilla qubits $Q'^X$ indexed by
+$C_0^X = \{j : (H_Z)_{j, \mathrm{supp}(x)} \neq 0\}$, with the vertex-edge incidence
 \begin{equation}
-\tilde H_X^{\mathrm{joint, pre}} =
+\partial_1^{x} = \pi_{\mathrm{supp}(x)}\, H_Z^T\, \pi_{C_0^X}^T
+\in \mathbb{F}_2^{|\mathrm{supp}(x)| \times |C_0^X|},
+\end{equation}
+which is exactly the single-gadget $\partial_1$ of \S 2, and the $X$-type vertex checks (one per
+$v \in \mathrm{supp}(x)$)
+\begin{equation}
+(S_X')_v = X_v \prod_{k} X_{\kappa^X_k}^{(\partial_1^{x})_{v,k}} .
+\end{equation}
+Apply the $X\leftrightarrow Z$ dual of \S 2 to the $\bar Z$-shadow $z$ to build the $Z$-system:
+ancilla qubits $Q'^Z$ indexed by $C_0^Z = \{j : (H_X)_{j, \mathrm{supp}(z)} \neq 0\}$, the dual
+incidence
+\begin{equation}
+\partial_1^{z} = \pi_{\mathrm{supp}(z)}\, H_X^T\, \pi_{C_0^Z}^T
+\in \mathbb{F}_2^{|\mathrm{supp}(z)| \times |C_0^Z|},
+\end{equation}
+and the $Z$-type vertex checks
+\begin{equation}
+(S_Z')_v = Z_v \prod_{k} Z_{\kappa^Z_k}^{(\partial_1^{z})_{v,k}} .
+\end{equation}
+The two systems use disjoint ancillas, $Q'^X \cap Q'^Z = \varnothing$. As in \S 2, the full
+products reproduce the shadows, $\prod_{v\in\mathrm{supp}(x)} (S_X')_v = \bar X$ and
+$\prod_{v\in\mathrm{supp}(z)} (S_Z')_v = \bar Z$.
+
+\subsection{The merge}
+For a qubit $v \in W$ both systems carry a vertex check: $(S_X')_v$ contains $X_v$ and
+$(S_Z')_v$ contains $Z_v$. These two checks share \emph{exactly} the single data qubit $v$
+(their ancillas are disjoint, and each vertex check touches only that one data qubit), where
+$X_v$ and $Z_v$ anticommute. They therefore cannot both sit in the stabilizer group. Replace
+each such pair by its Hermitian product
+\begin{equation}
+y_v \;:=\; i\,(S_X')_v\,(S_Z')_v
+\;=\; Y_v \prod_k X_{\kappa^X_k}^{(\partial_1^{x})_{v,k}}
+            \prod_k Z_{\kappa^Z_k}^{(\partial_1^{z})_{v,k}},
+\qquad v \in W,
+\end{equation}
+a single non-CSS check acting as $Y$ on the data qubit $v$, as $X$ on its $Q'^X$ neighbours,
+and as $Z$ on its $Q'^Z$ neighbours. The factor $i$ (since $Y = iXZ$) is the overall sign that
+arXiv:2410.02753 instructs us to track. For $v \in V_X$ (resp.\ $V_Z$) only the $X$-system
+(resp.\ $Z$-system) has a vertex check on $v$, so those checks are untouched and stay pure
+$X$- (resp.\ $Z$-) type.
+
+\subsection{Merged check matrices}
+The merge identifies the $X$- and $Z$-system vertices at every $v\in W$, gluing the two gadget
+graphs into one. Its incidence matrix---the merged $\partial_1$ of arXiv:2410.02753 Eq.~(66),
+with rows the vertices $V_X\sqcup W\sqcup V_Z$ and columns the edges $(Q'^X \mid Q'^Z)$---is
+\begin{equation}
+\partial_1 =
 \begin{pmatrix}
-H_X^l & 0 & \pi_{C_0^l}^T & 0 & 0 \\
-0 & H_X^r & 0 & 0 & 0 \\
-0 & 0 & H_X^{\prime l,\mathrm{aug}} & 0 & 0 \\
-0 & \pi_{V_0^r} & 0 & H_X^{\prime r,\mathrm{aug}} & \pi_{\mathcal{P}_r}^T P_{\sigma_r} \\
-0 & 0 & T_l & 0 & H_R
+\pi_{V_X} H_Z^T \pi_{C_0^X}^T & 0 \\
+\pi_{W}   H_Z^T \pi_{C_0^X}^T & \pi_{W}   H_X^T \pi_{C_0^Z}^T \\
+0 & \pi_{V_Z} H_X^T \pi_{C_0^Z}^T
+\end{pmatrix}
+=
+\begin{pmatrix}
+\partial_1^{x}|_{V_X} & 0 \\
+\partial_1^{x}|_{W}   & \partial_1^{z}|_{W} \\
+0 & \partial_1^{z}|_{V_Z}
 \end{pmatrix},
 \end{equation}
+where $\partial_1^{s}|_{S}$ denotes the rows of $\partial_1^{s}$ indexed by $S$. The spurious
+low-weight logicals are the cycles of this glued graph, so we take a \emph{single} cycle basis
 \begin{equation}
-\tilde H_Z^{\mathrm{joint, pre}} =
-\begin{pmatrix}
-H_Z^l & 0 & 0 & 0 & 0 \\
-0 & H_Z^r & 0 & \pi_{C_0^r}^T & 0 \\
-\pi_{V_0^l} & 0 & H_Z^{\prime l,\mathrm{aug}} & 0 & \pi_{\mathcal{P}_l}^T P_{\sigma_l} \\
-0 & 0 & 0 & H_Z^{\prime r,\mathrm{aug}} & 0 \\
-0 & 0 & 0 & T_r & H_R
-\end{pmatrix}.
+\partial_0 = \ker \partial_1
+= \bigl(\, \partial_0^{(X)} \,\big|\, \partial_0^{(Z)} \,\bigr),
 \end{equation}
-Reading row-block by row-block: original $H_X^s, H_Z^s$ extended with the
-appropriate $f$ block on its own $\kappa^s$; the basis-dual gauge of each side
-($H_X^{\prime l,\mathrm{aug}}$ on the left, $H_Z^{\prime r,\mathrm{aug}}$ on
-the right); the two basis-native row blocks
-$(S_Z^{\prime l}, S_X^{\prime r})$ attached to the adapter through
-$\pi_{\mathcal{P}_s}^T P_{\sigma_s}$; and one cycle row per side. At every
-adapter column $q$, the left $S_Z^{\prime l}$ port-row deposits a single
-$Z_{a_q}$ in $\tilde H_Z$ while the right $S_X^{\prime r}$ port-row deposits a
-single $X_{a_q}$ in $\tilde H_X$. These two rows do not commute.
+whose $Q'^X$-columns form the $X$-system part $\partial_0^{(X)}$ (a $Z$-type support) and whose
+$Q'^Z$-columns form the $Z$-system part $\partial_0^{(Z)}$ (an $X$-type support).
+\emph{These two halves are the same stabilizer row}, not two separate checks: a cycle that
+crosses a merged vertex $v\in W$ runs along both $Q'^X$ and $Q'^Z$ edges, so it is a single
+non-CSS row carrying $Z$ on $Q'^X$ and $X$ on $Q'^Z$. Only when $|W|=1$ does $\ker \partial_1$
+collapse to the two independent CSS families $\ker\partial_1^{x}$ (pure $Z$-type) and
+$\ker\partial_1^{z}$ (pure $X$-type); for $|W|\geq 2$ there are $|W|-1$ crossing cycles that are
+genuinely mixed and must not be split apart---they are precisely the rows whose commutation with
+the $y_v$ checks is the $W$-block of $\partial_1\partial_0^T = 0$.
 
-\subsection{Cross-merge at the adapter}
-For each adapter qubit $a_q$, write $i_s(q) := \mathcal{P}_s[\sigma_s^{-1}(q)]$
-for the port vertex on side $s$ labelled $q$. Exactly two rows have adapter
-support equal to $\{q\}$: the left port row $(S_Z^{\prime l})_{i_l(q)}$ and the
-right port row $(S_X^{\prime r})_{i_r(q)}$. They anti-commute at $a_q$ (single
-$Z$ meets single $X$), so they cannot both sit in a stabilizer group. Replace
-the pair by one symplectic Y-row
+In the qubit ordering $(Q \mid Q'^X \mid Q'^Z)$ of total size $N = n + |C_0^X| + |C_0^Z|$, the
+merged code is the non-CSS stabilizer code with symplectic check matrix
+$\tilde H = (\tilde H^{(X)} \mid \tilde H^{(Z)})$---the \S 2-convention rendering of
+arXiv:2410.02753 Eq.~(68):
 \begin{equation}
-y_q \;:=\; \bigl(\,(S_X^{\prime r})_{i_r(q)}\big|_X\ \big\vert\
-(S_Z^{\prime l})_{i_l(q)}\big|_Z\,\bigr) \;\in\;\mathbb{F}_2^{2N},
+\tilde H =
+\left(\begin{array}{ccc|ccc}
+H_X       & 0                   & \pi_{C_0^Z}^T    &           &                  &                     \\
+\pi_{V_X} & \partial_1^{x}|_{V_X} & 0              &           &                  &                     \\
+\pi_W     & \partial_1^{x}|_{W}   & 0              & \pi_W     & 0                & \partial_1^{z}|_{W} \\
+          &                     &                  & H_Z       & \pi_{C_0^X}^T    & 0                   \\
+          &                     &                  & \pi_{V_Z} & 0                & \partial_1^{z}|_{V_Z} \\
+          & 0                   & \partial_0^{(Z)} &           & \partial_0^{(X)} & 0
+\end{array}\right).
 \end{equation}
-i.e.\ keep the $X$-support of $(S_X^{\prime r})_{i_r(q)}$ and the $Z$-support of
-$(S_Z^{\prime l})_{i_l(q)}$ as the two halves of a single symplectic row.
-Concretely $y_q$ acts as
+The vertical bar separates the $X$- from the $Z$-Pauli columns, each ordered $(Q, Q'^X, Q'^Z)$.
+Row by row: original $H_X$ and $H_Z$, extended onto the opposite system's ancillas by
+$f_0^z = \pi_{C_0^Z}^T$ and $f_0^x = \pi_{C_0^X}^T$; the pure-$X$ vertex checks on $V_X$
+($f_1^{(X\setminus Z)}, \partial_1^{(X\setminus Z)}$ of Eq.~(68)) and pure-$Z$ on $V_Z$
+($f_1^{(Z\setminus X)}, \partial_1^{(Z\setminus X)}$); the mixed $Y$-row family on $W$, spanning
+both blocks ($f_1^{(Y|x)}, \partial_1^{(Y|x)} \mid f_1^{(Y|z)}, \partial_1^{(Y|z)}$); and the
+single cycle family $\partial_0 = (\partial_0^{(Z)} \mid \partial_0^{(X)})$, likewise spanning
+both blocks because it is one mixed stabilizer per row.
+
+\subsection{Commutation and the joint logical}
+In the pre-merge system the only anticommuting generator pairs are
+$\{(S_X')_v, (S_Z')_v\}_{v\in W}$, each sharing the single qubit $v$; every other pair commutes
+(distinct data qubits, disjoint ancillas, and the \S 2 CSS relations on each side). Merging
+replaces each such pair by $y_v$, which then commutes with every surviving row and with every
+other $y_{v'}$, because each deleted row's unique anticommuting partner is also deleted. The
+mixed cycle rows commute with every $y_v$ by construction: the symplectic product of $y_v$ with
+a cycle $\partial_0$ is exactly the $v$-th entry of $\partial_1\,\partial_0^T = 0$. The result
+is a (non-CSS) stabilizer code. Multiplying the surviving vertex checks and all merged rows,
 \begin{equation}
-y_q \;=\; Y_{a_q}
-\cdot \prod_{k:(H_X^{\prime r,\mathrm{aug}})_{i_r(q),k}=1} X_{\kappa^r_k}
-\cdot \prod_{k:(H_Z^{\prime l,\mathrm{aug}})_{i_l(q),k}=1} Z_{\kappa^l_k}
-\cdot \prod_{v\in V_0^l} Z_v^{(\pi_{V_0^l})_{i_l(q),v}}
-\cdot \prod_{v\in V_0^r} X_v^{(\pi_{V_0^r})_{i_r(q),v}}.
+\prod_{v\in V_X} (S_X')_v \;\prod_{v\in V_Z} (S_Z')_v \;\prod_{v\in W} y_v
+\;=\; i^{|W|}\, \bar X\, \bar Z \;=\; \bar P,
 \end{equation}
-Delete $(S_Z^{\prime l})_{i_l(q)}$ from $\tilde H_Z^{\mathrm{joint, pre}}$ and
-$(S_X^{\prime r})_{i_r(q)}$ from $\tilde H_X^{\mathrm{joint, pre}}$, and collect
-all $y_q$ into a new symplectic block
-$\tilde H_Y \in\mathbb{F}_2^{w\times 2N}$. Write
-$\bar{\mathcal{P}}_s := V_0^s\setminus\mathcal{P}_s$ for the non-port subset of
-$V_0^s$. The post-merge subsystem code has the three stabilizer blocks
+so the syndrome record returns the eigenvalue of the mixed logical $\bar P$ with no residual
+operator left over.
+
+\subsection{Initialization and measurement}
+We follow the protocol of arXiv:2410.02753 (\S III C), keeping the \S 2 structure of one ancilla
+layer measured for $R \geq d$ rounds. \textbf{No qubit is ever prepared in $|Y_+\rangle$.}
+\begin{enumerate}
+\item Prepare the $X$-system ancillas $Q'^X$ in $|0\rangle^{\otimes|C_0^X|}$ and the $Z$-system
+ancillas $Q'^Z$ in $|+\rangle^{\otimes|C_0^Z|}$. The data qubits are untouched. Every qubit is
+in a CSS eigenstate; the $X/Z$ mixing lives only in the checks $y_v$ and the crossing cycles.
+\item Measure all stabilizers of $\tilde H$ each round for $R \geq d$ rounds. Each mixed row
+($y_v$ or a crossing cycle) is read by a syndrome ancilla with \emph{mixed couplings}: $CX$ onto
+its $X$-support and $CZ$ onto its $Z$-support, exactly as one measures any non-CSS check. The
+$\mathrm{obs}_0$ value is the in-circuit product of the surviving vertex checks and the $y_v$
+rows, equal to $\bar P$ above.
+\item Detach by measuring the ancillas in their preparation-complementary basis: $Q'^X$ in $Z$
+and $Q'^Z$ in $X$. The data qubits remain encoded.
+\end{enumerate}
+Because the $Y$ sits on a genuine data-$Y$ qubit of $\bar P$ rather than on an adapter forced
+into $|Y_+\rangle$, there is no $\prod_q Y_{a_q}$ residual, and hence none of the
+destructive-readout or detector null-space machinery a $|Y_+\rangle$ adapter would require.
+
+\paragraph{The readout stabilizer product.}
+Concretely, $\mathrm{obs}_0$ is the product of \emph{exactly the new vertex/merge checks}
+introduced by the gadget---and of nothing else:
 \begin{equation}
-\tilde H_X^{\mathrm{joint}} =
-\begin{pmatrix}
-H_X^l & 0 & \pi_{C_0^l}^T & 0 & 0 \\
-0 & H_X^r & 0 & 0 & 0 \\
-0 & 0 & H_X^{\prime l,\mathrm{aug}} & 0 & 0 \\
-0 & \pi_{\bar{\mathcal{P}}_r} & 0 & H_X^{\prime r,\mathrm{aug}}\big|_{\bar{\mathcal{P}}_r} & 0 \\
-0 & 0 & T_l & 0 & H_R
-\end{pmatrix},
+\mathrm{obs}_0
+\;=\; \prod_{v\in V_X}(S_X')_v \;\prod_{v\in V_Z}(S_Z')_v \;\prod_{v\in W} y_v
+\;=\; i^{|W|}\,\bar X\,\bar Z \;=\; \bar P,
 \end{equation}
+read off the in-circuit ancilla outcomes (one $M$ record per $(S_X')_v$, one $M$ per
+$(S_Z')_v$, one $MX$ per $y_v$). In the merged matrix $\tilde H$ of Eq.~(68) these are the rows
+below the original $H_X$/$H_Z$ blocks: the $\pi_{V_X}$ rows, the $\pi_{V_Z}$ rows, and the mixed
+$\pi_W$ rows. The original $H_X$, $H_Z$ rows and the cycle rows $\partial_0$ are \emph{not}
+included. For the single-$\bar Y$ Steane example ($V_X=\{2,4\}$, $V_Z=\{1,3\}$, $W=\{5\}$) these
+are the five rows $\{3,4,8,9,10\}$ of $\tilde H$, whose product on the data is
+$X_2X_4Z_1Z_3Y_5$. Since $\bar Y = i\bar X\bar Z = +X_2X_4Z_1Z_3Y_5$ \emph{exactly} (the $i$
+cancels $X_5Z_5 = -iY_5$), the raw $\mathrm{obs}_0$ bit equals the $\bar Y$ eigenvalue:
+$\mathrm{obs}_0 = 0 \Leftrightarrow \bar Y = +1$.
+
+\paragraph{Logical-$\bar Y$ eigenstate preparation.}
+The gadget itself never prepares a $|Y_+\rangle$ ancilla (above). To \emph{certify} that the
+measurement returns a definite outcome we prepare the \emph{data} in a logical-$\bar Y$
+eigenstate. The correct state is the codeword
 \begin{equation}
-\tilde H_Z^{\mathrm{joint}} =
-\begin{pmatrix}
-H_Z^l & 0 & 0 & 0 & 0 \\
-0 & H_Z^r & 0 & \pi_{C_0^r}^T & 0 \\
-\pi_{\bar{\mathcal{P}}_l} & 0 & H_Z^{\prime l,\mathrm{aug}}\big|_{\bar{\mathcal{P}}_l} & 0 & 0 \\
-0 & 0 & 0 & H_Z^{\prime r,\mathrm{aug}} & 0 \\
-0 & 0 & 0 & T_r & H_R
-\end{pmatrix},
+|\bar Y_+\rangle = \bar S\,|\bar X_+\rangle,
 \end{equation}
+\emph{not} the physical product $\bigotimes_i |Y_{i,+}\rangle$. The latter is a $+1$ eigenstate
+of every single-qubit $Y_i$ but is \emph{not} a codeword: the code stabilizers are random on it,
+so the bare readout $[x\,|\,z]$ is non-deterministic. On the codeword every stabilizer is $+1$,
+so $[x\,|\,z] = \bar Y$ is sharp. We inject the codeword fault-tolerantly: prepare
+$|+\rangle^{\otimes n}$ (so $\bar X = +1$ and the $X$-syndrome is $0$), measure the
+$Z$-stabilizers, and apply the feedback Pauli $X^{R s}$ with $H_Z R = I$ to cancel the random
+syndrome $s$, projecting onto the syndrome-$0$ codeword $|\bar X_+\rangle$; then apply the
+logical $\bar S$.
+
+\paragraph{Transversal $S$ realizes logical $\bar S^\dagger$.}
+On a doubly-even self-dual CSS code (e.g.\ Steane), the transversal phase gate $S^{\otimes n}$
+implements the \emph{logical} $\bar S^\dagger$, not $\bar S$. Conjugating the logical,
 \begin{equation}
-\tilde H_Y =
-\bigl(\,\tilde H_Y^{(X)}\ \big|\ \tilde H_Y^{(Z)}\,\bigr) \in\mathbb{F}_2^{w\times 2N},
+S^{\otimes n}\,\bar X\,S^{\otimes n\,\dagger}
+= \prod_{v\in\mathrm{supp}(x)} iX_vZ_v
+= i^{\,\mathrm{wt}(\bar X)}\,\bar X\,Z|_{\mathrm{supp}(x)},
 \end{equation}
-\begin{equation}
-\tilde H_Y^{(X)} =
-\begin{pmatrix}
-0 & P_{\sigma_r}^T \pi_{\mathcal{P}_r}\,\pi_{V_0^r} & 0 & P_{\sigma_r}^T \pi_{\mathcal{P}_r}\,H_X^{\prime r,\mathrm{aug}} & I_w
-\end{pmatrix},
-\end{equation}
-\begin{equation}
-\tilde H_Y^{(Z)} =
-\begin{pmatrix}
-P_{\sigma_l}^T \pi_{\mathcal{P}_l}\,\pi_{V_0^l} & 0 & P_{\sigma_l}^T \pi_{\mathcal{P}_l}\,H_Z^{\prime l,\mathrm{aug}} & 0 & I_w
-\end{pmatrix}.
-\end{equation}
-Here $\pi_{\bar{\mathcal{P}}_s}\in\mathbb{F}_2^{(|V_0^s|-w)\times n_s}$ is the
-inclusion of non-port $V_0^s$ vertices into $Q_s$, and
-$H_X^{\prime r,\mathrm{aug}}\big|_{\bar{\mathcal{P}}_r},
-H_Z^{\prime l,\mathrm{aug}}\big|_{\bar{\mathcal{P}}_l}$ denote row-restriction of
-the respective $(S_X^{\prime r}), (S_Z^{\prime l})$ $\kappa$-blocks to non-port
-indices. In $\tilde H_Y$, the inner factor $\pi_{\mathcal{P}_s}\in\mathbb{F}_2^{w\times|V_0^s|}$
-selects port rows out of the $V_0^s$ row index of $\pi_{V_0^s}$ and of
-$H_{X/Z}^{\prime s,\mathrm{aug}}$, and $P_{\sigma_s}^T$ reorders those $w$ rows
-from port position to adapter-label order. Each row $q\in\{0,\dots,w-1\}$ of
-$\tilde H_Y$ thus carries: one $Y_{a_q}$ on the adapter (from the two $I_w$
-blocks combined symplectically), one $X$ on the right port qubit
-$v_{i_r(q)}^r\in Q_r$ paired with the right port's $\kappa^r$ neighborhood, and
-one $Z$ on the left port qubit $v_{i_l(q)}^l\in Q_l$ paired with the left port's
-$\kappa^l$ neighborhood.
+and the odd-weight phase $i^{\,\mathrm{wt}(\bar X)}$ (here $i^3 = -i$), reduced modulo the
+doubly-even stabilizers, gives $-\bar Y$---the conjugation rule of $\bar S^\dagger$. So the
+single-qubit identity $S|+\rangle = |Y_+\rangle$ does \emph{not} lift transversally:
+$|\bar Y_+\rangle = \bar S|\bar X_+\rangle$ is realized by the physical $S^{\dagger\,\otimes n}$
+(and $|\bar Y_-\rangle$ by $S^{\otimes n}$), verified numerically
+($\langle\bar Y\rangle = +1$ on $S^{\dagger\,\otimes n}|\bar X_+\rangle$, $-1$ on
+$S^{\otimes n}|\bar X_+\rangle$). The remaining five Pauli-basis data preparations are
+$|\bar 0\rangle, |\bar 1\rangle$ ($\bar Z$ eigenstates) and $|\bar +\rangle, |\bar -\rangle$
+($\bar X$ eigenstates); on all four $\bar Y$ anticommutes with the prepared logical, so the
+$\bar Y$ outcome is a genuine $50/50$.
 
-\subsection{Commutation and the resulting subsystem code}
-The cycle rows have weight-$2$ adapter support and are \emph{not} merged.
-Single-gadget commutation gives
-$[(S_Z^{\prime l})_i,(S_Z^{\prime l})_j] = [(S_X^{\prime r})_i,(S_X^{\prime r})_j] = 0$
-trivially, and the SkipTree identity ensures the bridge $X$/$Z$ rows commute
-with the cycle. After cross-merge, $y_q$ commutes with every remaining row in
-$\tilde H_X^{\mathrm{joint}}, \tilde H_Z^{\mathrm{joint}}$, and with every other
-$y_{q'}$, because each removed row's anti-commuting partner has also been
-removed. The resulting code is a (non-CSS) subsystem code whose stabilizer
-group is generated by the surviving CSS rows together with $\{y_q\}_{q=0}^{w-1}$.
-
-\subsection{Joint logical and deterministic readout}
-A direct operator computation (using $\mathbf{1}^T\pi_{V_0^s}=x_s^T$ together
-with $H_X^l z_l = H_Z^r x_r = 0$, as in \S2) gives
-\begin{equation}
-\prod_{i\in V_0^l} (S_Z^{\prime l})_i = \bar Z_l \cdot \prod_{q=0}^{w-1} Z_{a_q},
-\qquad
-\prod_{i\in V_0^r} (S_X^{\prime r})_i = \bar X_r \cdot \prod_{q=0}^{w-1} X_{a_q}.
-\end{equation}
-For each adapter qubit $a_q$, each $y_q$ carries $X_{a_q} Z_{a_q} \propto Y_{a_q}$,
-so $\prod_q y_q$ leaves a $\prod_q Y_{a_q}$ residual on the adapter even after
-all $\kappa$ contributions cancel (the port-side $\kappa$ pieces from
-$\prod y_q$ are matched by the non-port-side $\kappa$ pieces from
-$\prod_{i\in\bar{\mathcal{P}}_s}$). Restricting the $\chi$ products to the
-\emph{surviving} (non-port) rows,
-\begin{equation}
-\prod_{i\in\bar{\mathcal{P}}_l} (S_Z^{\prime l})_i \cdot
-\prod_{i\in\bar{\mathcal{P}}_r} (S_X^{\prime r})_i \cdot
-\prod_{q=0}^{w-1} y_q
-\;=\; \bar Z_l \otimes \bar X_r \cdot \prod_{q=0}^{w-1} Y_{a_q},
-\label{eq:obs0-with-Y-residual}
-\end{equation}
-so the bare product is \emph{not} $\bar Z_l\otimes\bar X_r$ as a Pauli operator
-on $|0\rangle^{\otimes w}$-prepared adapters: a $\prod Y_{a_q}$ residual remains.
-
-\paragraph{Adapter prep and detach in $Y$ basis.}
-Following Cohen, Kim, Bartlett, Brown (arXiv:2110.10794 \S II.B.2,
-Fig.~4), the mixed-basis joint PPM requires the adapter to be prepared in the
-common $+1$ eigenstate of $\{Y_{a_q}\}_{q=0}^{w-1}$, i.e.
-$|\mathcal{A}\rangle = |Y_+\rangle^{\otimes w}$, and destructively measured in
-the $Y$ basis at detach. Under this convention $\prod_q Y_{a_q}$ is a
-stabilizer of the adapter's initial state, so its eigenvalue is determined by
-the adapter's destructive $Y$-measurement record. The deterministic readout
-identity becomes
-\begin{equation}
-\bar Z_l \otimes \bar X_r =
-\prod_{i\in\bar{\mathcal{P}}_l} (S_Z^{\prime l})_i \cdot
-\prod_{i\in\bar{\mathcal{P}}_r} (S_X^{\prime r})_i \cdot
-\prod_{q=0}^{w-1} y_q \cdot
-\prod_{q=0}^{w-1} Y_{a_q}.
-\label{eq:obs0-corrected}
-\end{equation}
-At the circuit level, $\mathrm{obs}_0$ is the XOR of (i) the last-round
-syndrome bits of the surviving $\chi$-rows on both sides, (ii) the
-last-round $y_q$ outcomes, and (iii) the $w$ destructive $Y$-basis adapter
-readouts. The $\kappa^l, \kappa^r$ ancilla residuals from the $\chi$-product
-cancellation are absorbed inside (i)+(ii) — no extra terms are required.
-
-The extra gauge qubit created by deleting two rows and adding one is disjoint
-from $\bar Z_l\otimes\bar X_r$ (it lives in the gauge group), so its random
-outcome does not enter the readout. The cycle rows
-$T_l \mid T_r \mid H_R$ live in the gauge group via the
-$H_R H_R^T$ anti-commutation between sides; their per-shot outcomes are
-random but do not affect $\mathrm{obs}_0$ since they do not appear in
-Eq.~\eqref{eq:obs0-corrected}.
-
-\subsection{Readout-basis conflict at the adapter and the detector null space}
-\label{sec:detector-nullspace}
-
-The post-merge code is read out at detach with a \emph{single fixed Pauli basis
-per qubit}: data qubits $Q_l, Q_r$ in their own logical bases (here $Z$ on the
-left, $X$ on the right), each ancilla block $\kappa^s$ in its gadget basis (left
-$\kappa^l$ in $Z$, right $\kappa^r$ in $X$), and---crucially---the adapter
-$\mathcal{A}$ in the $Y$ basis, as forced by the $\prod_q Y_{a_q}$ residual of
-Eq.~\eqref{eq:obs0-corrected}. A final-round detector for a stabilizer row $r$ is
-the XOR of (i) the destructive readouts on $\mathrm{supp}(r)$ and (ii) the last
-in-circuit measurement of $r$; it is deterministic only if \emph{every} non-$I$
-Pauli of $r$ matches the destructive basis of its qubit.
-
-\paragraph{Where the conflict is.} The decisive incompatibility sits on the
-adapter columns $\mathcal{A}$. The rep-code cycle rows---the $H_R$ block in the
-\emph{last block-row of both} $\tilde H_X^{\mathrm{joint}}$ (the left cycle
-$T_l\mid H_R$, depositing $X_{a_q}$) \emph{and} $\tilde H_Z^{\mathrm{joint}}$
-(the right cycle $T_r\mid H_R$, depositing $Z_{a_q}$)---carry $X$ and $Z$ on the
-adapter, while the adapter is destructively measured in $Y$. No fixed single-qubit
-basis reads $X$, $Y$ and $Z$ on the same physical qubit, so each $a_q$
-simultaneously hosts $X$ (left cycle), $Z$ (right cycle) and $Y$ ($y_q$ and the
-detach measurement) across different generators, and the two cycle families are
-\emph{not individually reconstructable} at detach. (The remaining mismatches---$X$
-on $Q_l,\kappa^l$ read in $Z$ from $H_X^l, H_X^{\prime l,\mathrm{aug}}$, and $Z$
-on $Q_r,\kappa^r$ read in $X$ from $H_Z^r, H_Z^{\prime r,\mathrm{aug}}$---also
-occur in the same-basis CSS merge of \S3, do not enter $\mathrm{obs}_0$, and are
-harmlessly covered by the inter-round detectors.)
-
-This is exactly why the same-basis $\bar Z_l\otimes\bar Z_r$ merge needs no such
-treatment: it is CSS, its cycle rows live \emph{only} in $\tilde H_Z$ (a single
-$Z_{a_q}$ per adapter), and the adapter is read in the complementary basis that
-matches them, so every generator feeding $\mathrm{obs}_0$ is directly
-reconstructable.
-
-\paragraph{Why a null space is needed.} Although no single cycle row is
-reconstructable, certain \emph{linear combinations} of center rows are: when two
-rows that both touch a $Y$-measured adapter qubit are summed, their $X_{a_q}$ and
-$Z_{a_q}$ pieces combine into $Y_{a_q}$, which the $Y$ readout \emph{can} resolve.
-Encode the per-qubit readout as a constraint matrix $F\in\mathbb{F}_2^{N\times 2N}$
-whose row $q$ selects the unmeasurable Pauli direction of qubit $q$ (the
-$Z$-component if $q$ is read in $X$, the $X$-component if read in $Z$, and neither
-if read in $Y$). A row $r$ is reconstructable iff $F r^{\mathsf T}=0$, and a
-combination $c$ of the center rows $C$ is reconstructable iff
-\begin{equation}
-F\,C^{\mathsf T} c^{\mathsf T}=0,
-\qquad\text{i.e.}\qquad
-c \in \ker\!\bigl((C F^{\mathsf T})^{\mathsf T}\bigr).
-\end{equation}
-The detector generator must therefore be drawn from this null space. For each
-center row that is not directly compatible (the cycle rows above), we emit a
-minimum-weight null-space vector containing it; this yields one bounded-weight,
-fully $Y$/$X$/$Z$-compatible detector that pins the row's last-round outcome.
-
-\paragraph{Consequence.} Omitting these null-space detectors---emitting only the
-directly compatible single-row detectors---leaves the adapter outcomes that build
-$\mathrm{obs}_0$ unpinned: a single fault on a $Y$-measured adapter qubit then
-flips $\mathrm{obs}_0$ with no detector firing, collapsing the operational
-distance to $1$. We verified both directions numerically on
-$\mathrm{BB}[[72,12,6]]$: with the null-space detectors the detector-error model
-has no undetectable $\mathrm{obs}_0$ error, while removing them produces exactly
-one such weight-$1$ term. The same-basis merge is immune because it never has a
-$Y$-measured adapter or a $y_q$ row.
-
-\section{Mixed-basis joint PPM via local basis change}
-\label{sec:mixed-local-basis}
-
-The cross-merge of \S4 realizes $\bar Z_l\otimes\bar X_r$ by forcing the
-\emph{adapter qubits} into $|Y_+\rangle$ and absorbing a $\prod_q Y_{a_q}$
-residual through a $Y$-basis detach, at the cost of the null-space detectors of
-\S\ref{sec:detector-nullspace}. We now give an alternative---the one implemented
-by default in the accompanying code (\texttt{mixed\_strategy="hadamard\_dual"}).
-The mixing of $X$ and $Z$ is moved out of the adapter \emph{state} and into a
-\emph{local basis change} on the data, so that every qubit is prepared and
-measured in a single CSS eigenbasis ($|0\rangle$ or $|+\rangle$), the adapter
-$\mathcal{A}$ stays the single-type repetition code of \S3, and no $|Y_+\rangle$
-prep, $Y$-basis detach, or null-space detector is required.
-
-The principle is the local-basis reduction of Swaroop, Jochym-O'Connor, Yoder
-(arXiv:2410.03628 \S II): the universal adapter is, without loss of generality,
-defined for a \emph{$Z$-type} logical operator, and an arbitrary Pauli logical is
-brought to that form by choosing the appropriate single-qubit basis on each qubit
-of its support (allowing the deformed code to be non-CSS). Equivalently, the
-adapter requires only that each measured logical be \emph{homogeneous} (all-$Z$
-or all-$X$) on the \emph{port} qubits $\mathcal{P}_s$; the support inside the code
-block may be arbitrary Pauli. Two regimes arise, according to whether the
-required basis change preserves the CSS structure.
-
-\subsection{$\bar Z_l\otimes\bar X_r$ via the Hadamard dual (CSS)}
-\label{sec:hadamard-dual}
-
-Measure $\bar Z_l\otimes\bar X_r$ on disjoint blocks $\mathcal{C}_l,\mathcal{C}_r$.
-The left logical $\bar Z_l$ is already $Z$-type, so build the $Z$-gadget of \S2 on
-$\mathcal{C}_l$ with $V_0^l=\mathrm{supp}(z_l)$ and
-$C_0^l=\{j:(H_X^l)_{j,V_0^l}\neq 0\}$.
-
-For the right block, instead of the $X$-gadget on $\mathcal{C}_r$, take its
-\emph{transversal-Hadamard dual} $\mathcal{C}_r^{\perp}$,
-\begin{equation}
-H_X^{r^{\perp}}=H_Z^r,\qquad H_Z^{r^{\perp}}=H_X^r,
-\end{equation}
-obtained by applying a physical Hadamard to every data qubit of $\mathcal{C}_r$.
-Because $H_X^r (H_Z^r)^{\mathsf T}=0$ is symmetric, $\mathcal{C}_r^{\perp}$ is again
-CSS, and the Hadamard maps $\bar X_r\mapsto\bar Z_{r^{\perp}}$ with the \emph{same}
-bit-support $x_r$. Build the $Z$-gadget of \S2 on $\mathcal{C}_r^{\perp}$ with seed
-$x_r$, now a $Z$-logical of the dual:
-\begin{equation}
-V_0^r=\mathrm{supp}(x_r),\qquad
-C_0^r=\{j:(H_X^{r^{\perp}})_{j,V_0^r}\neq 0\}=\{j:(H_Z^r)_{j,V_0^r}\neq 0\}.
-\end{equation}
-
-\paragraph{Invariance of the adapter data.}
-The right gadget data $(V_0^r,C_0^r,H_X^{\prime r},\dots)$ built on the dual
-coincides \emph{bit-for-bit} with what the $X$-gadget on $\mathcal{C}_r$ would have
-produced, because the $X$-gadget reads its dual checks $C_0^r$ and incidence
-$H_X^{\prime r}=\pi_{V_0^r}(H_Z^r)^{\mathsf T}\pi_{C_0^r}^{\mathsf T}$ out of
-$H_Z^r$---exactly the matrix that becomes $H_X^{r^{\perp}}$ under the dual.
-Consequently the cellulated port subgraph, the SkipTree outputs
-$(T_r,P_{\sigma_r})$, and the port subset $\mathcal{P}_r$ are identical to the
-same-basis case. The \S3 same-basis ($Z\otimes Z$) adapter therefore applies
-verbatim, now measuring $\bar Z_l\otimes\bar Z_{r^{\perp}}$.
-
-\paragraph{Frame tracking and readout.}
-The transversal $H$ on $\mathcal{C}_r$ is a depth-one single-qubit layer; it need
-not be applied physically. A prepared $\bar X_r$-eigenstate is re-expressed as the
-corresponding $\bar Z_{r^{\perp}}$-eigenstate via $H|+\rangle=|0\rangle$,
-$H|-\rangle=|1\rangle$ (in the code, the input string is transformed by
-$+\!\leftrightarrow\!0,\ -\!\leftrightarrow\!1$), and the destructive readout basis
-is chosen to match. No qubit ever occupies a $Y$ state. The joint readout is the
-same-basis identity of \S3.4,
-\begin{equation}
-\prod_{s\in\{l,\,r^{\perp}\}}\prod_{i}(S_Z^{\prime s})_i
-=\bar Z_l\otimes\bar Z_{r^{\perp}},
-\end{equation}
-so $\mathrm{obs}_0$ is the XOR of the last-round $(S_Z')$ outcomes on the two
-sides; since $H\bar Z_{r^{\perp}}H=\bar X_r$, its eigenvalue equals that of
-$\bar Z_l\otimes\bar X_r$. There is no $y_q$ block, no $\prod_q Y_{a_q}$ residual,
-and---because the adapter is read in the basis matching its single-type cycle
-rows---no readout-basis conflict and hence none of the null-space detectors of
-\S\ref{sec:detector-nullspace}.
-
-\paragraph{Fault tolerance and distance.}
-A transversal single-qubit Clifford acts qubit-locally, so it preserves the weight
-of every Pauli; it maps the stabilizer and normalizer of $\mathcal{C}_r$ to those
-of $\mathcal{C}_r^{\perp}$ with identical weights, giving
-$d(\mathcal{C}_r^{\perp})=d(\mathcal{C}_r)$ and unchanged LDPC sparsity. As the
-construction reduces to \S3 on $(\mathcal{C}_l,\mathcal{C}_r^{\perp})$ with an
-identical port subgraph, the merged distance is $\Theta(\min(d_l,d_r))$ by the
-Cheeger bound of \S3.5.
-
-\subsection{$\bar Z_l\otimes\bar Y_r$ and general $\bar Z_l\otimes\bar P_r$ via a non-uniform local Clifford (non-CSS)}
-\label{sec:nonuniform-clifford}
-
-When the right logical is $\bar Y_r=i\,\bar X_r\bar Z_r$ (one logical qubit) it is
-intrinsically mixed: $X$ on $\mathrm{supp}(x_r)\setminus\mathrm{supp}(z_r)$, $Z$ on
-$\mathrm{supp}(z_r)\setminus\mathrm{supp}(x_r)$, and $Y$ on their (odd) overlap. A
-\emph{uniform} Hadamard no longer suffices. Choose instead a per-qubit Clifford
-frame $C=\bigotimes_q C_q$ with
-\begin{equation}
-C_q\,(\bar Y_r)_q\,C_q^{\dagger}=Z\qquad\text{for every }q\in\mathrm{supp}(\bar Y_r),
-\end{equation}
-which always exists, since every non-identity single-qubit Pauli is conjugate to
-$Z$ by some single-qubit Clifford. Then $C\bar Y_rC^{\dagger}=\pm\prod_q Z_q$ is $Z$-type
-(the sign is tracked classically and XORed into $\mathrm{obs}_0$), and in
-particular homogeneous $Z$ on the ports $\mathcal{P}_r$.
-
-\paragraph{Why the deformed code is non-CSS.}
-A uniform single-qubit Clifford preserves the CSS structure iff it maps
-$\{X,Z\}$ into $\{\pm X,\pm Z\}$. A Clifford sending $Y\mapsto Z$ sends the
-$Y$-axis to the $Z$-axis, so the images of $\{X,Z\}$ are $\{X,Y\}$ in some order:
-one of $X,Z$ is mapped to $Y$. The $C$-conjugated $X$- or $Z$-stabilizers
-therefore acquire $Y$ support, so the deformed block $\mathcal{C}_r^{C}$ is
-non-CSS. This is precisely why the transversal $H$ of \S\ref{sec:hadamard-dual}
-works for $X\!\leftrightarrow\!Z$ but a $Y$ measurement cannot remain CSS.
-
-\paragraph{The adapter is unchanged; only the interior is non-CSS.}
-The frame $C$ acts only inside $\mathcal{C}_r$. The measured logical is $Z$-type on
-its support, so on the port qubits the adapter still sees a single $Z$ per port:
-the repetition-code adapter $\mathcal{A}$, the parity check $H_R$, cellulation and
-SkipTree $(T_r,P_{\sigma_r})$ of \S3 attach verbatim. Only the interior
-vertex/gauge checks of $\mathcal{C}_r^{C}$ become mixed-type. Equivalently---and
-this is how the construction is realized without inserting any physical
-gates---one describes $\mathcal{C}_r$ directly as a non-CSS Tanner graph whose
-vertex checks carry arbitrary Pauli on $Q_r$ but homogeneous $Z$ on the ports,
-leaving the graph construction of \S2--\S3 intact.
-
-\paragraph{Measurement and fault tolerance.}
-Every data and adapter qubit is prepared in a CSS eigenstate ($|0\rangle$ or
-$|+\rangle$) and measured in $Z$ or $X$; the $X/Z$ mixing lives entirely in the
-non-CSS \emph{check}, extracted by a syndrome ancilla with mixed $CX/CY/CZ$
-couplings, as in the gauge-fixed $Y$-ancilla system of Cross, He, Rall, Yoder
-(arXiv:2407.18393 \S3.7). No qubit occupies a $Y$ state and no null-space detector
-is needed. The frame $C$ is transversal, so it preserves Pauli weights and the
-code distance, $d(\mathcal{C}_r^{C})=d(\mathcal{C}_r)$. The genuine cost relative
-to \S\ref{sec:hadamard-dual} is the non-CSS syndrome extraction: a single ancilla
-fault can deposit correlated $X$ and $Z$ on the data (hook errors in both bases),
-and decoding no longer separates into independent $X$- and $Z$-graphs but requires
-a symplectic/correlated decoder (e.g.\ BP-OSD/LSD on the joint check matrix). The
-price is paid by the extraction, not by the basis change.
-
-\paragraph{Status in the code.}
-The $X\!\leftrightarrow\!Z$ reduction of \S\ref{sec:hadamard-dual} is implemented
-and verified (noiseless $\bar Z_l\otimes\bar X_r$ truth tables on Steane and
-$\mathrm{BB}[[72,12]]$). The non-CSS extraction required for the genuine $\bar Y$
-case of this subsection is a direct extension of the mixed $CX/CY/CZ$ machinery
-already present (it was built for the \S4 $y_q$ rows) and is the remaining step for
-the $\bar Y$ implementation.
-
-\subsection{Comparison}
-\label{sec:mixed-comparison}
-
-\begin{table}[h]
-\centering\small
-\begin{tabularx}{\textwidth}{@{}l >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
-\toprule
- & \S4 cross-merge & \S\ref{sec:hadamard-dual} Hadamard-dual & \S\ref{sec:nonuniform-clifford} local Clifford \\
-\midrule
-$X/Z$ mixing in & adapter state ($|Y_+\rangle$) & local basis (transversal $H$) & non-CSS check ($CX/CY/CZ$) \\
-qubit states & adapter $|Y_+\rangle$, $Y$ detach & all $|0\rangle/|+\rangle$ & all $|0\rangle/|+\rangle$ \\
-adapter & single-type $+$ $y_q$ merge & \S3 verbatim & \S3 verbatim \\
-extra detectors & null space (\S\ref{sec:detector-nullspace}) & none & none \\
-CSS structure & non-CSS ($y_q$ rows) & fully CSS & non-CSS interior \\
-realizes & $\bar Z_l\otimes\bar X_r$ & $\bar Z_l\otimes\bar X_r$ & $\bar Z_l\otimes\bar Y_r$, general $\bar P_r$ \\
-\bottomrule
-\end{tabularx}
-\caption{Three realizations of mixed-basis joint PPM, distinguished by where the
-$X/Z$ non-commutativity is absorbed.}
-\label{tab:mixed-comparison}
-\end{table}
-
-All three measure the same logical $\bar Z_l\otimes\bar X_r$ (resp.\
-$\bar Z_l\otimes\bar Y_r$); they differ only in where the unavoidable $X/Z$
-non-commutativity is absorbed. \S4 places it in the adapter state and pays with a
-$Y$-basis detach and null-space detectors. \S\ref{sec:hadamard-dual} places it in
-a free transversal basis change and stays fully CSS---the preferred path whenever
-both logicals are single-type ($X$ or $Z$). \S\ref{sec:nonuniform-clifford} is the
-minimal extension to a genuine $\bar Y$: it keeps the CSS adapter and CSS qubit
-states but accepts a non-CSS interior, which is the irreducible cost of measuring a
-Pauli whose support mixes $X$ and $Z$ on the same qubit.
+\subsection{Distance}
+Boost each system's graph independently to Cheeger constant $\geq 1$ as in \S 2.2, applied to
+$\partial_1^{x}$ and $\partial_1^{z}$ separately. For the merged code, decompose any error in
+symplectic form as $\vec e = \vec e_X + \vec e_Z$. Since
+$\mathrm{wt}(\vec e) \geq \min(\mathrm{wt}\,\vec e_X, \mathrm{wt}\,\vec e_Z)$, the \S 2
+single-gadget distance bound applies to $\vec e_X$ against the $X$-system and to $\vec e_Z$
+against the $Z$-system independently, preserving the original distance $d$. The distance
+frequently \emph{increases}, since the $X$-type measurement raises the $Z$-distance and vice
+versa (arXiv:2410.02753, Eq.~(68) ff.).
 
 \end{document}
