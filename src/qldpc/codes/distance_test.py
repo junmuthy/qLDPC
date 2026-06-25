@@ -180,7 +180,10 @@ def test_get_symplectic_weight_fn() -> None:
 
 @pytest.mark.parametrize(
     "base_val",
-    [1, 2**64 - 1, int(np.random.randint(2**64, dtype=np.uint64)) | 1],
+    # Fixed-seed RNG (not global np.random): the value is evaluated at collection
+    # time, so it must be identical across processes or pytest-xdist workers
+    # disagree on test IDs. default_rng(0) is independent of pytest-randomly.
+    [1, 2**64 - 1, int(np.random.default_rng(0).integers(2**64, dtype=np.uint64)) | 1],
 )
 def test_count_trailing_zeros(base_val: int) -> None:
     """_count_trailing_zeros(val << i) == i for several base values across all 128 shift amounts."""

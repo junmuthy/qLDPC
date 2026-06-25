@@ -376,6 +376,7 @@ class Obs0ReadoutPlan:
 
 def _ybar_obs0_rows(
     H_sym: np.ndarray,
+    code: CSSCode,
     x: np.ndarray,
     z: np.ndarray,
     *,
@@ -403,9 +404,13 @@ def _ybar_obs0_rows(
     This is the §III.C readout rule of Ide, Gowda, Nadkarni, Dauphinais
     arXiv:2410.02753 §III.C: the obs0 eigenvalue is the XOR of the in-circuit
     ancilla records of the merged-code rows whose product equals Ȳ on the data.
-    The all-Y constraint used previously was a Steane |Y±⟩-prep artifact that is
-    infeasible on general codes (e.g. BB ``[[36,8,4]]``); the literal ``[x | z]``
-    support is feasible whenever Ȳ lies in the merged stabilizer center.
+    The selected rows are exactly the new merge stabilizers (χ_X on V_X, χ_Z on
+    V_Z, y_v on W), so obs0 is their BARE product. This literal ``[x | z]``
+    support is feasible whenever Ȳ lies in the merged stabilizer center, and is
+    deterministic in-circuit on a proper Ȳ-eigenstate codeword prep (the
+    ``data_init="Y±"`` exact |Ȳ±⟩ = S̄|X̄±⟩ injection); an all-Y representative
+    would only be deterministic on a physical ``∏_i|Y_i⟩`` prep and does not
+    exist on a general code (e.g. BB ``[[36,8,4]]``), so it is not used.
 
     Returns
     -------
@@ -425,20 +430,27 @@ def _ybar_obs0_rows(
     n_rows = H.shape[0]
     Hx = H[:, :n_merged]
     Hz = H[:, n_merged:]
+    if n0 != code.num_qudits:
+        raise ValueError(f"n0={n0} != code.num_qudits={code.num_qudits}")
 
-    # Assemble the GF(2) constraint system  A c = b  on the row-selection c.
+    # obs0 = the BARE product of the new merge stabilizers (χ_X on V_X, χ_Z on
+    # V_Z, y_v on W) = the literal [x | z] = iX̄Z̄ support. Solve A c = b for the
+    # row-selection c such that the selected rows' product restricts to [x | z] on
+    # data (X on V_X, Z on V_Z, Y on W) and is eigenbasis-compatible on the κ
+    # ancillas (Z-only κ_x, X-only κ_z). Because x is a logical-X representative
+    # and z a logical-Z representative, this product is automatically a logical-Y,
+    # so the logical-Y commute/anticommute conditions are IMPLIED. On the exact
+    # |Ȳ±⟩ codeword prep (|X̄+⟩ then transversal S) every code stabilizer is +1,
+    # so this bare product agrees with Ȳ and its in-circuit XOR is DETERMINISTIC.
+    # Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C.
     a_rows: list[np.ndarray] = []
     b_vals: list[int] = []
-    # Data part of S must equal the literal Ȳ support [x | z] — X on V_X, Z on
-    # V_Z, Y on W — the §III.C in-circuit readout (NOT all-Y on data). The
-    # logical-Y commute/anticommute conditions are then IMPLIED (x is a logical-X
-    # rep, z a logical-Z rep), so they are dropped.
     for q in range(n0):
         a_rows.append(Hx[:, q].copy())
         b_vals.append(int(x[q]))  # data X-part == x_q
         a_rows.append(Hz[:, q].copy())
         b_vals.append(int(z[q]))  # data Z-part == z_q
-    # Ancilla eigenbasis: κ_x carries only Z (X-part 0); κ_z only X (Z-part 0).
+    # Ancilla eigenbasis: κ_x Z-only (X-part 0); κ_z X-only (Z-part 0).
     for q in range(n0, n0 + k_x):
         a_rows.append(Hx[:, q].copy())
         b_vals.append(0)
@@ -456,27 +468,21 @@ def _ybar_obs0_rows(
         if lead.size == 0:
             if rref[r, n_rows] == 1:
                 raise ValueError(
-                    "BLOCKED: no eigenbasis-compatible merged-code row product equals "
-                    "Ȳ = iX̄Z̄ on the original data columns; the §III.C deterministic "
-                    "readout does not exist (Ide, Gowda, Nadkarni, Dauphinais "
+                    "BLOCKED: no eigenbasis-compatible merged-code row product "
+                    "equals Ȳ = iX̄Z̄ (Ide, Gowda, Nadkarni, Dauphinais "
                     "arXiv:2410.02753 §III.C)"
                 )
             continue
         c[lead[0]] = rref[r, n_rows]
 
-    # Resolve the product S = c·H and certify it (data == [x|z] + κ eigenbasis).
     S = (c @ H) % 2
     sx = S[:n_merged]
     sz = S[n_merged:]
-    # Data part of S must equal the literal Ȳ support [x | z].
     if not (np.array_equal(sx[:n0], x) and np.array_equal(sz[:n0], z)):
         raise ValueError("internal: obs0 product data part != Ȳ support [x|z]")
     if sx[n0 : n0 + k_x].any() or sz[n0 + k_x :].any():
         raise ValueError("internal: obs0 product not eigenbasis-compatible on κ ancillas")
 
-    # Build the destructive-readout plan from the product's support. The data
-    # support is now MIXED (data == [x|z]): X-only → V_X (MX), Z-only → V_Z (M),
-    # both X and Z → W (MY, the literal Pauli Y of Ȳ = iX̄Z̄).
     data_x = tuple(int(q) for q in range(n0) if sx[q] and not sz[q])
     data_z = tuple(int(q) for q in range(n0) if sz[q] and not sx[q])
     data_y = tuple(int(q) for q in range(n0) if sx[q] and sz[q])
@@ -486,8 +492,6 @@ def _ybar_obs0_rows(
         data_x=data_x, data_z=data_z, data_y=data_y, kx_z=kx_z, kz_x=kz_x
     )
 
-    # Per-row provenance, classified the same way the circuit re-partitions the
-    # merged-code matrix (``_split_quditcode_into_virtual_cssc``).
     x_slot = z_slot = y_slot = 0
     rows: list[Obs0Row] = []
     for sym_row in range(n_rows):
@@ -568,24 +572,29 @@ class YGadgetLayout:
                       ``obs0`` as the XOR of these rows' IN-CIRCUIT last-QEC-round
                       ancilla outcomes (family_index → ``checks_x`` / ``checks_z``
                       / ``y_ancilla_ids`` slot) — but ONLY when that XOR is
-                      deterministic on the prepared state. With the ``[x | z]``
-                      representative the product carries bare X on V_X / Z on V_Z
-                      data, which is non-deterministic on a |Y±⟩ prep, so obs0 is
-                      gated off on such codes (e.g. Steane); the all-Y
-                      representative that made obs0 deterministic is infeasible on
-                      general codes (BB) and no longer targeted (Task 5a). Where
-                      obs0 IS emitted it measures −Ȳ (the GF(2) product drops the
-                      ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit): Y+ → 1,
-                      Y− → 0 — handled by a documented sign convention.
+                      deterministic on the prepared state. The bare ``[x | z]``
+                      product carries X on V_X / Z on V_Z data, so it is
+                      deterministic exactly on a proper Ȳ-eigenstate codeword: the
+                      ``data_init="Y±"`` prep injects the EXACT |Ȳ±⟩ = S̄|X̄±⟩
+                      codeword, on which every code stabilizer is +1 and obs0 is
+                      emitted; on a non-eigenstate prep (|0̄⟩/|+̄⟩) it is a genuine
+                      50/50 and gated off (unless ``force_obs0``). The same bare
+                      representative is the only feasible one on a general code (BB
+                      [[36,8,4]], where an all-Y representative does not exist).
+                      The bare product equals Ȳ = iX̄Z̄ EXACTLY (for Steane
+                      [x | z] = X₂X₄Z₁Z₃Y₅ and iX̄Z̄ = +X₂X₄Z₁Z₃Y₅), so the raw
+                      obs0 bit IS the Ȳ eigenvalue bit: Y+ → 0, Y− → 1.
         obs0_readout— :class:`Obs0ReadoutPlan`: the DESTRUCTIVE cross-check
                       (``obs1``, NOT the physical readout). Per support-qubit it
                       gives the Pauli to read off the final destructive readout:
                       V_X data → X, V_Z data → Z, W data → Y, κ_x → Z, κ_z → X.
-                      Those record signs carry the physical Ȳ = iX̄Z̄ phase, so
-                      :func:`build_single_y_ppm_circuit` emits it as ``obs1`` with
-                      the un-inverted eigenvalue (Y+ → 0, Y− → 1) — the complement
-                      of the in-circuit ``obs0`` (whose signed product is −Ȳ; see
-                      ``obs0_xor_map``).
+                      This reads the SAME Ȳ = [x | z] product as ``obs0`` off the
+                      destructive records, so it carries the same eigenvalue
+                      (Y+ → 0, Y− → 1). :func:`build_single_y_ppm_circuit` uses it
+                      in ``benchmark_y`` as ``obs0 ⊕ obs1`` (deterministic on ANY
+                      input — both equal Ȳ); as a standalone ``obs1`` it is emitted
+                      only when its destructive basis matches the readout
+                      (gated by ``_observable_is_deterministic``).
     """
 
     code: CSSCode
@@ -735,7 +744,7 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     merged_code = QuditCode(field(H_sym), is_subsystem_code=bool(comm.any()))
 
     obs0_rows, obs0_readout = _ybar_obs0_rows(
-        H_sym, x, z, n0=n, n_merged=n_merged, k_x=k_x
+        H_sym, code, x, z, n0=n, n_merged=n_merged, k_x=k_x
     )
     return YGadgetLayout(
         code=code,

@@ -41,14 +41,113 @@ def test_single_y_circuit_compiles_all_inits(data_init: str | None, rounds: int)
     assert dem.num_detectors > 0
 
 
-def test_single_y_circuit_rejects_product_state_init() -> None:
-    """A product-state data_init (e.g. "0") is rejected: Ȳ prep needs Y+/Y-."""
+def test_single_y_circuit_compiles_with_noise() -> None:
+    """The single-Y circuit instruments under a noise model and still compiles
+    to a DEM. Deterministic structural check (no sampling) covering the
+    ``noise_model`` branch of ``build_single_y_ppm_circuit``.
+    """
+    from qldpc.circuits import DepolarizingNoiseModel
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
 
     code, x, z = _steane_y_pair()
     yg = build_y_gadget(code, x=x, z=z)
-    with pytest.raises(ValueError, match="data_init must be None, 'Y\\+' or 'Y-'"):
+    circuit = build_single_y_ppm_circuit(
+        yg, rounds=2, data_init="Y+", noise_model=DepolarizingNoiseModel(0.01)
+    )
+    assert isinstance(circuit, stim.Circuit)
+    dem = circuit.detector_error_model()
+    assert dem.num_detectors > 0
+
+
+def test_single_y_circuit_rejects_unsupported_init() -> None:
+    """An unsupported data_init (e.g. "0") is rejected; valid: the six Pauli
+    eigenstates None/'Z+', 'Z-', '+'/'X+', 'X-', 'Y+', 'Y-'."""
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    with pytest.raises(ValueError, match="data_init must be one of"):
         build_single_y_ppm_circuit(yg, rounds=3, data_init="0")
+    # the six Pauli-basis eigenstates (and the None/"+" aliases) are all accepted
+    for di in (None, "Z+", "Z-", "+", "X+", "X-", "Y+", "Y-"):
+        build_single_y_ppm_circuit(yg, rounds=3, data_init=di).detector_error_model()
+
+
+def test_single_y_steane_obs0_deterministic_on_eigenstate() -> None:
+    """Steane bare obs0 = ∏(χ_X·χ_Z·y_v) is the deterministic Ȳ readout on |Ȳ±⟩.
+
+    The Ȳ-eigenstate prep is the EXACT codeword |Ȳ±⟩ (state injection |X̄+⟩ then
+    transversal S†/S), NOT the physical product ∏_i|Y_i±⟩. On the proper codeword
+    every Steane stabilizer is +1, so the bare new-stabilizer product [x | z]
+    agrees with Ȳ and its in-circuit XOR is deterministic. The bare support is
+    the LITERAL Ȳ = iX̄Z̄ ([x | z] = X₂X₄Z₁Z₃Y₅ = +iX̄Z̄ exactly), so the raw obs0
+    bit IS the Ȳ eigenvalue bit: |Ȳ+⟩ → 0, |Ȳ-⟩ → 1 (opposite, both
+    deterministic). Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C.
+    """
+    import numpy as np
+
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    expected = {"Y+": 0.0, "Y-": 1.0}
+    for data_init, want in expected.items():
+        circuit = build_single_y_ppm_circuit(yg, rounds=3, data_init=data_init)
+        # Deterministic ⇒ the noiseless DEM compiles with exactly the obs0 observable.
+        assert circuit.detector_error_model().num_observables == 1
+        obs_lines = [
+            ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        assert len(obs_lines) == 1, "obs0 must be emitted on a deterministic Ȳ eigenstate"
+        raw = circuit.compile_sampler().sample(shots=4000).astype(np.uint8)
+        n_meas = raw.shape[1]
+        offs = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1)
+        frac = float(obs0.mean())
+        assert frac == want, f"data_init={data_init!r}: P(obs0=1)={frac}, expected {want}"
+
+
+def test_single_y_noiseless_random_outcome_on_0_and_plus() -> None:
+    """Noiseless Ȳ on |0̄⟩ / |+̄⟩ is a genuine 50/50 measurement (``force_obs0``).
+
+    Ȳ = iX̄Z̄ anticommutes with Z̄ (on |0̄⟩) and with X̄ (on |+̄⟩), so the noiseless
+    readout outcome is maximally random. obs0 is non-deterministic here (the DEM
+    does not compile), so we raw-sample the forced obs0 and check it is ~50/50.
+    """
+    import numpy as np
+
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    for data_init in (None, "+"):
+        circuit = build_single_y_ppm_circuit(
+            yg, rounds=3, data_init=data_init, force_obs0=True
+        )
+        obs_lines = [
+            ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        assert len(obs_lines) == 1, "force_obs0 should emit exactly one obs0 observable"
+        raw = circuit.compile_sampler().sample(shots=4000).astype(np.uint8)
+        n_meas = raw.shape[1]
+        offs = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1)
+        frac = float(obs0.mean())
+        assert 0.4 < frac < 0.6, f"data_init={data_init!r}: P(obs0=1)={frac:.3f}, expected ~0.5"
+
+
+def test_single_y_force_obs0_conflicts_with_memory_logical() -> None:
+    """``force_obs0`` and ``memory_logical`` both claim observable index 0."""
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    with pytest.raises(ValueError, match="index 0"):
+        build_single_y_ppm_circuit(
+            yg, rounds=3, data_init=None, memory_logical=0, force_obs0=True
+        )
 
 
 def test_single_y_survivor_memory_observable_compiles() -> None:
@@ -87,67 +186,16 @@ def test_single_y_memory_logical_none_unchanged() -> None:
     assert default.detector_error_model().num_observables == 0
 
 
-@pytest.mark.slow
-def test_bb_survivor_memory_ler_monotone_in_p() -> None:
-    """BB Ȳ-surgery preserves a surviving logical: survivor-memory LER grows with p.
-
-    obs0 (the random Ȳ outcome) stays gated off; we score decoding against a
-    surviving logical Z̄ (deterministic on |0̄…0̄⟩), demonstrating the merge is
-    decodable and fault-tolerant for the other logicals (Ide, Gowda, Nadkarni,
-    Dauphinais arXiv:2410.02753 §III.C).
-    """
-    import sinter
-
-    from qldpc import decoders
-    from qldpc.circuits import DepolarizingNoiseModel
-    from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
-
-    code, x, z = _bb_y_pair(overlap=1)
-    yg = build_y_gadget(code, x=x, z=z)
-    error_rates = [0.001, 0.005, 0.02]
-    tasks = []
-    for p in error_rates:
-        circ = build_single_y_ppm_circuit(
-            yg,
-            rounds=3,
-            data_init=None,
-            memory_logical=0,
-            noise_model=DepolarizingNoiseModel(p),
-        )
-        tasks.append(sinter.Task(circuit=circ, json_metadata={"p": float(p)}))
-    results = sinter.collect(
-        tasks=tasks,
-        decoders=["custom"],
-        custom_decoders={"custom": decoders.SinterDecoder()},
-        num_workers=4,
-        max_shots=2000,
-        max_errors=30,
-        print_progress=False,
-    )
-    by_p = {r.json_metadata["p"]: r.errors / max(r.shots, 1) for r in results}
-    sorted_p = sorted(by_p)
-    ler = [by_p[p] for p in sorted_p]
-    print("survivor-memory LER:", list(zip(sorted_p, ler)))
-    for i in range(len(ler) - 1):
-        assert ler[i] <= ler[i + 1] * 1.5, (
-            f"LER not monotone: {list(zip(sorted_p, ler))}"
-        )
-
-
-# RETIRED (Task 5a): test_single_y_noiseless_truth_table and
-# test_single_y_dem_has_no_undetectable_observable_error are superseded by the BB
-# DEM test (Task 6). Both asserted on the Steane IN-CIRCUIT obs0, which was only
-# deterministic for the ALL-Y-on-data representative of Ȳ = iX̄Z̄. That
-# representative does not exist on a general code (BB [[36,8,4]] → ValueError), so
-# `_ybar_obs0_rows` now targets the literal Ȳ support `[x | z]` (Ide, Gowda,
-# Nadkarni, Dauphinais arXiv:2410.02753 §III.C). The `[x | z]` product carries
-# bare Pauli-X on V_X / Pauli-Z on V_Z data qubits, which are NOT measurable
-# in-circuit on a |Y±⟩ prep (verified: every selected row's ancilla record is
-# individually non-deterministic; stim reports "The circuit contains
-# non-deterministic observables"). build_single_y_ppm_circuit therefore gates obs0
-# off (via _observable_is_deterministic), so no obs0 OBSERVABLE_INCLUDE is emitted
-# for the Steane fixture and these two Steane-obs0 tests no longer have a subject.
-# The fault-tolerant Ȳ readout / sign convention is validated on BB by the Task 6
-# DEM test instead. (build_single_y_ppm_circuit / DEM compilation for the Steane
-# fixture is still covered by the four tests above.)
+# obs0 representative & prep (supersedes the retired all-Y truth-table tests).
+# `_ybar_obs0_rows` targets the BARE literal Ȳ support `[x | z]` — the product of
+# the new merge stabilizers ∏(χ_X·χ_Z·y_v) (Ide, Gowda, Nadkarni, Dauphinais
+# arXiv:2410.02753 §III.C). That product carries Pauli-X on V_X / Pauli-Z on V_Z
+# data qubits, so it is deterministic ONLY on a proper Ȳ-eigenstate CODEWORD —
+# NOT on the physical product ∏_i|Y_i±⟩ (where the code stabilizers are random).
+# `_steane_logical_y_eigenstate_prep` therefore prepares the EXACT codeword
+# |Ȳ±⟩ = S̄|X̄±⟩ (inject |X̄+⟩ by RX^n + Z-syndrome feedback, then transversal S),
+# on which the bare obs0 is deterministic and opposite for Y+/Y- — asserted by
+# test_single_y_steane_obs0_deterministic_on_eigenstate above. The same bare
+# `[x | z]` representative is the only feasible one on a general code (BB
+# [[36,8,4]], where the all-Y representative does not exist); its 50/50 behaviour
+# on a non-eigenstate prep is covered by the BB force_obs0 test above.

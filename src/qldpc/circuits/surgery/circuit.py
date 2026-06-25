@@ -7,8 +7,6 @@ References:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import stim
 
@@ -21,9 +19,6 @@ from qldpc.objects import Pauli
 from .bridge import Bridge
 from .gadget import GadgetLayout
 from .y_gadget import YGadgetLayout
-
-if TYPE_CHECKING:
-    from qldpc.circuits.surgery.joint_layout import JointPPMLayout
 
 
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
@@ -442,39 +437,63 @@ def _steane_logical_y_eigenstate_prep(
     real_data_ids: tuple[int, ...],
     *,
     data_init: str,
+    ancilla_base: int,
 ) -> stim.Circuit:
-    """Transversal logical-Y eigenstate prep for a self-dual CSS code.
+    """Prepare the EXACT logical-Y eigenstate codeword |Ȳ±⟩ = S̄|X̄±⟩.
 
-    Prepares an Ȳ eigenstate on the original ``yg.code`` data qubits
-    (``real_data_ids`` = the first ``code.num_qudits`` merged-code columns).
-    For a self-dual CSS code with transversal H (logical H) and transversal S
-    (logical S) — e.g. the [[7,1,3]] Steane code — the logical-Y eigenstate is
-    obtained from the protocol-default logical |0⟩ prep by the transversal
-    rotation ``S^⊗n · H^⊗n``:
+    The correct preparation of a logical-Y eigenstate is the codeword |X̄+⟩
+    followed by the transversal phase gate S̄ — NOT the physical product
+    ``∏_i |Y_i+⟩`` (which is a +1 eigenstate of every single-qubit Y_i but is
+    NOT a codeword: the original code stabilizers are random on it). The
+    distinction is decisive for the Ȳ readout: on the physical product the bare
+    Ȳ representative ``[x | z]`` (= the product of the merged code's new
+    χ_X·χ_Z·y_v rows) is non-deterministic, because ``[x | z]`` differs from an
+    all-Y representative by code stabilizers that are random there. On the
+    proper codeword every code stabilizer is +1, so all Ȳ representatives agree
+    and the in-circuit ``[x | z]`` readout is DETERMINISTIC. The bare support is
+    the LITERAL Ȳ = iX̄Z̄: for Steane ``[x | z] = X₂X₄Z₁Z₃Y₅``, and
+    ``iX̄Z̄ = +X₂X₄Z₁Z₃Y₅`` (the ``i`` cancels the ``X₅Z₅ = −iY₅`` phase), so
+    ⟨[x | z]⟩ = ⟨Ȳ⟩ EXACTLY — no sign convention.
 
-        R^⊗n           → |0⟩^n         (a +1 eigenstate of every Z-stabilizer
-                                        and of Z̄, hence projects to |0⟩_L once
-                                        the X-stabilizers are measured)
-        H^⊗n           → |+⟩_L         (transversal H is logical H)
-        S^⊗n  / S†^⊗n  → |+i⟩_L/|−i⟩_L (transversal S is logical S; S Z S† = Z,
-                                        S X S† = Y, so S|+⟩_L is an Ȳ eigenstate)
+    Construction (exact, noiseless codeword injection):
+        RX^n                 → |+⟩^n  (X̄ = +1, X-syndrome 0, Z-syndrome random)
+        measure H_Z, correct → |X̄+⟩  (feedback X^{R·s} cancels the random
+                                       Z-syndrome s, where ``H_Z R = I``; the
+                                       X-corrections commute with X̄ = +1, so the
+                                       logical is untouched)
+        S†^n (Y+) / S^n (Y-)  → |Ȳ±⟩  (transversal S† maps X̄ → +Ȳ, so
+                                       S†|X̄+⟩ = |Ȳ+⟩; transversal S maps X̄ → −Ȳ,
+                                       so S|X̄+⟩ = |Ȳ-⟩ — verified in stim)
 
-    ``data_init="Y+"`` applies ``S`` (→ |+i⟩_L); ``"Y-"`` applies ``S†`` (→
-    |−i⟩_L). The two are the ∓1 eigenstates of the logical Y in stim's S
-    convention. We verified with a postselected-codeword tableau that the
-    resulting state preserves every Steane stabilizer and has ⟨X̄⟩ = ⟨Z̄⟩ = 0,
-    ⟨Ȳ⟩ = ∓1 — i.e. a genuine deterministic Ȳ eigenstate.
+    The feedback measurement+correction PROJECTS |+⟩^n onto the syndrome-0
+    codeword |X̄+⟩ deterministically (the random Z-syndrome is cancelled by a
+    Pauli correction, not merely tracked), so the state entering the merge is an
+    exact Ȳ eigenstate and the merge's original-code H_X/H_Z rows are +1
+    deterministic on it (verified). ``data_init="Y+"`` applies ``S†`` (→ |Ȳ+⟩,
+    ⟨Ȳ⟩ = +1, bare obs0 = +1 → bit 0); ``"Y-"`` applies ``S`` (→ |Ȳ-⟩, ⟨Ȳ⟩ = −1,
+    bare obs0 = −1 → bit 1).
 
-    Whether this transversal recipe yields a logical operation is a property of
-    the code (its transversal-gate set); it is NOT applied blindly. For codes
-    without transversal H/S this prep does not produce an Ȳ eigenstate, so we
-    restrict it to the self-dual CSS case and raise otherwise.
+    Transversal S is a logical operation only for a self-dual CSS code (its X-
+    and Z-stabilizer row spaces coincide); we restrict to that case and raise
+    otherwise. Homological Ȳ = iX̄Z̄ measurement of Ide, Gowda, Nadkarni,
+    Dauphinais arXiv:2410.02753 §III.C/§III.D (docs/superpowers/docs/main.tex
+    §4); the eigenstate prep is the standard transversal-Clifford state
+    injection of self-dual CSS codes.
 
-    Homological Ȳ = iX̄Z̄ measurement of Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 §III.C/§III.D (docs/superpowers/docs/main.tex §4); the
-    eigenstate prep itself is the standard transversal-Clifford state injection
-    of self-dual CSS codes.
+    Args:
+        yg: the Y-gadget layout (provides the underlying self-dual CSS ``code``).
+        real_data_ids: the merged-code data-qubit IDs (first ``code.num_qudits``
+            columns) the codeword is prepared on.
+        data_init: ``"Y+"`` (apply S) or ``"Y-"`` (apply S†).
+        ancilla_base: first free qubit ID; the ``m_z`` Z-stabilizer measurement
+            ancillas occupy ``ancilla_base .. ancilla_base + m_z - 1`` (disjoint
+            from the merge qubits). These prep measurements are emitted before
+            any merge measurement, so the merge's end-relative ``target_rec``
+            offsets are unaffected.
     """
+    import galois as _galois
+
+    F2 = _galois.GF(2)
     code = yg.code
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
@@ -489,10 +508,45 @@ def _steane_logical_y_eigenstate_prep(
             "Dauphinais arXiv:2410.02753 §III.C)."
         )
     ids = list(real_data_ids)
+    n = len(ids)
+    m_z = HZ.shape[0]
+
+    # Right inverse R (n×m_z) of H_Z over GF(2): H_Z @ R = I. The Pauli X^{R·s}
+    # then has Z-syndrome s, so applying it cancels a measured Z-syndrome s.
+    R = np.zeros((n, m_z), dtype=np.uint8)
+    eye = np.eye(m_z, dtype=np.uint8)
+    for i in range(m_z):
+        aug = F2(np.hstack([HZ, eye[i].reshape(-1, 1)]))
+        rref = np.asarray(aug.row_reduce()).astype(np.uint8)
+        col = np.zeros(n, dtype=np.uint8)
+        for row in rref:
+            lead = np.flatnonzero(row[:n])
+            if lead.size:
+                col[lead[0]] = row[n]
+        R[:, i] = col
+    if not np.array_equal((HZ @ R) % 2, eye):
+        raise ValueError("internal: H_Z has no right inverse (code not full Z-rank)")
+
     circuit = stim.Circuit()
-    circuit.append("R", ids)  # |0⟩^n → |0⟩_L after X-stabilizer projection
-    circuit.append("H", ids)  # transversal H = logical H → |+⟩_L
-    circuit.append("S" if data_init == "Y+" else "S_DAG", ids)  # logical S/S† → |±i⟩_L
+    circuit.append("RX", ids)  # |+⟩^n  (X̄ = +1, X-syndrome 0)
+    # Measure each Z-stabilizer onto a fresh ancilla (random Z-syndrome on |+⟩^n).
+    anc_ids = [ancilla_base + i for i in range(m_z)]
+    for i in range(m_z):
+        anc = anc_ids[i]
+        circuit.append("R", [anc])
+        for q in np.flatnonzero(HZ[i]):
+            circuit.append("CX", [ids[int(q)], anc])  # Z-parity of data → ancilla
+        circuit.append("M", [anc])
+    # Feedback X^{R·s} to cancel the syndrome → exact |X̄+⟩. Stabilizer i is the
+    # (m_z - i)-th most recent measurement record.
+    for i in range(m_z):
+        rec = stim.target_rec(-(m_z - i))
+        for q in np.flatnonzero(R[:, i]):
+            circuit.append("CX", [rec, ids[int(q)]])  # classically-controlled X_q
+    # Transversal S† maps X̄ → +Ȳ (= iX̄Z̄), so S†|X̄+⟩ = |Ȳ+⟩ (the Ȳ = +1
+    # eigenstate); transversal S maps X̄ → −Ȳ, so S|X̄+⟩ = |Ȳ-⟩. Verified in stim:
+    # ⟨Ȳ⟩ = ⟨[x|z]⟩ = +1 on S†|X̄+⟩ and −1 on S|X̄+⟩.
+    circuit.append("S_DAG" if data_init == "Y+" else "S", ids)  # → |Ȳ+⟩ / |Ȳ-⟩
     return circuit
 
 
@@ -503,6 +557,8 @@ def build_single_y_ppm_circuit(
     noise_model: NoiseModel | None = None,
     data_init: str | None = None,
     memory_logical: int | None = None,
+    force_obs0: bool = False,
+    benchmark_y: bool = False,
 ) -> stim.Circuit:
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
@@ -515,12 +571,11 @@ def build_single_y_ppm_circuit(
     rows), the Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 cross-merge of the
     χ_X and χ_Z rows anchored at each crossing qubit ``v ∈ W``.
 
-    The emission reuses the split-schedule machinery of
-    ``_build_joint_ppm_circuit_mixed_basis`` (this function's joint-PPM
-    sibling), pointed at the single merged code instead of the two-block bridge
-    structure. We deliberately do NOT call ``build_joint_ppm_circuit`` — its
-    mixed-basis dispatch routes through a forbidden rotate-to-Z / Hadamard-dual
-    path; the circuit here is built DIRECTLY from ``yg.merged_code``.
+    The emission runs the split X / Z / Y syndrome schedule (the X-ancillas
+    collapse before the Z-phase fires; the mixed Y-checks are measured last)
+    directly on the single merged code ``yg.merged_code``. This is the sole
+    non-CSS surgery emitter — ``build_joint_ppm_circuit`` handles only
+    same-basis CSS joints and rejects mixed-basis inputs.
 
     Pipeline (mirrors ``build_single_ppm_circuit``):
       1. QUBIT_COORDS for data + κ ancillas + Y-row ancilla.
@@ -549,10 +604,17 @@ def build_single_y_ppm_circuit(
          the SAME product off the final destructive readouts (``yg.obs0_readout``)
          as a noiseless cross-check.
 
-    ``data_init`` options:
-      * ``None`` (default): data |0⟩ (R). No Ȳ eigenstate is prepared.
-      * ``"Y+"`` / ``"Y-"``: transversal logical-Y eigenstate prep |±i⟩_L for a
-        self-dual CSS code (see ``_steane_logical_y_eigenstate_prep``).
+    ``data_init`` options — the six logical Pauli-basis eigenstates, named by the
+    operator they are a ± eigenstate of:
+      * ``"Z+"`` / ``None``: |0̄⟩ (Z̄ = +1, R).     ``"Z-"``: |1̄⟩ (Z̄ = −1, R + X̄).
+      * ``"X+"`` / ``"+"``:  |+̄⟩ (X̄ = +1, RX).    ``"X-"``: |-̄⟩ (X̄ = −1, RX + Z̄).
+      * ``"Y+"`` / ``"Y-"``: the EXACT logical-Y eigenstate codeword |Ȳ±⟩ = S̄|X̄±⟩
+        (inject |X̄+⟩ then transversal S†/S; self-dual CSS code only, see
+        ``_steane_logical_y_eigenstate_prep``).
+    ``None`` and ``"+"`` are backward-compatible aliases for ``"Z+"`` and ``"X+"``.
+    The Ȳ readout (obs0) is deterministic only on the Ȳ eigenstates (Y±); on the
+    Z̄ (Z±) and X̄ (X±) eigenstates Ȳ anticommutes with the prepared logical, so
+    obs0 is a genuine 50/50 (read via ``force_obs0``).
 
     ``memory_logical`` (survivor-memory mode). The Ȳ-on-q0 measurement preserves
     the other logicals of the code; their Z̄ are deterministic on the |0̄…0̄⟩ prep
@@ -589,21 +651,21 @@ def build_single_y_ppm_circuit(
     ``checks_z`` M-record, q1 → ``y_ancilla`` MX-record), the same mechanism the
     X/Z-measurement sibling ``_surgery_observable`` uses on the final QEC round.
 
-    Determinism gate. With the ``[x | z]`` representative the product carries bare
-    Pauli-X on V_X / Pauli-Z on V_Z data qubits, which are NOT measurable
-    in-circuit on a |Y±⟩ data prep, so this in-circuit XOR is generally
-    non-deterministic (the previous ALL-Y-on-data representative — deterministic
-    but infeasible on general codes such as BB [[36,8,4]] — is no longer
-    targeted; Task 5a). ``_observable_is_deterministic`` therefore gates obs0 OFF
-    whenever the XOR is not pinned by the prep; for the Steane fixture obs0 is not
-    emitted (its fault-tolerant readout is validated on BB by the Task 6 DEM
-    test). Where obs0 IS deterministic it measures the SIGNED Pauli product −Ȳ
-    (the GF(2) picker drops the ``i`` of iX̄Z̄), so the raw obs0 bit is NOT(Ȳ bit):
-    Y+ → 1, Y- → 0 — a documented, honest convention (a stim OBSERVABLE_INCLUDE
-    cannot carry a constant offset to normalise it). The complementary obs1 reads
-    the SAME product off the final destructive readouts (V_X data MX ⊕ V_Z data M
-    ⊕ W data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check, carrying the
-    un-inverted eigenvalue (Y+ → 0, Y- → 1). The per-system Cheeger boost
+    Determinism gate. The bare ``[x | z]`` product carries Pauli-X on V_X /
+    Pauli-Z on V_Z data qubits, so it is deterministic only on a PROPER Ȳ-
+    eigenstate codeword — not on a non-eigenstate prep. With ``data_init`` in
+    ``("Y+", "Y-")`` the data is the EXACT |Ȳ±⟩ codeword (state injection |X̄+⟩
+    then transversal S), on which every code stabilizer is +1, so the bare
+    product agrees with Ȳ and the in-circuit XOR is DETERMINISTIC; obs0 is
+    emitted (DEM compiles). With the |0̄⟩/|+̄⟩ preps Ȳ anticommutes with the
+    prepared logical, so the XOR is a genuine 50/50 and
+    ``_observable_is_deterministic`` gates obs0 OFF unless ``force_obs0`` is set.
+    The bare product equals Ȳ = iX̄Z̄ EXACTLY (for Steane ``[x | z] = X₂X₄Z₁Z₃Y₅``
+    and ``iX̄Z̄ = +X₂X₄Z₁Z₃Y₅``), so the raw obs0 bit is the Ȳ eigenvalue bit:
+    obs0 = 0 ↔ Ȳ = +1 (|Ȳ+⟩), obs0 = 1 ↔ Ȳ = −1 (|Ȳ-⟩). The complementary obs1
+    reads the SAME product off the final destructive readouts (V_X data MX ⊕ V_Z
+    data M ⊕ W data MY ⊕ κ_x M ⊕ κ_z MX) as a noiseless cross-check. The
+    per-system Cheeger boost
     (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D;
     docs/superpowers/docs/main.tex §4.7) is the FAULT-DISTANCE refinement, applied
     inside ``build_y_gadget``; it is not needed for this readout.
@@ -640,16 +702,50 @@ def build_single_y_ppm_circuit(
     circuit = _mixed_basis_qubit_coords(n_q, qubit_ids, y_ancilla_ids)
 
     # --- State prep -----------------------------------------------------------
+    # ``data_init`` is one of the six logical Pauli-basis eigenstates, named by
+    # the operator they are a +/- eigenstate of:
+    #   "Z+" (or None) → |0̄⟩ (Z̄ = +1)      "Z-" → |1̄⟩ (Z̄ = −1)
+    #   "X+" (or "+")  → |+̄⟩ (X̄ = +1)      "X-" → |-̄⟩ (X̄ = −1)
+    #   "Y+"           → |Ȳ+⟩ (Ȳ = +1)      "Y-" → |Ȳ-⟩ (Ȳ = −1)
+    # The Ȳ measurement is deterministic ONLY on the Ȳ eigenstates (Y±); on the
+    # Z̄/X̄ eigenstates Ȳ anticommutes with the prepared logical, so obs0 is a
+    # genuine 50/50 (read via ``force_obs0``). None ("Z+") and "+" ("X+") are the
+    # backward-compatible aliases for |0̄⟩ and |+̄⟩; internally |0̄⟩ is ``None``.
+    data_init = {"Z+": None, "X+": "+"}.get(data_init, data_init)
+    x_cols = tuple(int(q) for q in np.flatnonzero(np.asarray(yg.x).astype(np.uint8)))
+    z_cols = tuple(int(q) for q in np.flatnonzero(np.asarray(yg.z).astype(np.uint8)))
     if data_init is None:
+        circuit.append("R", list(real_data_ids))  # |0⟩^n → logical |0̄…0̄⟩
+    elif data_init == "Z-":
         circuit.append("R", list(real_data_ids))  # |0⟩^n
+        circuit.append("X", [real_data_ids[q] for q in x_cols])  # X̄ on supp(x) → |1̄⟩
+    elif data_init == "+":
+        circuit.append("RX", list(real_data_ids))  # |+⟩^n → logical |+̄…+̄⟩
+    elif data_init == "X-":
+        circuit.append("RX", list(real_data_ids))  # |+⟩^n
+        circuit.append("Z", [real_data_ids[q] for q in z_cols])  # Z̄ on supp(z) → |-̄⟩
     elif data_init in ("Y+", "Y-"):
+        prep_base = (
+            max([*qubit_ids.all_qubits, *y_ancilla_ids])
+            if (qubit_ids.all_qubits or y_ancilla_ids)
+            else -1
+        ) + 1
         circuit += _steane_logical_y_eigenstate_prep(
-            yg, real_data_ids, data_init=data_init
+            yg, real_data_ids, data_init=data_init, ancilla_base=prep_base
         )
     else:
         raise ValueError(
-            f"data_init must be None, 'Y+' or 'Y-' for build_single_y_ppm_circuit; "
-            f"got {data_init!r}"
+            "data_init must be one of None/'Z+', 'Z-', '+'/'X+', 'X-', 'Y+', 'Y-' "
+            f"for build_single_y_ppm_circuit; got {data_init!r}"
+        )
+    if sum([bool(force_obs0), memory_logical is not None, bool(benchmark_y)]) > 1:
+        raise ValueError(
+            "force_obs0, memory_logical, benchmark_y each use observable index 0; set at most one"
+        )
+    if benchmark_y and data_init in ("Y+", "Y-"):
+        raise ValueError(
+            "benchmark_y reads Ȳ without a Ȳ-eigenstate prep; use a Z̄/X̄ basis "
+            "data_init (None/'Z+', 'Z-', '+'/'X+', 'X-')"
         )
     if kx_ids:
         circuit.append("R", list(kx_ids))  # X-system gadget ancilla |0⟩ (basis-complement)
@@ -657,9 +753,9 @@ def build_single_y_ppm_circuit(
         circuit.append("RX", list(kz_ids))  # Z-system gadget ancilla |+⟩ (basis-complement)
 
     # --- Build the split X / Z / Y per-round circuit --------------------------
-    # See _build_joint_ppm_circuit_mixed_basis for the determinism rationale:
-    # X-ancillas collapse before the Z-phase CZ gates fire, so the data is in a
-    # definite X-stabilizer eigenstate when the Z-phase starts.
+    # Determinism rationale: X-ancillas collapse before the Z-phase CZ gates
+    # fire, so the data is in a definite X-stabilizer eigenstate when the
+    # Z-phase starts.
     qubit_ids_x = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_x)
     qubit_ids_x.checks_x = qubit_ids.checks_x
     qubit_ids_z = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_z)
@@ -747,9 +843,14 @@ def build_single_y_ppm_circuit(
     #     deterministic — only the Ȳ row product is, handled by obs0).
     #   κ_x: |0⟩ → +Z;  κ_z: |+⟩ → +X.
     qubit_init: dict[int, tuple[Pauli, int] | None] = {}
-    if data_init is None:
-        for qid in real_data_ids:
-            qubit_init[qid] = (Pauli.Z, +1)  # |0⟩
+    if data_init in (None, "Z-"):
+        flip = set(x_cols) if data_init == "Z-" else set()  # |1̄⟩ = X̄ on supp(x)
+        for col, qid in enumerate(real_data_ids):
+            qubit_init[qid] = (Pauli.Z, -1 if col in flip else +1)  # |0⟩ / |1⟩
+    elif data_init in ("+", "X-"):
+        flip = set(z_cols) if data_init == "X-" else set()  # |-̄⟩ = Z̄ on supp(z)
+        for col, qid in enumerate(real_data_ids):
+            qubit_init[qid] = (Pauli.X, -1 if col in flip else +1)  # |+⟩ / |-⟩
     else:  # "Y+"/"Y-": no single-qubit Pauli eigenstate per data qubit
         for qid in real_data_ids:
             qubit_init[qid] = None
@@ -759,12 +860,26 @@ def build_single_y_ppm_circuit(
         qubit_init[qid] = (Pauli.X, +1)
 
     # Per-qubit destructive readout basis (used by final detector emission):
-    #   κ_x → Z (M), κ_z → X (MX), real data → basis matching data_init
-    #   (Y-eigenstate data is measured in Y; |0⟩ default measured in Z).
-    data_final_pauli = Pauli.Y if data_init in ("Y+", "Y-") else Pauli.Z
+    #   κ_x → Z (M), κ_z → X (MX), real data → basis matching data_init:
+    #   Y± → Y;  X± ("+"/"X-") → X;  Z± (None/"1") → Z.
+    data_final_pauli = (
+        Pauli.Y
+        if data_init in ("Y+", "Y-")
+        else (Pauli.X if data_init in ("+", "X-") else Pauli.Z)
+    )
     qubit_final_meas: dict[int, Pauli] = {}
-    for qid in real_data_ids:
-        qubit_final_meas[qid] = data_final_pauli
+    if benchmark_y:
+        # Destructive Ȳ readout (obs1): the obs0-product support on data is
+        # X on V_X (data_x), Z on V_Z (data_z), Y on W (data_y); other data → Z.
+        _bx = set(yg.obs0_readout.data_x)
+        _by = set(yg.obs0_readout.data_y)
+        for col, qid in enumerate(real_data_ids):
+            qubit_final_meas[qid] = (
+                Pauli.X if col in _bx else (Pauli.Y if col in _by else Pauli.Z)
+            )
+    else:
+        for qid in real_data_ids:
+            qubit_final_meas[qid] = data_final_pauli
     for qid in kx_ids:
         qubit_final_meas[qid] = Pauli.Z
     for qid in kz_ids:
@@ -799,6 +914,12 @@ def build_single_y_ppm_circuit(
             round1_reliable_check_ids.append(cid)
 
     measurement_record = MeasurementRecord()
+
+    # The merge (lattice surgery proper). On a Y±-eigenstate prep the data is the
+    # exact |Ȳ±⟩ codeword (prepared by _steane_logical_y_eigenstate_prep above),
+    # so the bare new-stabilizer product ∏(χ_X·χ_Z·y_v) = [x | z] first-measures
+    # on a codeword and is the deterministic Ȳ readout (Ide, Gowda, Nadkarni,
+    # Dauphinais arXiv:2410.02753 §III.C).
     circuit += one_round
     measurement_record.append(round_measurement_record)
     for cid in round1_reliable_check_ids:
@@ -830,9 +951,27 @@ def build_single_y_ppm_circuit(
         circuit.append("MX", list(kz_ids))  # Z-system ancilla read in X
         measurement_record.append({q: i for i, q in enumerate(kz_ids)})
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
-    data_meas_op = "MY" if data_init in ("Y+", "Y-") else "M"
-    circuit.append(data_meas_op, list(real_data_ids))
-    measurement_record.append({q: i for i, q in enumerate(real_data_ids)})
+    if benchmark_y:
+        # Per-qubit destructive Ȳ readout: MX on V_X, MY on W, M (Z) on the rest.
+        _bx = set(yg.obs0_readout.data_x)
+        _by = set(yg.obs0_readout.data_y)
+        mx_qids = [qid for col, qid in enumerate(real_data_ids) if col in _bx]
+        my_qids = [qid for col, qid in enumerate(real_data_ids) if col in _by]
+        mz_qids = [
+            qid for col, qid in enumerate(real_data_ids) if col not in _bx and col not in _by
+        ]
+        for op, qids in (("MX", mx_qids), ("MY", my_qids), ("M", mz_qids)):
+            if qids:
+                circuit.append(op, qids)
+                measurement_record.append({q: i for i, q in enumerate(qids)})
+    else:
+        data_meas_op = (
+            "MY"
+            if data_init in ("Y+", "Y-")
+            else ("MX" if data_init in ("+", "X-") else "M")
+        )
+        circuit.append(data_meas_op, list(real_data_ids))
+        measurement_record.append({q: i for i, q in enumerate(real_data_ids)})
 
     # --- Final detectors (center rows reconstructable from destructive readouts)
     # Same construction as the mixed-basis final detectors: emit a detector for
@@ -916,45 +1055,73 @@ def build_single_y_ppm_circuit(
     # Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C: the obs0
     # eigenvalue is the XOR of the IN-CIRCUIT ancilla records of the merged-code
     # rows whose product equals Ȳ on the original data columns. The picker
-    # ``_ybar_obs0_rows`` solves this over GF(2): the selected rows' product
-    # restricts to the literal Ȳ support ``[x | z]`` on data (X on V_X, Z on V_Z,
-    # Y on W) and is eigenbasis-compatible on the κ ancillas (Z-only κ_x, X-only
-    # κ_z). ``yg.obs0_xor_map`` records, per selected row, its merged-code
-    # (``H_sym``) row index plus its Pauli family (``"X"`` χ/stab row, ``"Z"``
-    # χ/stab row, or the ``"Y"`` q1 row) and its index within that family. The
-    # family→ancilla map is the same one the round circuit uses
-    # (``_split_quditcode_into_virtual_cssc`` partitions ``merged_code.matrix`` in
-    # the SAME row order as ``H_sym``, so family_index is the slot in
-    # ``checks_x`` / ``checks_z`` / ``y_ancilla_ids``):
+    # ``_ybar_obs0_rows`` solves this over GF(2): the selected rows' product is
+    # the BARE new-stabilizer product ∏(χ_X·χ_Z·y_v), restricting to the literal
+    # Ȳ support ``[x | z]`` on data (X on V_X, Z on V_Z, Y on W) and eigenbasis-
+    # compatible on the κ ancillas (Z-only κ_x, X-only κ_z). ``yg.obs0_xor_map``
+    # records, per selected row, its merged-code (``H_sym``) row index plus its
+    # Pauli family (``"X"`` χ_X row, ``"Z"`` χ_Z row, or the ``"Y"`` y_v row) and
+    # its index within that family. The family→ancilla map is the same one the
+    # round circuit uses (``_split_quditcode_into_virtual_cssc`` partitions
+    # ``merged_code.matrix`` in the SAME row order as ``H_sym``, so family_index
+    # is the slot in ``checks_x`` / ``checks_z`` / ``y_ancilla_ids``):
     #   family "X" → ``qubit_ids.checks_x[family_index]``   (X-phase, M record)
     #   family "Z" → ``qubit_ids.checks_z[family_index]``   (Z-phase, M record)
     #   family "Y" → ``y_ancilla_ids[family_index]``        (Y-phase, MX record)
     #
-    # DETERMINISM GATE. With the literal ``[x | z]`` representative, the product
-    # carries bare Pauli-X on V_X and Pauli-Z on V_Z data qubits, which are NOT
-    # measurable in-circuit on a |Y±⟩ data prep (each selected row's ancilla
-    # record is individually non-deterministic). The previous ALL-Y-on-data
-    # representative, which gave a deterministic in-circuit obs0, exists only on
-    # special codes (Steane) and is infeasible on general codes (BB [[36,8,4]]),
-    # so it is no longer targeted (Task 5a). ``_observable_is_deterministic``
-    # therefore gates obs0 OFF whenever the in-circuit XOR is not pinned by the
-    # prep — e.g. for the Steane fixture, where no obs0 OBSERVABLE_INCLUDE is
-    # emitted. Where it IS deterministic, the SIGN convention follows the −Ȳ
-    # GF(2)-product phase documented on ``YGadgetLayout.obs0_xor_map``.
-    # obs0 is the Ȳ eigenvalue only when an Ȳ eigenstate was prepared (data_init
-    # Y+/Y-). With the default |0⟩ prep no Ȳ eigenvalue exists, so it is omitted.
-    if data_init in ("Y+", "Y-"):
-        obs0_recs: list[stim.GateTarget] = []
-        for row in yg.obs0_xor_map:
-            if row.family == "X":
-                cid = qubit_ids.checks_x[row.family_index]
-            elif row.family == "Z":
-                cid = qubit_ids.checks_z[row.family_index]
-            else:  # "Y" — the q1 mixed check, read MX in the Y-phase
-                cid = y_ancilla_ids[row.family_index]
-            obs0_recs.append(measurement_record.get_target_rec(cid))
+    # DETERMINISM GATE. The bare ``[x | z]`` product carries Pauli-X on V_X and
+    # Pauli-Z on V_Z data qubits. On a Y±-eigenstate prep the data is the EXACT
+    # |Ȳ±⟩ codeword (state injection |X̄+⟩ then transversal S, see
+    # ``_steane_logical_y_eigenstate_prep``), where every code stabilizer is +1,
+    # so the bare product agrees with Ȳ and the in-circuit XOR is DETERMINISTIC
+    # (Y+ → bit 1, Y- → bit 0; the GF(2) product drops the ``i`` of iX̄Z̄, so the
+    # raw bit reads −Ȳ). On a non-eigenstate prep (|0̄⟩/|+̄⟩) the bare product is a
+    # genuine 50/50, so ``_observable_is_deterministic`` gates obs0 OFF unless
+    # ``force_obs0`` is set (the 50/50 cross-check). The previous ALL-Y-on-data
+    # representative — a physical ∏_i|Y_i⟩ prep artifact, infeasible on general
+    # codes such as BB [[36,8,4]] — is no longer targeted: the exact codeword
+    # prep is what makes the bare product deterministic.
+    obs0_recs: list[stim.GateTarget] = []
+    for row in yg.obs0_xor_map:
+        if row.family == "X":
+            cid = qubit_ids.checks_x[row.family_index]
+        elif row.family == "Z":
+            cid = qubit_ids.checks_z[row.family_index]
+        else:  # "Y" — the mixed y_v check, read MX in the Y-phase
+            cid = y_ancilla_ids[row.family_index]
+        obs0_recs.append(measurement_record.get_target_rec(cid))
+    if force_obs0:
+        # Emit obs0 even when it is NON-deterministic. On a non-Ȳ-eigenstate prep
+        # (|0̄⟩ via data_init=None, or |+̄⟩ via data_init="+"), Ȳ anticommutes with
+        # the prepared logical so the outcome is a genuine 50/50 — the DEM will NOT
+        # compile, but raw sampling (``circuit.compile_sampler``) reads obs0
+        # directly. Demonstrates that the merge measures Ȳ (Ide, Gowda, Nadkarni,
+        # Dauphinais arXiv:2410.02753 §III.C).
+        if obs0_recs:
+            circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
+    elif data_init in ("Y+", "Y-"):
         if obs0_recs and _observable_is_deterministic(circuit, obs0_recs):
             circuit.append("OBSERVABLE_INCLUDE", obs0_recs, 0)
+
+    # --- benchmark_y: obs0 ⊕ obs1 (surgery Ȳ readout vs destructive Ȳ readout) --
+    # Direct benchmark of the Ȳ MEASUREMENT itself (Ide, Gowda, Nadkarni,
+    # Dauphinais arXiv:2410.02753 §III.C): obs0 reads Ȳ off the in-circuit checks;
+    # obs1 reads the SAME §III.C product (``yg.obs0_readout``) off the per-qubit
+    # destructive Ȳ readout (data_x → MX, data_z → M, data_y → MY; κ_x → M, κ_z →
+    # MX). Each alone is a random 50/50 outcome on a non-Ȳ-eigenstate prep, but
+    # their XOR is DETERMINISTIC (both equal Ȳ) — so it compiles to a DEM and a
+    # decoder scores P(obs0 ≠ obs1) = the measurement logical error rate. No Ȳ
+    # eigenstate prep is required (any input state works).
+    if benchmark_y:
+        plan = yg.obs0_readout
+        bench_recs: list[stim.GateTarget] = list(obs0_recs)
+        for q in (*plan.data_x, *plan.data_z, *plan.data_y):
+            bench_recs.append(measurement_record.get_target_rec(real_data_ids[q]))
+        for q in plan.kx_z:
+            bench_recs.append(measurement_record.get_target_rec(kx_ids[q - n_code]))
+        for q in plan.kz_x:
+            bench_recs.append(measurement_record.get_target_rec(kz_ids[q - n_code - k_x]))
+        circuit.append("OBSERVABLE_INCLUDE", bench_recs, 0)
 
     # --- obs1: destructive cross-check (NOT a physical protocol) ----------------
     # Read the SAME §III.C product (``yg.obs0_readout``) off the FINAL DESTRUCTIVE
@@ -963,10 +1130,12 @@ def build_single_y_ppm_circuit(
     # X-support → MX (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
     # This destructively collapses the data, so it is not the fault-tolerant
     # readout; it is the noiseless cross-check sibling of ``_surgery_observable``'s
-    # obs1. Its record signs ARE the physical Pauli-eigenvalue convention, so its
-    # raw bit is the un-inverted Ȳ eigenvalue (Y+ → 0, Y- → 1) — the complement of
-    # the in-circuit obs0, by the −Ȳ sign documented above. Keep obs1 only as a
-    # cross-check; for any LER/noisy run keep ONLY obs0 (keep_only_observable).
+    # obs1. It reads the SAME Ȳ = [x | z] product as obs0, so its raw bit is the
+    # same Ȳ eigenvalue (Y+ → 0, Y- → 1). It is emitted only when its destructive
+    # basis matches the readout — with the all-MY Y±-eigenstate readout the V_X/V_Z
+    # records are measured in Y, not X/Z, so it is gated OFF (``benchmark_y`` is the
+    # working destructive cross-check, splitting the readout MX/MY/M). Keep obs1
+    # only as a cross-check; for any LER/noisy run keep ONLY obs0.
     if data_init in ("Y+", "Y-"):
         plan = yg.obs0_readout
         obs1_recs: list[stim.GateTarget] = []
@@ -1225,353 +1394,13 @@ def _stitch_to_joint_code(
     g_r: GadgetLayout,
     bridge: Bridge,
 ) -> tuple[QuditCode, Bridge]:
-    """Assemble merged code (CSSCode for same-basis, QuditCode subsystem for mixed-basis).
+    """Assemble merged CSSCode for same-basis two-PPM surgery.
 
-    Same-basis path delegates to ``_stitch_to_joint_csscode`` and returns
-    the bridge unchanged.
-
-    Mixed-basis path (Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2
-    Theorem 20 proof; Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5)
-    delegates to ``_build_mixed_basis_joint_code`` which assembles a SUBSYSTEM
-    code via the block-by-block ``joint_layout`` module: the per-side χ_l
-    (basis_l-type) and χ_r (basis_r-type) seed-operator rows remain as
-    separate gauge generators whose pairwise anti-commutation on shared
-    adapter qubits is structural and expected. The stabilizer center is
-    computed automatically by ``QuditCode(is_subsystem_code=True)``.
+    Delegates to ``_stitch_to_joint_csscode`` and returns the bridge
+    unchanged. Mixed-basis joints are rejected upstream in
+    ``build_joint_ppm_circuit`` (no valid CSS merged code exists).
     """
-    if bridge.basis_l is bridge.basis_r:
-        return _stitch_to_joint_csscode(g_l, g_r, bridge), bridge
-
-    code, bridge_out, _layout = _build_mixed_basis_joint_code(g_l, g_r, bridge)
-    return code, bridge_out
-
-
-def _assemble_meas_comp_per_side(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    bridge: Bridge,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, slice]]:
-    """Build per-side M_meas / M_comp blocks honoring each side's own basis.
-
-    Each block is expanded to the full n_merged column width and zero-padded
-    outside its native data + ancilla columns.
-
-    Returns
-    -------
-    M_meas_l_block, M_comp_l_block, M_meas_r_block, M_comp_r_block
-        Each shape (rows_side, n_merged); zero-padded into the full merged
-        column space.
-    slices
-        Dict with keys 'cl_data', 'cr_data' (or 'c_data' for intracode),
-        'cl_ancilla', 'cr_ancilla', 'c_adapter' — slice objects into the
-        merged column range.
-
-    Naming convention: 'meas' = the side's own measured-basis check rows
-    (χ-carrier per Webster Eq. 1); 'comp' = the dual (cycle-Z for basis=X).
-    Caller decides how to split these into H_X / H_Z by inspecting basis_l
-    and basis_r.
-    """
-    intercode = g_l.code is not g_r.code
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-
-    def _per_side(
-        g: GadgetLayout, g_aug: GadgetLayout, basis: Pauli
-    ) -> tuple[np.ndarray, np.ndarray, int, int]:
-        if basis is Pauli.X:
-            M_meas_src, M_comp_src = g_aug.HX_merged, g_aug.HZ_merged
-            m_meas_data = g.code.matrix_x.shape[0]
-            m_comp_data = g.code.matrix_z.shape[0]
-        else:
-            M_meas_src, M_comp_src = g_aug.HZ_merged, g_aug.HX_merged
-            m_meas_data = g.code.matrix_z.shape[0]
-            m_comp_data = g.code.matrix_x.shape[0]
-        return (
-            np.asarray(M_meas_src).astype(np.int_),
-            np.asarray(M_comp_src).astype(np.int_),
-            m_meas_data,
-            m_comp_data,
-        )
-
-    M_meas_l, M_comp_l, m_meas_l_data, m_comp_l_data = _per_side(g_l, g_l_aug, bridge.basis_l)
-    M_meas_r, M_comp_r, m_meas_r_data, m_comp_r_data = _per_side(g_r, g_r_aug, bridge.basis_r)
-
-    n_l = g_l.code.num_qudits
-    n_r = g_r.code.num_qudits if intercode else 0
-    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
-    w = bridge.width
-
-    if intercode:
-        n_merged = n_l + n_r + k_l + k_r + w
-        cl_data = slice(0, n_l)
-        cr_data = slice(n_l, n_l + n_r)
-        cl_ancilla = slice(n_l + n_r, n_l + n_r + k_l)
-        cr_ancilla = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
-        c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
-        slices = {
-            "cl_data": cl_data,
-            "cr_data": cr_data,
-            "cl_ancilla": cl_ancilla,
-            "cr_ancilla": cr_ancilla,
-            "c_adapter": c_adapter,
-        }
-    else:
-        n = n_l
-        n_merged = n + k_l + k_r + w
-        c_data = slice(0, n)
-        cl_ancilla = slice(n, n + k_l)
-        cr_ancilla = slice(n + k_l, n + k_l + k_r)
-        c_adapter = slice(n + k_l + k_r, n_merged)
-        slices = {
-            "c_data": c_data,
-            "cl_data": c_data,
-            "cr_data": c_data,
-            "cl_ancilla": cl_ancilla,
-            "cr_ancilla": cr_ancilla,
-            "c_adapter": c_adapter,
-        }
-
-    def _expand(
-        rows_local: np.ndarray,
-        side_label_attr: str,
-        m_data: int,
-        n_side: int,
-        c_data_slice: slice,
-        c_ancilla_slice: slice,
-        kind: str,
-    ) -> np.ndarray:
-        # Data rows: meas-side data checks live on data cols only (no κ extension).
-        # Comp-side data checks get extended to commute with χ rows acting X on κ,
-        # so they carry both data and κ-ancilla support — same convention as
-        # the same-basis _stitch_intercode / _stitch_intracode helpers.
-        m_total = rows_local.shape[0]
-        out = np.zeros((m_total, n_merged), dtype=np.int_)
-        out[:m_data, c_data_slice] = rows_local[:m_data, :n_side]
-        if kind == "comp":
-            out[:m_data, c_ancilla_slice] = rows_local[:m_data, n_side:]
-        rest = rows_local[m_data:, :]
-        out[m_data:, c_data_slice] = rest[:, :n_side]
-        out[m_data:, c_ancilla_slice] = rest[:, n_side:]
-        if kind == "meas":
-            labels = bridge.label_l if side_label_attr == "l" else bridge.label_r
-            for v_idx, lab in enumerate(labels):
-                if lab >= 0:
-                    out[m_data + v_idx, c_adapter.start + lab] = 1
-        return out
-
-    n_side_l = n_l
-    n_side_r = n_r if intercode else n_l
-
-    M_meas_l_block = _expand(
-        M_meas_l, "l", m_meas_l_data, n_side_l, slices["cl_data"], cl_ancilla, "meas"
-    )
-    M_comp_l_block = _expand(
-        M_comp_l, "l", m_comp_l_data, n_side_l, slices["cl_data"], cl_ancilla, "comp"
-    )
-    M_meas_r_block = _expand(
-        M_meas_r, "r", m_meas_r_data, n_side_r, slices["cr_data"], cr_ancilla, "meas"
-    )
-    M_comp_r_block = _expand(
-        M_comp_r, "r", m_comp_r_data, n_side_r, slices["cr_data"], cr_ancilla, "comp"
-    )
-
-    return M_meas_l_block, M_comp_l_block, M_meas_r_block, M_comp_r_block, slices
-
-
-def _build_mixed_basis_joint_code(
-    g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge
-) -> tuple[QuditCode, Bridge, "JointPPMLayout"]:
-    """New mixed-basis stitch via block-by-block layout (joint_layout module).
-
-    Returns the QuditCode plus the JointPPMLayout itself; downstream callers
-    (specifically the obs0 emission in _build_joint_ppm_circuit_mixed_basis)
-    consume the layout's row provenance to construct obs0 = ⊕ m(χ_l) ⊕
-    ⊕ m(χ_r) ⊕ ⊕ m(y_q) directly.
-    """
-    from qldpc.circuits.surgery.joint_layout import JointPPMLayout, build_joint_layout
-
-    layout = build_joint_layout(g_l, g_r, bridge)
-    code = layout.to_quditcode(g_l.code.field)
-    return code, bridge, layout
-
-
-def _stitch_to_joint_code_mixed(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    bridge: Bridge,
-) -> tuple[QuditCode, Bridge]:
-    """Mixed-basis stitch: assemble code via Webster-Smith-Cohen cross-merge.
-
-    The merged code for an inter-code mixed-basis joint Pauli measurement
-    (e.g. X̄_l ⊗ Z̄_r) is built per:
-
-      * Webster, Smith, Cohen arXiv:2511.15989 §II.B.2 — the cross-merge
-        recipe that combines a χ_l (X-type) and χ_r (Z-type) pair on each
-        shared bridge qubit into a single Y-type stabilizer row.
-      * Cross, He, Rall, Yoder arXiv:2407.18393 Appendix A.2 (Theorem 20)
-        — the underlying subsystem-code dimension analysis.
-      * Cowtan, He, Williamson, Yoder arXiv:2503.05003 §3.5 — lattice-
-        surgery specialization.
-
-    Construction (inter-code Steane × Steane, k_l = k_r = 1, w = 3):
-
-      1. Per-side blocks via ``_assemble_meas_comp_per_side`` (X/Z split
-         by each side's own basis).
-      2. Cycle rows on BOTH duals: cycle_l of comp_l-type with support
-         T_l on cl_ancilla + H_R on adapter; cycle_r symmetric. These
-         anti-commute pairwise on the adapter via H_R · H_R^T — structural,
-         expected for the subsystem code.
-      3. Cross-merge step (``apply_mixed_basis_merge`` from merge.py): for
-         each adapter qubit q where both an X- and Z-row have single-{q}
-         adapter support, fuse them into a Y-stab. The χ_l (X-type on
-         data + adapter) and χ_r (Z-type) rows are the canonical pivots.
-         Multi-adapter-col rows (cycle rows) are left unchanged.
-      4. Final symplectic matrix = [HX_out | 0] ∪ [0 | HZ_out] ∪ Y_stab.
-
-    Returns a ``QuditCode`` — tried as stabilizer code first, falls back
-    to subsystem if any gauge generator pair anti-commutes (cycle_l /
-    cycle_r anti-commutation is the normal failure mode).
-
-    Bridge fields populated:
-      * ``Y_stab``: the cross-merge Y rows (shape ``(n_Y, 2*n_merged)``)
-      * ``obs0_xor_map``: list of Y_stab row indices XORed into obs0
-        (per Lemma 2). All Y rows contribute.
-      * ``x_leftover_indices`` / ``z_leftover_indices``: indices (within
-        the X-row / Z-row blocks of the final code) of cycle rows that
-        contribute to obs0 to cancel residual X^A / Z^A on the adapter.
-      * ``merge_qubits``: adapter columns processed by the cross-merge.
-    """
-    import dataclasses
-
-    field = g_l.code.field
-    intercode = g_l.code is not g_r.code
-
-    M_meas_l, M_comp_l, M_meas_r, M_comp_r, slices = _assemble_meas_comp_per_side(
-        g_l, g_r, bridge
-    )
-
-    def _x_z_split(
-        M_meas_block: np.ndarray, M_comp_block: np.ndarray, basis: Pauli
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if basis is Pauli.X:
-            return M_meas_block, M_comp_block
-        return M_comp_block, M_meas_block
-
-    HX_l, HZ_l = _x_z_split(M_meas_l, M_comp_l, bridge.basis_l)
-    HX_r, HZ_r = _x_z_split(M_meas_r, M_comp_r, bridge.basis_r)
-
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n_l = g_l.code.num_qudits
-    n_r = g_r.code.num_qudits if intercode else 0
-    k_l, k_r = g_l_aug.incidence.shape[0], g_r_aug.incidence.shape[0]
-    w = bridge.width
-    n_merged = (n_l + n_r if intercode else n_l) + k_l + k_r + w
-
-    cl_ancilla = slices["cl_ancilla"]
-    cr_ancilla = slices["cr_ancilla"]
-    c_adapter = slices["c_adapter"]
-
-    # Step 2: cycle rows on both duals.
-    cycle_l = np.zeros((bridge.T_l.shape[0], n_merged), dtype=np.int_)
-    cycle_l[:, cl_ancilla] = bridge.T_l
-    cycle_l[:, c_adapter] = bridge.H_R
-
-    cycle_r = np.zeros((bridge.T_r.shape[0], n_merged), dtype=np.int_)
-    cycle_r[:, cr_ancilla] = bridge.T_r
-    cycle_r[:, c_adapter] = bridge.H_R
-
-    # Build pre-merge HX_all / HZ_all.
-    # cycle_l is in the basis dual to basis_l; cycle_r in the basis dual to basis_r.
-    HX_pre_rows: list[np.ndarray] = list(HX_l.astype(np.int_)) + list(HX_r.astype(np.int_))
-    HZ_pre_rows: list[np.ndarray] = list(HZ_l.astype(np.int_)) + list(HZ_r.astype(np.int_))
-    if bridge.basis_l is Pauli.X:
-        HZ_pre_rows.extend(cycle_l.astype(np.int_))
-    else:
-        HX_pre_rows.extend(cycle_l.astype(np.int_))
-    if bridge.basis_r is Pauli.X:
-        HZ_pre_rows.extend(cycle_r.astype(np.int_))
-    else:
-        HX_pre_rows.extend(cycle_r.astype(np.int_))
-
-    HX_all = (
-        np.array(HX_pre_rows, dtype=np.int_)
-        if HX_pre_rows
-        else np.zeros((0, n_merged), dtype=np.int_)
-    )
-    HZ_all = (
-        np.array(HZ_pre_rows, dtype=np.int_)
-        if HZ_pre_rows
-        else np.zeros((0, n_merged), dtype=np.int_)
-    )
-
-    # Step 3: cross-merge. merge_qubits = adapter columns with both X and Z support.
-    from .merge import apply_mixed_basis_merge
-
-    adapter_cols = tuple(range(c_adapter.start, c_adapter.stop))
-    merge_qubits = tuple(
-        q for q in adapter_cols if HX_all[:, q].any() and HZ_all[:, q].any()
-    )
-    HX_out, HZ_out, Y_stab, obs0_y, x_left, z_left = apply_mixed_basis_merge(
-        HX_all.astype(np.uint8),
-        HZ_all.astype(np.uint8),
-        merge_qubits,
-        adapter_cols=adapter_cols,
-    )
-    HX_out = np.asarray(HX_out).astype(np.int_)
-    HZ_out = np.asarray(HZ_out).astype(np.int_)
-
-    # Identify the leftover cycle row indices (within HX_out / HZ_out) for
-    # obs0 cancellation per Lemma 2. Cycle rows have weight ≥ 2 support on
-    # the adapter, so we identify them structurally. For our construction,
-    # cycle_r (X-type) lives in HX_out (when basis_r=Z), and cycle_l (Z-type)
-    # lives in HZ_out (when basis_l=X). The merge algorithm never deletes
-    # multi-adapter rows so they survive in order at the END of HX_out/HZ_out.
-    def _adapter_weight(row: np.ndarray) -> int:
-        return int(row[c_adapter.start : c_adapter.stop].sum())
-
-    x_cycle_indices_in_out = tuple(
-        i for i in range(HX_out.shape[0]) if _adapter_weight(HX_out[i]) >= 2
-    )
-    z_cycle_indices_in_out = tuple(
-        i for i in range(HZ_out.shape[0]) if _adapter_weight(HZ_out[i]) >= 2
-    )
-
-    # Step 4: pack symplectic matrix.
-    rows_sym: list[np.ndarray] = []
-    for r in HX_out:
-        rows_sym.append(np.concatenate([r, np.zeros(n_merged, dtype=np.int_)]))
-    for r in HZ_out:
-        rows_sym.append(np.concatenate([np.zeros(n_merged, dtype=np.int_), r]))
-    if Y_stab is not None:
-        for r in Y_stab:
-            rows_sym.append(r.astype(np.int_))
-
-    sym_matrix = (
-        np.array(rows_sym, dtype=np.int_)
-        if rows_sym
-        else np.zeros((0, 2 * n_merged), dtype=np.int_)
-    )
-
-    # Try stabilizer code first; fall back to subsystem if cycle anti-commutation
-    # makes the matrix non-CSS-commuting.
-    is_subsystem = False
-    if rows_sym:
-        Hx = sym_matrix[:, :n_merged].astype(np.int_)
-        Hz = sym_matrix[:, n_merged:].astype(np.int_)
-        comm = (Hx @ Hz.T + Hz @ Hx.T) % 2
-        np.fill_diagonal(comm, 0)
-        is_subsystem = bool(comm.any())
-
-    joint_code = QuditCode(field(sym_matrix), is_subsystem_code=is_subsystem)
-
-    bridge_populated = dataclasses.replace(
-        bridge,
-        Y_stab=Y_stab if Y_stab is not None else None,
-        merge_qubits=merge_qubits,
-        obs0_xor_map=tuple(obs0_y),
-        x_leftover_indices=x_cycle_indices_in_out,
-        z_leftover_indices=z_cycle_indices_in_out,
-    )
-    return joint_code, bridge_populated
+    return _stitch_to_joint_csscode(g_l, g_r, bridge), bridge
 
 
 def _expand_joint_data_init(
@@ -1630,147 +1459,6 @@ def _expand_joint_data_init(
 _H_DATA_INIT = {"+": "0", "-": "1", "0": "+", "1": "-"}
 
 
-def _dual_csscode(code: CSSCode) -> CSSCode:
-    """Transversal-Hadamard dual of a CSS code (matrix_x ↔ matrix_z).
-
-    Applying a physical Hadamard to every data qubit of a CSS code maps it to
-    its dual: H_X ↔ H_Z, X̄ ↔ Z̄ (SJOY24 / Swaroop et al. arXiv:2410.03628 §II,
-    "appropriate local basis for each qubit"). The dual is itself CSS because
-    H_X H_Z^T = 0 is symmetric. This is the local/transversal-H frame change
-    used to turn an X-side gadget into a Z-type one so the existing same-basis
-    bridge path applies verbatim.
-    """
-    return CSSCode(
-        np.asarray(code.matrix_z).astype(np.int_),
-        np.asarray(code.matrix_x).astype(np.int_),
-        is_subsystem_code=False,
-    )
-
-
-def _rotate_x_side_to_z(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    bridge: Bridge,
-) -> tuple[GadgetLayout, GadgetLayout, Bridge, bool]:
-    """Rotate the X-basis side of a mixed-basis joint to Z-type via a dual frame.
-
-    Mixed joint (one side X, one side Z, e.g. X̄_l ⊗ Z̄_r) is turned into an
-    ordinary same-basis Z⊗Z joint by replacing the X-side code with its
-    transversal-Hadamard dual (``_dual_csscode``). Because the gadget's V_0,
-    incidence, data_checks and gauge depend only on the *complementary* check
-    matrix of the measured basis — which is invariant under the X↔Z swap of a
-    dual code — the rebuilt Z-gadget on the dual code has bit-for-bit identical
-    support / incidence / ports, so SkipTree sees exactly the same Z-type port
-    graph (hard constraint 1). The same-basis bridge is then rebuilt over the
-    rotated gadgets, preserving the caller's port subsets.
-
-    SJOY24 / Swaroop et al. arXiv:2410.03628 §II: the universal adapter is only
-    ever defined for a Z-type operator, and arbitrary Paulis are reduced to it
-    by a local basis change. Here the X-side becomes Z-type, the right side is
-    already Z, so both are uniform and the CSS same-basis path (already
-    |Y_+⟩-free) applies. Cross, He, Rall, Yoder arXiv:2407.18393 §3.7 gauging
-    measurement is realized without the |Y_+⟩ adapter or null-space synthesis.
-
-    Returns
-    -------
-    g_l_rot, g_r_rot
-        The rotated gadgets (both Z-basis). The side that was already Z is
-        returned unchanged; the X-side is the dual-code Z-gadget.
-    bridge_rot
-        A same-basis (Z) bridge over the rotated gadgets.
-    left_is_x
-        True iff the LEFT side carried the X basis (so its data_init must be
-        H-transformed). Exactly one side is X for a mixed joint.
-    """
-    from .bridge import build_bridge
-    from .gadget import build_gadget
-
-    left_is_x = bridge.basis_l is Pauli.X
-    intracode = g_l.code is g_r.code
-
-    def _rotate(g: GadgetLayout) -> GadgetLayout:
-        dual = _dual_csscode(g.code)
-        # supp(x) is a logical-X of the original code → a logical-Z of the dual
-        # (same bit support), so build a Z-basis gadget on the dual with seed x.
-        return build_gadget(dual, np.asarray(g.x).astype(np.uint8), basis=Pauli.Z)
-
-    if intracode:
-        # Rotating one side to its dual makes the two sides use different code
-        # objects, so a single-patch (intra-code) mixed joint cannot be routed
-        # through the same-basis path as an intra-code stitch. This is a genuine
-        # mixed single-qubit Ȳ-style overlap (CHRY §3.7 q_0/q_1 machinery) and
-        # is out of scope for the disjoint-code dual-frame reduction.
-        raise NotImplementedError(
-            "intra-code mixed-basis joint via Hadamard-dual frame is not "
-            "supported (the dual rotation makes the two sides use different "
-            "codes); use distinct code instances for the two logicals"
-        )
-
-    if left_is_x:
-        g_l_rot = _rotate(g_l)
-        g_r_rot = g_r
-    else:
-        g_l_rot = g_l
-        g_r_rot = _rotate(g_r)
-
-    bridge_rot = build_bridge(
-        g_l_rot,
-        g_r_rot,
-        port_subset_l=tuple(bridge.port_l),
-        port_subset_r=tuple(bridge.port_r),
-    )
-    return g_l_rot, g_r_rot, bridge_rot, left_is_x
-
-
-def _h_transform_left_data_init(
-    data_init: str | tuple[str, ...] | list[str] | None,
-    n_l: int,
-    n_r: int,
-    *,
-    left_is_x: bool,
-) -> tuple[str, ...] | None:
-    """Normalize ``data_init`` to a (spec_l, spec_r) pair, H-transforming the
-    X-side spec into the dual frame (+↔0, -↔1).
-
-    The rotated joint runs a Z⊗Z surgery on the dual frame, so a prepared
-    X̄-eigenstate on the original X-side must be re-expressed as the
-    corresponding Z̄-eigenstate of the dual code: H|+⟩=|0⟩, H|-⟩=|1⟩. Tracking
-    the transversal H purely in the init string (and the dual code's
-    stabilizers) is physically identical to inserting a depth-1 H layer, with
-    no Y states anywhere. The non-X side passes through unchanged.
-
-    Returns ``None`` (use builder defaults) iff ``data_init`` is None.
-    """
-    if data_init is None:
-        return None
-    if isinstance(data_init, str):
-        if len(data_init) == 1:
-            spec_l, spec_r = data_init * n_l, data_init * n_r
-        else:
-            spec_l, spec_r = data_init[:n_l], data_init[n_l:]
-    elif isinstance(data_init, (tuple, list)):
-        if len(data_init) != 2:
-            raise ValueError(
-                f"data_init tuple must have 2 entries (one per code), got {len(data_init)}"
-            )
-        sl, sr = data_init
-        spec_l = sl * n_l if len(sl) == 1 else sl
-        spec_r = sr * n_r if len(sr) == 1 else sr
-    else:
-        raise TypeError(
-            f"data_init must be str, tuple, list, or None; got {type(data_init).__name__}"
-        )
-    if len(spec_l) != n_l:
-        raise ValueError(f"data_init left length {len(spec_l)} != n_l {n_l}")
-    if len(spec_r) != n_r:
-        raise ValueError(f"data_init right length {len(spec_r)} != n_r {n_r}")
-    if left_is_x:
-        spec_l = "".join(_H_DATA_INIT[c] for c in spec_l)
-    else:
-        spec_r = "".join(_H_DATA_INIT[c] for c in spec_r)
-    return (spec_l, spec_r)
-
-
 def build_joint_ppm_circuit(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -1779,9 +1467,8 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | tuple[str, ...] | list[str] | None = None,
-    mixed_strategy: str = "hadamard_dual",
 ) -> tuple[stim.Circuit, QuditCode]:
-    """Joint-PPM circuit (universal adapter; no U_B in α*).
+    """Joint-PPM circuit for same-basis logical measurement (X̄_l⊗X̄_r / Z̄_l⊗Z̄_r).
 
     Emits two OBSERVABLE_INCLUDE entries (see ``_surgery_observable`` for
     full semantics):
@@ -1805,49 +1492,23 @@ def build_joint_ppm_circuit(
       * ``tuple[str, str]`` (intercode only) — per-code logical-init spec.
         ``data_init=("0", "+")`` → c_l in |0⟩_L, c_r in |+⟩_L.
 
-    ``mixed_strategy`` (mixed-basis joints only): selects how X̄ ⊗ Z̄-style
-    mixed measurements are realized.
-
-      * ``"hadamard_dual"`` (default) — rotate the X-side to a Z-type dual code
-        via a transversal/local Hadamard frame (SJOY24 / Swaroop et al.
-        arXiv:2410.03628 §II), then run the EXISTING CSS same-basis bridge path
-        (Cross, He, Rall, Yoder arXiv:2407.18393 §3.7 gauging measurement).
-        Fully CSS: all ancillas in |0⟩/|+⟩ measured in Z/X, no |Y_+⟩, no
-        null-space final-detector synthesis. obs0 = ∏ m_v over in-circuit
-        vertex checks.
-      * ``"cohen"`` — legacy Cohen–Kim–Bartlett–Brown arXiv:2110.10794 |Y_+⟩
-        cross-merge path. Retained for comparison during bring-up; uses RY/MY
-        and a null-space combination-detector block. Will be removed.
+    Mixed-basis joints (Z̄_l ⊗ X̄_r) are not supported: the Z-check and
+    X-check anticommute on the shared bridge qubit, so no valid CSS merged
+    code exists — joint PPMs are same-type only (Cross, He, Rall, Yoder
+    arXiv:2407.18393). Use single-qubit Ȳ surgery
+    (``build_single_y_ppm_circuit``) for mixed / non-CSS logical measurements.
     """
-    if bridge.basis_l is bridge.basis_r:
-        joint_code, bridge = _stitch_to_joint_code(g_l, g_r, bridge)
-        return _build_joint_ppm_circuit_same_basis(
-            g_l, g_r, bridge, joint_code,
-            rounds=rounds, noise_model=noise_model, data_init=data_init,
+    if bridge.basis_l is not bridge.basis_r:
+        raise NotImplementedError(
+            "Mixed-basis joint PPM (e.g. Z̄ ⊗ X̄) is not supported: the Z- and "
+            "X-checks anticommute on the bridge qubit, so no CSS merged code "
+            "exists (Cross, He, Rall, Yoder arXiv:2407.18393, joint PPMs are "
+            "same-type only). Use build_single_y_ppm_circuit for mixed / "
+            "non-CSS logical measurements."
         )
-
-    if mixed_strategy == "hadamard_dual":
-        g_l_rot, g_r_rot, bridge_rot, left_is_x = _rotate_x_side_to_z(g_l, g_r, bridge)
-        n_l = g_l_rot.code.num_qudits
-        n_r = g_r_rot.code.num_qudits
-        rot_data_init = _h_transform_left_data_init(
-            data_init, n_l, n_r, left_is_x=left_is_x
-        )
-        joint_code, bridge_rot = _stitch_to_joint_code(g_l_rot, g_r_rot, bridge_rot)
-        return _build_joint_ppm_circuit_same_basis(
-            g_l_rot, g_r_rot, bridge_rot, joint_code,
-            rounds=rounds, noise_model=noise_model, data_init=rot_data_init,
-        )
-    if mixed_strategy != "cohen":
-        raise ValueError(
-            f"mixed_strategy must be 'hadamard_dual' or 'cohen', got {mixed_strategy!r}"
-        )
-
-    # Legacy Cohen |Y_+⟩ path (kept reachable during bring-up per design constraint).
-    joint_code, bridge, layout = _build_mixed_basis_joint_code(g_l, g_r, bridge)
-    return _build_joint_ppm_circuit_mixed_basis(
+    joint_code, bridge = _stitch_to_joint_code(g_l, g_r, bridge)
+    return _build_joint_ppm_circuit_same_basis(
         g_l, g_r, bridge, joint_code,
-        layout=layout,
         rounds=rounds, noise_model=noise_model, data_init=data_init,
     )
 
@@ -1896,14 +1557,12 @@ def _build_joint_ppm_circuit_same_basis(
         bridge_ids,
         data_init=expanded_data_init,
     )
-    qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
+    qec_cycle, measurement_record, _ = _surgery_qec_cycle(
         g_l,
-        g_r,
         joint_code,
-        bridge,
         num_rounds=rounds,
         qubit_ids=qubit_ids,
-        intercode=intercode,
+        joint=(g_r, bridge, intercode),
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
@@ -1913,14 +1572,12 @@ def _build_joint_ppm_circuit_same_basis(
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
-    circuit += _surgery_final_detectors_joint(
+    circuit += _surgery_final_detectors(
         g_l,
-        g_r,
         joint_code,
-        bridge,
         qubit_ids,
         measurement_record=measurement_record,
-        intercode=intercode,
+        joint=(g_r, bridge, intercode),
     )
 
     # χ check IDs: data H_X^(l) rows occupy first mX_l indices in
@@ -1964,9 +1621,8 @@ def _split_quditcode_into_virtual_cssc(
     arXiv:2503.05003 §3.5 / Webster, Smith, Cohen arXiv:2511.15989 §II.B.2).
     The merged code is a SUBSYSTEM code: not all pairs of rows commute.
 
-    The stitch ``_stitch_to_joint_code_mixed`` produces three row classes:
-      * pure-X rows (HX block): data X-stabilizers + comp_r-side rows +
-        cycle_r if basis_r=Z.
+    The merged code (Webster cross-merge in ``y_gadget``) has three row classes:
+      * pure-X rows (HX block): data X-stabilizers + comp-side rows.
       * pure-Z rows (HZ block): symmetric on Z side.
       * mixed Y rows (Y_stab block): one per merge qubit from the Webster
         cross-merge. Their X-part comes from a χ_l row, Z-part from a χ_r
@@ -2039,81 +1695,6 @@ def _mixed_basis_qubit_coords(
     return circuit
 
 
-def _mixed_basis_state_prep(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    bridge: Bridge,
-    data_l_ids: tuple[int, ...],
-    data_r_ids: tuple[int, ...],
-    ancilla_l_ids: tuple[int, ...],
-    ancilla_r_ids: tuple[int, ...],
-    bridge_ids: tuple[int, ...],
-    *,
-    data_init_l: str,
-    data_init_r: str,
-) -> stim.Circuit:
-    """Init data + ancillas + bridge for the mixed-basis joint PPM.
-
-    Per-side rules (mirroring ``_surgery_state_prep``):
-      * data_s: per-qubit init from data_init_s string ('0','1','+','-').
-      * ancilla_s: basis_s-complement +1 eigenstate
-        (basis_s = X → |0⟩ via R; basis_s = Z → |+⟩ via RX).
-      * bridge (adapter) qubits: initialized in basis_l-complement
-        deterministically. The cross-merge / bridge-gauge structure
-        makes this choice arbitrary up to gauge — basis_l is selected
-        to match the placement convention in
-        ``_stitch_to_joint_code_mixed`` (cycle_l in the basis_l-dual).
-    """
-    circuit = stim.Circuit()
-
-    def _emit_data(ids: tuple[int, ...], spec: str) -> None:
-        r_ids, rx_ids, x_after, z_after = [], [], [], []
-        for q, c in zip(ids, spec):
-            if c == "0":
-                r_ids.append(q)
-            elif c == "1":
-                r_ids.append(q)
-                x_after.append(q)
-            elif c == "+":
-                rx_ids.append(q)
-            elif c == "-":
-                rx_ids.append(q)
-                z_after.append(q)
-            else:
-                raise ValueError(f"invalid data_init char {c!r}; must be one of 0/1/+/-")
-        if r_ids:
-            circuit.append("R", r_ids)
-        if rx_ids:
-            circuit.append("RX", rx_ids)
-        if x_after:
-            circuit.append("X", x_after)
-        if z_after:
-            circuit.append("Z", z_after)
-
-    _emit_data(data_l_ids, data_init_l)
-    _emit_data(data_r_ids, data_init_r)
-
-    l_complement = "R" if bridge.basis_l is Pauli.X else "RX"
-    r_complement = "R" if bridge.basis_r is Pauli.X else "RX"
-    if ancilla_l_ids:
-        circuit.append(l_complement, list(ancilla_l_ids))
-    if ancilla_r_ids:
-        circuit.append(r_complement, list(ancilla_r_ids))
-    # Bridge prep:
-    #   * Same-basis (basis_l is basis_r): basis_l-complement init matches the
-    #     adapter stabilizer choice in ``_stitch_to_joint_code_mixed``.
-    #   * Mixed-basis (basis_l ≠ basis_r): |Y_+⟩^⊗w so that ∏ Y_{a_q} is a
-    #     stabilizer with eigenvalue +1, absorbing the adapter Y residual per
-    #     main.tex §4.5 Eq. eq:obs0-corrected (Cohen-Kim-Bartlett-Brown
-    #     arXiv:2110.10794 §II.B.2 / Fig. 4 |Y⟩ ancilla protocol).
-    if bridge_ids:
-        if bridge.basis_l is bridge.basis_r:
-            circuit.append(l_complement, list(bridge_ids))
-        else:
-            circuit.append("RY", list(bridge_ids))
-    return circuit
-
-
 def _compute_stabilizer_center_mask(H_sym: np.ndarray, n: int) -> np.ndarray:
     """Mark each row of the symplectic matrix that commutes with ALL other rows.
 
@@ -2133,724 +1714,31 @@ def _compute_stabilizer_center_mask(H_sym: np.ndarray, n: int) -> np.ndarray:
     return np.asarray(~comm.any(axis=1))
 
 
-def _build_joint_ppm_circuit_mixed_basis(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    bridge: Bridge,
-    joint_code: QuditCode,
-    *,
-    layout: JointPPMLayout,
-    rounds: int,
-    noise_model: NoiseModel | None,
-    data_init: str | tuple[str, ...] | list[str] | None,
-) -> tuple[stim.Circuit, QuditCode]:
-    """Mixed-basis joint PPM circuit (subsystem merged code).
-
-    Cross, He, Rall, Yoder (arXiv:2407.18393) Theorem 20 / Cowtan, He,
-    Williamson, Yoder (arXiv:2503.05003 §3.5) / Webster, Smith, Cohen
-    (arXiv:2511.15989 §II.B.2) construction. The merged code is a
-    subsystem code with anti-commuting gauge generators (the SkipTree
-    cycle rows on opposite Pauli types overlap on the adapter via
-    H_R · H_R^T).
-
-    Pipeline:
-      1. _build_mixed_basis_joint_code (joint_layout.py) builds the merged
-         QuditCode following docs/superpowers/docs/main.tex §4.2/§4.3
-         block-by-block, returning a JointPPMLayout with per-row provenance.
-      2. _split_quditcode_into_virtual_cssc partitions the joint-code matrix
-         into pure-X / pure-Z rows (used by EdgeColoring) and Y-type rows
-         (from the §4.3 cross-merge).
-      3. Allocate ancillas: QubitIDs.from_code(virtual_cssc) for the CSS
-         subset, then additional Y ancillas appended.
-      4. Per-side state prep + detach (different bases for l / r).
-      5. Per-round QEC: split X / Z / Y phases for determinism per
-         Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2.
-      6. obs0 = ⊕ m(χ_l) ⊕ ⊕ m(χ_r) ⊕ ⊕ m(y_q) per Lemma 2 of the design
-         spec — implemented via JointPPMLayout row provenance. For the
-         degenerate fixture where every V_0 vertex is a port (e.g.
-         Steane × Steane), surviving χ rows are empty and obs0 reduces to
-         ⊕ m(y_q) alone, which has a residual ∏ Y on the adapter; in that
-         regime obs0 emission is suppressed (test_mixed_basis_circuit_
-         compiles_to_dem passes vacuously, truth-table test stays xfail).
-    """
-    intercode = g_l.code is not g_r.code
-    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
-    n_l = g_l.code.num_qudits
-    n_r = g_r.code.num_qudits if intercode else 0
-    k_l = g_l_aug.incidence.shape[0]
-    k_r = g_r_aug.incidence.shape[0]
-    w = bridge.width
-
-    virtual_cssc, _HX, _HZ, x_row_idx, z_row_idx, mixed_row_idx = (
-        _split_quditcode_into_virtual_cssc(joint_code)
-    )
-
-    qubit_ids = QubitIDs.from_code(virtual_cssc)
-    # Allocate Y-row ancillas appended after the virtual_cssc's check ids.
-    n_Y = len(mixed_row_idx)
-    if n_Y:
-        max_id = max(qubit_ids.all_qubits) if qubit_ids.all_qubits else -1
-        y_ancilla_ids: tuple[int, ...] = tuple(range(max_id + 1, max_id + 1 + n_Y))
-    else:
-        y_ancilla_ids = ()
-    n_data_total = n_l + n_r if intercode else n_l
-
-    if intercode:
-        data_l_ids = qubit_ids.data[:n_l]
-        data_r_ids = qubit_ids.data[n_l : n_l + n_r]
-    else:
-        data_l_ids = qubit_ids.data[:n_l]
-        data_r_ids = data_l_ids  # shared
-    ancilla_l_ids = qubit_ids.data[n_data_total : n_data_total + k_l]
-    ancilla_r_ids = qubit_ids.data[n_data_total + k_l : n_data_total + k_l + k_r]
-    bridge_ids = qubit_ids.data[n_data_total + k_l + k_r :]
-    assert len(bridge_ids) == w
-
-    # Normalize data_init to per-side strings.
-    if data_init is None:
-        spec_l = ("+" if bridge.basis_l is Pauli.X else "0") * n_l
-        spec_r = ("+" if bridge.basis_r is Pauli.X else "0") * n_r if intercode else spec_l
-    elif isinstance(data_init, str):
-        if not intercode:
-            spec_l = data_init * n_l if len(data_init) == 1 else data_init
-            spec_r = spec_l
-        else:
-            if len(data_init) == 1:
-                spec_l = data_init * n_l
-                spec_r = data_init * n_r
-            else:
-                spec_l = data_init[:n_l]
-                spec_r = data_init[n_l:]
-    elif isinstance(data_init, (tuple, list)):
-        if not intercode:
-            raise ValueError(
-                "tuple/list data_init only valid for intercode joint PPM"
-            )
-        if len(data_init) != 2:
-            raise ValueError(
-                f"data_init tuple must have 2 entries, got {len(data_init)}"
-            )
-        sl, sr = data_init
-        spec_l = sl * n_l if len(sl) == 1 else sl
-        spec_r = sr * n_r if len(sr) == 1 else sr
-    else:
-        raise TypeError(f"data_init has unsupported type {type(data_init).__name__}")
-    if len(spec_l) != n_l:
-        raise ValueError(f"data_init left length {len(spec_l)} != n_l {n_l}")
-    if intercode and len(spec_r) != n_r:
-        raise ValueError(f"data_init right length {len(spec_r)} != n_r {n_r}")
-
-    circuit = _mixed_basis_qubit_coords(n_data_total, qubit_ids, y_ancilla_ids)
-    circuit += _mixed_basis_state_prep(
-        g_l, g_r, bridge,
-        data_l_ids=data_l_ids,
-        data_r_ids=data_r_ids if intercode else (),
-        ancilla_l_ids=ancilla_l_ids,
-        ancilla_r_ids=ancilla_r_ids,
-        bridge_ids=bridge_ids,
-        data_init_l=spec_l,
-        data_init_r=spec_r,
-    )
-
-    # Multi-round QEC via *split* EdgeColoring on the virtual CSS subset.
-    #
-    # IMPORTANT (mixed-basis determinism). A naive call to
-    # ``EdgeColoring().get_circuit(virtual_cssc, qubit_ids)`` initializes
-    # ALL ancillas in |+⟩ at the start of the round, fires the X-stab CX
-    # subgraph, then the Z-stab CZ subgraph, and finally measures ALL
-    # ancillas in X-basis. Because all X-ancillas remain in superposition
-    # while the Z-stab CZ gates fire, the X-CX gates entangle the data
-    # in a way that can rotate the adapter qubit's Z eigenvalue before
-    # the Z-stab ancillas record it. The result is that χ_r outcomes
-    # become non-deterministic shot-to-shot whenever χ_l shares an
-    # adapter qubit with χ_r — the canonical failure mode noted in the
-    # Tier 1 design docstring.
-    #
-    # Per Cohen, Kim, Bartlett, Brown arXiv:2110.10794 §II.B.2 (mixed-
-    # basis joint PPM) and Cross, He, Rall, Yoder arXiv:2407.18393
-    # Theorem 20 (subsystem-code construction), the X-type and Z-type
-    # gauge measurements must be scheduled in SEPARATE non-overlapping
-    # circuit phases. We split the per-round circuit into:
-    #   • X-phase: RX(X-ancillas) → CX gates → MX(X-ancillas)
-    #   • Z-phase: RX(Z-ancillas) → CZ gates → MX(Z-ancillas)
-    # X-ancillas collapse before Z-CZ gates fire, so the data is in a
-    # definite X-stabilizer eigenstate when the Z-phase starts. With
-    # this schedule the individual χ_l (X-type) and χ_r (Z-type) gauge
-    # measurements become deterministic in the subsystem-code sense.
-    qubit_ids_x = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_x)
-    qubit_ids_x.checks_x = qubit_ids.checks_x
-    qubit_ids_z = QubitIDs(data=qubit_ids.data, check=qubit_ids.checks_z)
-    qubit_ids_z.checks_z = qubit_ids.checks_z
-
-    field = joint_code.field
-    n_qudits = joint_code.num_qudits
-    HX_only = _HX if _HX.shape[0] else np.zeros((0, n_qudits), dtype=np.uint8)
-    HZ_only = _HZ if _HZ.shape[0] else np.zeros((0, n_qudits), dtype=np.uint8)
-    virtual_cssc_X = CSSCode(
-        field(HX_only),
-        field(np.zeros((0, n_qudits), dtype=np.uint8)),
-        is_subsystem_code=False,
-    )
-    virtual_cssc_Z = CSSCode(
-        field(np.zeros((0, n_qudits), dtype=np.uint8)),
-        field(HZ_only),
-        is_subsystem_code=False,
-    )
-
-    strategy = EdgeColoring()
-    if HX_only.shape[0]:
-        x_phase_circuit, x_phase_record = strategy.get_circuit(virtual_cssc_X, qubit_ids_x)
-    else:
-        x_phase_circuit, x_phase_record = stim.Circuit(), MeasurementRecord()
-    if HZ_only.shape[0]:
-        z_phase_circuit, z_phase_record = strategy.get_circuit(virtual_cssc_Z, qubit_ids_z)
-    else:
-        z_phase_circuit, z_phase_record = stim.Circuit(), MeasurementRecord()
-
-    # Y-row syndrome extraction phase. Each Y-stab row gets a dedicated
-    # ancilla initialized in |+⟩ (RX); CX/CY/CZ gates entangle the ancilla
-    # with the data depending on the Pauli at each qubit; finally MX
-    # collapses the ancilla to record the eigenvalue.
-    y_phase_circuit = stim.Circuit()
-    y_phase_record = MeasurementRecord()
-    if n_Y:
-        H_full = np.asarray(joint_code.matrix).astype(np.int_)
-        n_q = joint_code.num_qudits
-        if y_ancilla_ids:
-            y_phase_circuit.append("RX", list(y_ancilla_ids))
-        # Emit per-Pauli gate lists (collected then appended in canonical order).
-        for y_anc, orig_row_idx in zip(y_ancilla_ids, mixed_row_idx):
-            row = H_full[orig_row_idx]
-            x_part = row[:n_q]
-            z_part = row[n_q:]
-            cx_pairs: list[int] = []
-            cy_pairs: list[int] = []
-            cz_pairs: list[int] = []
-            for q in range(n_q):
-                xq, zq = int(x_part[q]), int(z_part[q])
-                if xq == 1 and zq == 0:
-                    cx_pairs.extend([y_anc, qubit_ids.data[q]])
-                elif xq == 0 and zq == 1:
-                    cz_pairs.extend([y_anc, qubit_ids.data[q]])
-                elif xq == 1 and zq == 1:
-                    cy_pairs.extend([y_anc, qubit_ids.data[q]])
-            if cx_pairs:
-                y_phase_circuit.append("CX", cx_pairs)
-            if cy_pairs:
-                y_phase_circuit.append("CY", cy_pairs)
-            if cz_pairs:
-                y_phase_circuit.append("CZ", cz_pairs)
-        if y_ancilla_ids:
-            y_phase_circuit.append("MX", list(y_ancilla_ids))
-            y_phase_record.append({q: i for i, q in enumerate(y_ancilla_ids)})
-
-    one_round = stim.Circuit()
-    one_round += x_phase_circuit
-    one_round += z_phase_circuit
-    one_round += y_phase_circuit
-    round_measurement_record = MeasurementRecord()
-    round_measurement_record.append(x_phase_record)
-    round_measurement_record.append(z_phase_record)
-    round_measurement_record.append(y_phase_record)
-
-    measurement_record = MeasurementRecord()
-
-    # Determine which check IDs belong to rows in the algebraic stabilizer
-    # center — i.e. rows that commute with every other gauge generator.
-    # Only these are safe to register as detectors (deterministic outcomes).
-    H_sym = np.asarray(joint_code.matrix).astype(np.int_)
-    center_mask = _compute_stabilizer_center_mask(H_sym, joint_code.num_qudits)
-    # Map original row index in joint_code.matrix → measurement-record ancilla ID.
-    row_to_check: dict[int, int] = {}
-    for slot, orig in enumerate(x_row_idx):
-        row_to_check[orig] = qubit_ids.checks_x[slot]
-    for slot, orig in enumerate(z_row_idx):
-        row_to_check[orig] = qubit_ids.checks_z[slot]
-    for slot, orig in enumerate(mixed_row_idx):
-        row_to_check[orig] = y_ancilla_ids[slot]
-    center_check_ids = tuple(
-        row_to_check[orig] for orig in row_to_check if center_mask[orig]
-    )
-
-    # Per-qubit init Pauli + sign (one stabilizer per product-state qubit).
-    # Used by round-1 + final detector emission below to identify center rows
-    # whose joint eigenvalue is deterministic on the prepared state.
-    #   data_l[i]/data_r[i]: spec char → +X (|+⟩), -X (|-⟩), +Z (|0⟩), -Z (|1⟩)
-    #   ancilla_{l,r}: basis-complement init → +Z (|0⟩) or +X (|+⟩)
-    #   bridge: same-basis → basis_l-complement; mixed-basis → +Y (|Y_+⟩, RY)
-    _data_init_to_pauli: dict[str, tuple[Pauli, int]] = {
-        "+": (Pauli.X, +1), "-": (Pauli.X, -1),
-        "0": (Pauli.Z, +1), "1": (Pauli.Z, -1),
-    }
-    qubit_init: dict[int, tuple[Pauli, int]] = {}
-    for i, qid in enumerate(data_l_ids):
-        qubit_init[qid] = _data_init_to_pauli[spec_l[i]]
-    if intercode:
-        for i, qid in enumerate(data_r_ids):
-            qubit_init[qid] = _data_init_to_pauli[spec_r[i]]
-    _anc_l_pauli = Pauli.Z if bridge.basis_l is Pauli.X else Pauli.X
-    _anc_r_pauli = Pauli.Z if bridge.basis_r is Pauli.X else Pauli.X
-    for qid in ancilla_l_ids:
-        qubit_init[qid] = (_anc_l_pauli, +1)
-    for qid in ancilla_r_ids:
-        qubit_init[qid] = (_anc_r_pauli, +1)
-    if bridge.basis_l is bridge.basis_r:
-        _bridge_init_pauli = _anc_l_pauli
-    else:
-        _bridge_init_pauli = Pauli.Y
-    for qid in bridge_ids:
-        qubit_init[qid] = (_bridge_init_pauli, +1)
-
-    # Per-qubit destructive readout basis (used by final detector emission).
-    qubit_final_meas: dict[int, Pauli] = {}
-    for qid in data_l_ids:
-        qubit_final_meas[qid] = bridge.basis_l  # MX → X, M → Z
-    if intercode:
-        for qid in data_r_ids:
-            qubit_final_meas[qid] = bridge.basis_r
-    for qid in ancilla_l_ids:
-        qubit_final_meas[qid] = _anc_l_pauli
-    for qid in ancilla_r_ids:
-        qubit_final_meas[qid] = _anc_r_pauli
-    for qid in bridge_ids:
-        qubit_final_meas[qid] = _bridge_init_pauli
-
-    def _row_pauli_per_qubit(orig_row: int) -> dict[int, Pauli]:
-        """Return {data-col → Pauli} for non-I support of joint matrix row."""
-        H_full_ = np.asarray(joint_code.matrix).astype(np.int_)
-        row = H_full_[orig_row]
-        out: dict[int, Pauli] = {}
-        for q in range(joint_code.num_qudits):
-            xq, zq = int(row[q]), int(row[q + joint_code.num_qudits])
-            if xq == 0 and zq == 0:
-                continue
-            if xq == 1 and zq == 0:
-                out[q] = Pauli.X
-            elif xq == 0 and zq == 1:
-                out[q] = Pauli.Z
-            else:
-                out[q] = Pauli.Y
-        return out
-
-    # Center rows mapped to (check_id, per-qubit Pauli support).
-    center_rows: list[tuple[int, int, dict[int, Pauli]]] = [
-        (orig_row, row_to_check[orig_row], _row_pauli_per_qubit(orig_row))
-        for orig_row in row_to_check
-        if center_mask[orig_row]
-    ]
-
-    # Classify center rows that are deterministic on the prepared state.
-    # Round-1 single-target detector fires iff sign = +1 (so noiseless
-    # measurement outcome is 0). Sign = -1 rows are still caught by the
-    # inter-round diff detectors, so skipping them here is safe.
-    round1_reliable_check_ids: list[int] = []
-    for _, cid, row_paulis in center_rows:
-        sign = 1
-        ok = True
-        for q, pauli_q in row_paulis.items():
-            qid = qubit_ids.data[q]
-            init_pauli, init_sign = qubit_init[qid]
-            if pauli_q is not init_pauli:
-                ok = False
-                break
-            sign *= init_sign
-        if ok and sign == 1:
-            round1_reliable_check_ids.append(cid)
-
-    circuit += one_round
-    measurement_record.append(round_measurement_record)
-    for cid in round1_reliable_check_ids:
-        circuit.append(
-            "DETECTOR",
-            [measurement_record.get_target_rec(cid)],
-            (cid, 0, 0),
-        )
-
-    if rounds > 1:
-        repeat = one_round.copy()
-        measurement_record.append(round_measurement_record)
-        repeat.append("SHIFT_COORDS", [], (0, 0, 1))
-        for cid in center_check_ids:
-            repeat.append(
-                "DETECTOR",
-                [
-                    measurement_record.get_target_rec(cid, -1),
-                    measurement_record.get_target_rec(cid, -2),
-                ],
-                (cid, 0, 0),
-            )
-        circuit.append(stim.CircuitRepeatBlock(rounds - 1, repeat))
-        measurement_record.append(round_measurement_record, repeat=rounds - 2)
-
-    # Detach + destructive readout per side. Mixed-basis: each side uses its
-    # own basis-complement ancilla measurement and its own basis-aligned data
-    # measurement.
-    l_anc_op = "M" if bridge.basis_l is Pauli.X else "MX"
-    r_anc_op = "M" if bridge.basis_r is Pauli.X else "MX"
-    l_data_op = "MX" if bridge.basis_l is Pauli.X else "M"
-    r_data_op = "MX" if bridge.basis_r is Pauli.X else "M"
-
-    # Measure ancillas + bridge.
-    detach_l = list(ancilla_l_ids)
-    detach_r = list(ancilla_r_ids)
-    if detach_l:
-        circuit.append(l_anc_op, detach_l)
-        measurement_record.append({q: i for i, q in enumerate(detach_l)})
-    if detach_r:
-        circuit.append(r_anc_op, detach_r)
-        measurement_record.append({q: i for i, q in enumerate(detach_r)})
-    if bridge_ids:
-        # Mixed-basis: bridge measured in Y basis (matches |Y_+⟩ prep) so that
-        # ∏ m(a_q) gives the ∏ Y_{a_q} eigenvalue per main.tex §4.5
-        # Eq. eq:obs0-corrected. Same-basis: matches basis_l-complement init.
-        if bridge.basis_l is bridge.basis_r:
-            bridge_meas_op = l_anc_op
-        else:
-            bridge_meas_op = "MY"
-        circuit.append(bridge_meas_op, list(bridge_ids))
-        measurement_record.append({q: i for i, q in enumerate(bridge_ids)})
-    circuit.append("SHIFT_COORDS", [], (0, 0, 1))
-
-    # Measure data — left in basis_l, right in basis_r.
-    circuit.append(l_data_op, list(data_l_ids))
-    measurement_record.append({q: i for i, q in enumerate(data_l_ids)})
-    if intercode:
-        circuit.append(r_data_op, list(data_r_ids))
-        measurement_record.append({q: i for i, q in enumerate(data_r_ids)})
-
-    # Final detectors. A center row's eigenvalue can be reconstructed from the
-    # destructive readout only when every non-I Pauli of the row matches that
-    # qubit's fixed destructive measurement basis (data_l→basis_l, data_r→
-    # basis_r, κ_s→gadget basis, adapter→Y). For those directly compatible
-    # rows we emit the row-by-row detector
-    #   DETECTOR( XOR per-qubit destructive readouts on supp(r)
-    #             ⊕ last-round in-circuit ancilla measurement of r ).
-    #
-    # In the mixed-basis (non-CSS) merge this is NOT enough: the cycle rows
-    # (H_R blocks of BOTH H̃_X^joint and H̃_Z^joint) deposit X_{a_q} / Z_{a_q}
-    # on the adapter, which §4.5 forces to be measured in Y, so they are not
-    # individually reconstructable; yet their last-round outcomes (and the
-    # adapter Y readouts) enter obs0 and must be pinned. We therefore also emit
-    # detectors for *linear combinations* of center rows whose incompatible
-    # parts cancel into a readout-compatible support — exactly the null space of
-    # the per-qubit incompatibility constraint F. Without these combination
-    # detectors a single fault on the Y-measured adapter flips obs0 with no
-    # detector firing (operational distance collapses to 1). See main.tex §4.6.
-    H_full = np.asarray(joint_code.matrix).astype(np.int_)
-    center_idx = [orig for orig in row_to_check if center_mask[orig]]
-    if center_idx:
-        import galois as _galois
-        F2 = _galois.GF(2)
-        C = H_full[center_idx]  # (n_center, 2n)
-        n_q = joint_code.num_qudits
-
-        def _row_destructive_compatible(combined_row: np.ndarray) -> bool:
-            for q in range(n_q):
-                xq, zq = int(combined_row[q]), int(combined_row[q + n_q])
-                if xq == 0 and zq == 0:
-                    continue
-                P = qubit_final_meas[qubit_ids.data[q]]
-                if P is Pauli.X and (xq, zq) != (1, 0):
-                    return False
-                if P is Pauli.Z and (xq, zq) != (0, 1):
-                    return False
-                if P is Pauli.Y and (xq, zq) != (1, 1):
-                    return False
-            return True
-
-        def _emit_combo_detector(c_int: np.ndarray) -> None:
-            combined = (c_int @ C) % 2
-            targets: list[stim.GateTarget] = []
-            for q in range(n_q):
-                xq, zq = int(combined[q]), int(combined[q + n_q])
-                if xq == 0 and zq == 0:
-                    continue
-                targets.append(measurement_record.get_target_rec(qubit_ids.data[q]))
-            for slot, ci in enumerate(c_int):
-                if ci:
-                    cid_slot = row_to_check[center_idx[slot]]
-                    targets.append(measurement_record.get_target_rec(cid_slot, -1))
-            if targets:
-                circuit.append("DETECTOR", targets, (0, 0, 0))
-
-        # Build constraint matrix F such that F @ row_sym = 0 iff row is
-        # destructive-compatible (one constraint per qubit).
-        F_rows: list[np.ndarray] = []
-        for q in range(n_q):
-            row_vec = np.zeros(2 * n_q, dtype=np.uint8)
-            P = qubit_final_meas[qubit_ids.data[q]]
-            if P is Pauli.X:
-                row_vec[q + n_q] = 1
-            elif P is Pauli.Z:
-                row_vec[q] = 1
-            else:  # Pauli.Y
-                row_vec[q] = 1
-                row_vec[q + n_q] = 1
-            F_rows.append(row_vec)
-        F_mat = np.stack(F_rows)
-        A = F2((C @ F_mat.T) % 2)
-        null_basis = np.asarray(A.T.null_space()).astype(np.int_)
-        # Rows of null_basis span all destructive-compatible combos.
-
-        emitted_for: set[int] = set()
-        for slot, orig in enumerate(center_idx):
-            if orig in emitted_for:
-                continue
-            single_row = C[slot]
-            if _row_destructive_compatible(single_row):
-                c = np.zeros(len(center_idx), dtype=np.int_)
-                c[slot] = 1
-                _emit_combo_detector(c)
-                emitted_for.add(orig)
-                continue
-            # Row's Pauli is incompatible with the destructive readout
-            # basis somewhere (e.g. Y_stab row with X-on-left-ancilla).
-            # Pick a min-weight null-space vector that includes this row;
-            # the combination cancels the incompatible parts. One detector
-            # per Y_stab row keeps the Tanner graph bounded.
-            cands = [(int(v.sum()), v) for v in null_basis if int(v[slot]) == 1]
-            if not cands:
-                continue  # row genuinely unreachable via destructive readouts
-            cands.sort(key=lambda x: x[0])
-            best_c = cands[0][1].astype(np.int_)
-            _emit_combo_detector(best_c)
-            for s2, val in enumerate(best_c):
-                if val:
-                    emitted_for.add(center_idx[s2])
-
-    # obs0 per main.tex §4.5 Eq. eq:obs0-corrected:
-    #   Z̄_l ⊗ X̄_r = ∏ χ_l surviving · ∏ χ_r surviving · ∏ y_q · ∏ Y_{a_q}
-    # The last product (∏ Y_{a_q}) over bridge destructive Y-basis readouts
-    # closes the adapter Y residual that arises in the mixed-basis case
-    # (Cohen-Kim-Bartlett-Brown arXiv:2110.10794 §II.B.2 / Fig. 4 |Y⟩-ancilla
-    # protocol). With |Y_+⟩^⊗w bridge init (RY) and MY detach, this term is
-    # deterministic and produces a deterministic obs0 even in the degenerate
-    # V_0 = ports regime (e.g. Steane × Steane), where rows_chi['l'] and
-    # rows_chi['r'] are both empty.
-    obs0_check_ids: list[int] = []
-
-    # Compute layout-row → joint-row → virtual_cssc-row → check-id mappings.
-    # layout.rows_chi[side] are indices into layout.H_X (if side's basis is X)
-    # or layout.H_Z (if Z). to_quditcode stacks [H_X | 0] then [0 | H_Z] then
-    # H_Y, so joint_row = layout_H_X_row for H_X rows or N_X + layout_H_Z_row
-    # for H_Z rows. _split_quditcode_into_virtual_cssc then re-partitions
-    # joint rows by Pauli type into x_row_idx / z_row_idx lists, where
-    # qubit_ids.checks_x[i] corresponds to joint_row = x_row_idx[i]. We
-    # invert that map here so a layout-row routes to the correct ancilla ID.
-    N_X = layout.H_X.shape[0]
-    x_inv = {jr: i for i, jr in enumerate(x_row_idx)}
-    z_inv = {jr: i for i, jr in enumerate(z_row_idx)}
-
-    def _layout_x_row_to_check_id(layout_row_idx: int) -> int | None:
-        """Map layout.H_X row index to check_id via joint row + virtual_cssc split."""
-        joint_row = layout_row_idx  # H_X rows are first in joint matrix
-        if joint_row not in x_inv:
-            return None  # row was not pure-X (split moved it somewhere else)
-        return qubit_ids.checks_x[x_inv[joint_row]]
-
-    def _layout_z_row_to_check_id(layout_row_idx: int) -> int | None:
-        """Map layout.H_Z row index to check_id via joint row + virtual_cssc split."""
-        joint_row = N_X + layout_row_idx  # H_Z rows come after H_X
-        if joint_row not in z_inv:
-            return None
-        return qubit_ids.checks_z[z_inv[joint_row]]
-
-    for row_idx in layout.rows_chi["l"]:
-        if layout.basis_l is Pauli.X:
-            cid = _layout_x_row_to_check_id(row_idx)
-        else:
-            cid = _layout_z_row_to_check_id(row_idx)
-        if cid is not None:
-            obs0_check_ids.append(cid)
-    for row_idx in layout.rows_chi["r"]:
-        if layout.basis_r is Pauli.X:
-            cid = _layout_x_row_to_check_id(row_idx)
-        else:
-            cid = _layout_z_row_to_check_id(row_idx)
-        if cid is not None:
-            obs0_check_ids.append(cid)
-    for y_idx in layout.rows_y:
-        obs0_check_ids.append(y_ancilla_ids[y_idx])
-    # ∏ Y_{a_q}: bridge destructive Y-basis readouts — closes the adapter
-    # residual per main.tex §4.5 Eq. eq:obs0-corrected.
-    for bid in bridge_ids:
-        obs0_check_ids.append(bid)
-
-    if obs0_check_ids:
-        obs0_targets = [
-            measurement_record.get_target_rec(cid) for cid in obs0_check_ids
-        ]
-        circuit.append("OBSERVABLE_INCLUDE", obs0_targets, 0)
-
-    if noise_model is not None:
-        circuit = noise_model.noisy_circuit(circuit)
-    return circuit, joint_code
-
-
-def _classify_reliable_round1_checks_joint(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    qubit_ids: QubitIDs,
-    *,
-    intercode: bool,
-) -> tuple[int, ...]:
-    """Joint-code variant: reliable checks across both gadgets + new cycle rows.
-
-    basis=X (data |+⟩, ancilla + bridge |0⟩):
-        H_X rows = [data S_X^(l), data S_X^(r), S'_meas^(l), S'_meas^(r)]
-        H_Z rows = [data S_Z^(l) ext, data S_Z^(r) ext, S'_comp^(l)_aug,
-                    S'_comp^(r)_aug, new cycle-Z]
-
-      Reliable X: data S_X rows of both gadgets.
-      Reliable Z: S'_comp_aug rows + new cycle-Z rows (all act on ancilla ∪ bridge, all |0⟩).
-
-    basis=Z is the X↔Z dual.
-    """
-    m_X_l = g_l.code.matrix_x.shape[0]
-    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
-    m_Z_l = g_l.code.matrix_z.shape[0]
-    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
-    if g_l.basis is Pauli.X:
-        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]  # data S_X^(l/r)
-        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]  # S'_comp_aug + new cycle-Z
-    else:
-        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]  # S'_comp_aug + new cycle-X
-        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]  # data S_Z^(l/r)
-    return tuple(reliable_x) + tuple(reliable_z)
-
-
-def _surgery_qec_cycle_joint(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    joint_code: CSSCode,
-    bridge: Bridge,
-    num_rounds: int,
-    qubit_ids: QubitIDs,
-    *,
-    intercode: bool,
-) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
-    """Joint-code variant of _surgery_qec_cycle that classifies reliable checks
-    across both gadgets + the bridge's new cycle-checks."""
-    strategy = EdgeColoring()
-    one_round, round_measurement_record = strategy.get_circuit(joint_code, qubit_ids)
-    reliable = set(
-        _classify_reliable_round1_checks_joint(
-            g_l,
-            g_r,
-            qubit_ids,
-            intercode=intercode,
-        )
-    )
-    all_check_ids = qubit_ids.check
-    lane_idx = _check_lane_index_map(
-        g_l,
-        qubit_ids,
-        joint=(g_r, bridge, intercode),
-    )
-
-    circuit = stim.Circuit()
-    measurement_record = MeasurementRecord()
-    detector_record = DetectorRecord()
-
-    circuit += one_round
-    measurement_record.append(round_measurement_record)
-    for check_id in all_check_ids:
-        if check_id in reliable:
-            lane, idx = lane_idx[check_id]
-            circuit.append(
-                "DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0)
-            )
-    reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
-    detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
-
-    if num_rounds > 1:
-        repeat_circuit = one_round.copy()
-        measurement_record.append(round_measurement_record)
-        repeat_circuit.append("SHIFT_COORDS", [], (0, 0, 1))
-        for check_id in all_check_ids:
-            lane, idx = lane_idx[check_id]
-            repeat_circuit.append(
-                "DETECTOR",
-                [
-                    measurement_record.get_target_rec(check_id, -1),
-                    measurement_record.get_target_rec(check_id, -2),
-                ],
-                (idx, lane, 0),
-            )
-        circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
-        measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
-        detector_record.append(
-            {cid: dd for dd, cid in enumerate(all_check_ids)},
-            repeat=num_rounds - 1,
-        )
-
-    return circuit, measurement_record, detector_record
-
-
-def _surgery_final_detectors_joint(
-    g_l: GadgetLayout,
-    g_r: GadgetLayout,
-    joint_code: CSSCode,
-    bridge: Bridge,
-    qubit_ids: QubitIDs,
-    *,
-    measurement_record: MeasurementRecord,
-    intercode: bool,
-) -> stim.Circuit:
-    """Joint-code variant of _surgery_final_detectors.
-
-    Emits detectors for the same reliable stabilizers as the round-1 classifier:
-    basis=X: data H_X rows from both gadgets + G_aug + new cycle-Z rows.
-    basis=Z: data H_Z rows from both gadgets + G_aug + new cycle-X rows.
-    """
-    m_X_l = g_l.code.matrix_x.shape[0]
-    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
-    m_Z_l = g_l.code.matrix_z.shape[0]
-    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
-    HX = np.asarray(joint_code.matrix_x).astype(np.uint8)
-    HZ = np.asarray(joint_code.matrix_z).astype(np.uint8)
-
-    circuit = stim.Circuit()
-    lane_idx = _check_lane_index_map(
-        g_l,
-        qubit_ids,
-        joint=(g_r, bridge, intercode),
-    )
-
-    def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
-        supp = np.where(stab_row)[0]
-        targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
-        targets.append(measurement_record.get_target_rec(check_id, -1))
-        lane, idx = lane_idx[check_id]
-        circuit.append("DETECTOR", targets, (idx, lane, 0))
-
-    if g_l.basis is Pauli.X:
-        for kk in range(m_X_l + m_X_r):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
-        for kk in range(m_Z_l + m_Z_r, HZ.shape[0]):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-    else:
-        for kk in range(m_Z_l + m_Z_r):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-        for kk in range(m_X_l + m_X_r, HX.shape[0]):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
-
-    return circuit
-
-
 def _classify_reliable_round1_checks(
     gadget: GadgetLayout,
     qubit_ids: QubitIDs,
+    *,
+    g_r: GadgetLayout | None = None,
+    intercode: bool = False,
 ) -> tuple[int, ...]:
-    """Check ancillas with deterministic round-1 syndrome given surgery init state."""
-    m_X, m_Z = gadget.code.matrix_x.shape[0], gadget.code.matrix_z.shape[0]
-    if gadget.basis is Pauli.X:
-        reliable_x = qubit_ids.checks_x[:m_X]  # data S_X rows (det. +1)
-        reliable_z = qubit_ids.checks_z[m_Z:]  # gauge rows (= S'_comp) (det. +1)
-    else:
-        reliable_x = qubit_ids.checks_x[m_X:]  # gauge rows (= S'_comp)
-        reliable_z = qubit_ids.checks_z[:m_Z]  # data S_Z rows
+    """Check ancillas with deterministic round-1 syndrome given surgery init state.
 
+    Single-gadget (``g_r=None``): reliable = data-basis rows + gauge (S'_comp)
+    rows. Joint-code (``g_r`` set): the same split spanning both gadgets — for
+    inter-code the right gadget's data-check rows extend the data block
+    (offsets m_X_l+m_X_r etc.); the bridge's new cycle rows live in the gauge
+    block. Intra-code joints share data, so ``intercode=False`` (m_*_r = 0).
+    """
+    m_X_l = gadget.code.matrix_x.shape[0]
+    m_Z_l = gadget.code.matrix_z.shape[0]
+    m_X_r = g_r.code.matrix_x.shape[0] if (g_r is not None and intercode) else 0
+    m_Z_r = g_r.code.matrix_z.shape[0] if (g_r is not None and intercode) else 0
+    if gadget.basis is Pauli.X:
+        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]  # data S_X rows (det. +1)
+        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]  # gauge (S'_comp) + cycle
+    else:
+        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]  # gauge (S'_comp) + cycle
+        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]  # data S_Z rows
     return tuple(reliable_x) + tuple(reliable_z)
 
 
@@ -2937,13 +1825,29 @@ def _surgery_qec_cycle(
     merged_code: CSSCode,
     num_rounds: int,
     qubit_ids: QubitIDs,
+    *,
+    joint: tuple[GadgetLayout, Bridge, bool] | None = None,
 ) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
-    """num_rounds of merged-code SE; round-1 detectors only for reliable checks."""
+    """num_rounds of merged-code SE; round-1 detectors only for reliable checks.
+
+    Single-PPM (``joint=None``) and joint-PPM (``joint=(g_r, bridge,
+    intercode)``) share one round loop; only the reliable-check classifier and
+    the check→lane map differ by whether the right gadget + bridge participate.
+    """
     strategy = EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
-    reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
+    if joint is None:
+        reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
+        lane_idx = _check_lane_index_map(gadget, qubit_ids)
+    else:
+        g_r, _bridge, intercode = joint
+        reliable = set(
+            _classify_reliable_round1_checks(
+                gadget, qubit_ids, g_r=g_r, intercode=intercode
+            )
+        )
+        lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
     all_check_ids = qubit_ids.check
-    lane_idx = _check_lane_index_map(gadget, qubit_ids)
 
     circuit = stim.Circuit()
     measurement_record = MeasurementRecord()
@@ -3035,20 +1939,27 @@ def _surgery_final_detectors(
     qubit_ids: QubitIDs,
     *,
     measurement_record: MeasurementRecord,
+    joint: tuple[GadgetLayout, Bridge, bool] | None = None,
 ) -> stim.Circuit:
     """Emit DETECTORs for reliable stabs inferable from final readouts.
 
     For basis=X: data H_X (from Mx data) + G (from Mz κ).
     For basis=Z: data H_Z (from Mz data) + G (from Mx κ).
     Each DETECTOR XORs ⊕(final M-record on stab support) ⊕ last-round syndrome.
+    Joint-PPM (``joint=(g_r, bridge, intercode)``) spans both gadgets' data rows.
     """
     m_X = gadget.code.matrix_x.shape[0]
     m_Z = gadget.code.matrix_z.shape[0]
+    if joint is not None:
+        g_r, _bridge, intercode = joint
+        if intercode:
+            m_X += g_r.code.matrix_x.shape[0]
+            m_Z += g_r.code.matrix_z.shape[0]
     HX = np.asarray(merged_code.matrix_x).astype(np.uint8)
     HZ = np.asarray(merged_code.matrix_z).astype(np.uint8)
 
     circuit = stim.Circuit()
-    lane_idx = _check_lane_index_map(gadget, qubit_ids)
+    lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
 
     def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
         supp = np.where(stab_row)[0]

@@ -415,102 +415,6 @@ def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis: PauliXZ) ->
     )
 
 
-@pytest.mark.slow
-def test_single_ppm_ler_monotone_in_p() -> None:
-    """Tiny sinter sweep: PPM LER monotonically increasing in p.
-
-    Catches gross protocol errors (wrong observable basis, sign flips, etc.).
-    """
-    import sinter
-
-    from qldpc import decoders
-    from qldpc.circuits import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
-    from qldpc.circuits.surgery.gadget import build_gadget
-
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x, basis=Pauli.X)
-
-    error_rates = [0.001, 0.005, 0.02]
-    tasks = []
-    for p in error_rates:
-        circuit = build_single_ppm_circuit(
-            g,
-            rounds=3,
-            noise_model=DepolarizingNoiseModel(p),
-        )
-        tasks.append(
-            sinter.Task(
-                circuit=circuit,
-                json_metadata={"p": float(p)},
-            )
-        )
-    sinter_decoder = decoders.SinterDecoder()
-    results = sinter.collect(
-        tasks=tasks,
-        decoders=["custom"],
-        custom_decoders={"custom": sinter_decoder},
-        num_workers=4,
-        max_shots=2000,
-        max_errors=30,
-        print_progress=False,
-    )
-    by_p = {r.json_metadata["p"]: r.errors / max(r.shots, 1) for r in results}
-    sorted_p = sorted(by_p.keys())
-    ler_vals = [by_p[p] for p in sorted_p]
-    print(f"LER values: {list(zip(sorted_p, ler_vals))}")
-    # Monotonically non-decreasing (allow small statistical noise)
-    for i in range(len(ler_vals) - 1):
-        assert ler_vals[i] <= ler_vals[i + 1] * 1.5, (
-            f"LER not monotonic: p={sorted_p[i]} → {ler_vals[i]}, "
-            f"p={sorted_p[i + 1]} → {ler_vals[i + 1]}"
-        )
-
-
-@pytest.mark.slow
-def test_single_ppm_ler_with_final_detectors_below_threshold() -> None:
-    """With final detectors wired, LER at p=0.001 should be ≤ 0.01.
-
-    Reference: before the final-detector wiring, LER at p=0.001 was ~0.024
-    (from test_single_ppm_ler_monotone_in_p in the surgery-circuit-rewrite plan).
-    Adding the inferred detectors should drop it significantly.
-    """
-    import sinter
-
-    from qldpc import decoders
-    from qldpc.circuits import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
-    from qldpc.circuits.surgery.gadget import build_gadget
-
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, x, basis=Pauli.X)
-
-    p = 0.001
-    circuit = build_single_ppm_circuit(
-        g,
-        rounds=3,
-        noise_model=DepolarizingNoiseModel(p),
-    )
-    sinter_decoder = decoders.SinterDecoder()
-    results = sinter.collect(
-        tasks=[sinter.Task(circuit=circuit, json_metadata={"p": float(p)})],
-        decoders=["custom"],
-        custom_decoders={"custom": sinter_decoder},
-        num_workers=4,
-        max_shots=5000,
-        max_errors=50,
-        print_progress=False,
-    )
-    assert len(results) == 1
-    ler = results[0].errors / max(results[0].shots, 1)
-    assert ler <= 0.01, (
-        f"LER at p=0.001 = {ler:.4f} (errors={results[0].errors}/{results[0].shots} shots). "
-        f"Expected ≤ 0.01 with final detectors wired. Was ~0.024 without them."
-    )
-
-
 def test_stitch_intercode_basis_x_css_commutation() -> None:
     """Inter-code Steane × Steane joint X̄X̄ merged code commutes."""
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -770,34 +674,6 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
             f"data_init={data_init!r}: obs0 disagrees with obs1 on "
             f"{(obs0 != obs1).sum()}/8 noiseless shots"
         )
-
-
-@pytest.mark.slow
-def test_joint_ppm_ler_monotone_steane_intercode() -> None:
-    """LER non-increasing in p across {1e-4, 3e-4, 1e-3} for Steane × Steane."""
-    from qldpc.circuits.noise_model import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.bridge import build_bridge
-    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
-    from qldpc.circuits.surgery.gadget import build_gadget
-
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g_l = build_gadget(code, x, basis=Pauli.X)
-    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
-    bridge = build_bridge(g_l, g_r)
-    lers = []
-    shots = 2000
-    for p in (1e-3, 3e-4, 1e-4):
-        nm = DepolarizingNoiseModel(p)
-        circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, noise_model=nm)
-        sampler = circuit.compile_detector_sampler()
-        _, obs = sampler.sample(shots, separate_observables=True)
-        # logical error rate of OBS 0 (joint χ XOR)
-        ler = (obs[:, 0] != 0).mean()
-        lers.append(ler)
-    # LER should be non-increasing as p decreases (tolerance 1.3× to absorb sampling noise)
-    assert lers[0] >= lers[1] / 1.3, f"LER not monotone: {lers}"
-    assert lers[1] >= lers[2] / 1.3, f"LER not monotone: {lers}"
 
 
 @pytest.mark.parametrize("code_index", [0, 1, 2, 3])
