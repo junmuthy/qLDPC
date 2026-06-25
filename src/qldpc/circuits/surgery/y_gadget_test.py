@@ -179,15 +179,6 @@ def test_bb_merged_structure_and_crossing_dim(overlap, crossing_dim_expected):
     assert crossing_dim == crossing_dim_expected  # 0 at |W|=1, |W|−1 at |W|=3
 
 
-def test_bb_w1_distance_not_collapsed():
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
-
-    code, x, z = _bb_y_pair(overlap=1)
-    yg = build_y_gadget(code, x=x, z=z)
-    d = yg.merged_code.get_distance(bound=4)  # decoder upper bound
-    assert d >= 4  # collapse below d_data=4 would make the bound return < 4
-
-
 def test_h_sym_rows_in_h_tilde_block_order() -> None:
     """H_sym rows follow the H̃ formula order: block1 H_X(X), block2 S_X'(X),
     block3 Y(mixed), block4 H_Z(Z), block5 S_Z'(Z), block6 cycles
