@@ -3,8 +3,8 @@ Cain et al. arXiv:2603.28627 §B.1).
 
 Three explicit named steps that map 1:1 to the paper:
     _step1_restriction  — restriction: V₀=supp(x), C₀=checks touching V₀,
-                          H_X' = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`)
-    _step2_gauge_fix    — gauge fix: G = ker((H_X')^T) over GF(2) (stored as `gauge`)
+                          ∂_1 = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`)
+    _step2_gauge_fix    — gauge fix: ∂_0 = ker(∂_1) over GF(2) (stored as `gauge`)
     _step3_assemble     — block assembly of HX_merged, HZ_merged
 """
 
@@ -44,8 +44,8 @@ class GadgetLayout:
         support       = V₀  (qubit indices in supp(x))
         data_checks   = C₀  (complementary-basis check indices touching V₀;
                              -1 sentinels indicate boost-added Q' with no backing check)
-        incidence     = (H_X')^T  (|C₀|×|V₀| matrix; H_X' = π_{V₀}H_Z^Tπ_{C₀}^T)
-        gauge         = G   (basis of ker((H_X')^T) over GF(2))
+        incidence     = ∂_1^T  (|C₀|×|V₀| edge×vertex matrix; ∂_1 = incidence.T)
+        gauge         = ∂_0    (basis of ker(∂_1) over GF(2); field renamed next task)
         Q_prime       = Q' (κ qubits, indexed after the n data qubits)
     """
 
@@ -71,7 +71,7 @@ def _step1_restriction(
     Cain et al. arXiv:2603.28627 §B.1).
 
     V₀ = support = supp(x); C₀ = data_checks = complementary-basis checks touching V₀;
-    H_X' = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`, shape |C₀|×|V₀|).
+    ∂_1 = π_{V₀} H_Z^T π_{C₀}^T (stored transposed as `incidence`, shape |C₀|×|V₀|).
 
     basis=Pauli.X: complementary matrix is H_Z (measuring X̄, restricting via Z-checks).
     basis=Pauli.Z: complementary matrix is H_X (measuring Z̄, restricting via X-checks).
@@ -89,22 +89,23 @@ def _step1_restriction(
     data_checks = tuple(
         int(j) for j in range(H_complement.shape[0]) if H_complement[j, list(support)].any()
     )
-    # H_X' = π_{V₀} H_Z^T π_{C₀}^T  (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
-    # Cain et al. arXiv:2603.28627 §B.1).  The stored `incidence` is its transpose —
-    # the |C₀|×|V₀| vertex-edge incidence (§4 y_gadget.py calls this ∂₁ˣ).
+    # ∂_1 = π_{V₀} H_Z^T π_{C₀}^T  (vertex×edge incidence; Webster, Smith, Cohen
+    # arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1; arXiv:2410.02753 Eq.(62)).
+    # The stored `incidence` is its transpose ∂_1^T — the |C₀|×|V₀| edge×vertex form
+    # (§4 y_gadget.py recovers ∂_1^x = incidence.T).
     n = code.num_qudits
-    pi_V0 = _projection(support, n)                  # π_{V₀} = f_X' ∈ F₂^{|V₀|×n}
-    pi_C0 = _projection(data_checks, H_complement.shape[0])   # π_{C₀} ∈ F₂^{|C₀|×m_comp}
-    H_X_prime = (pi_V0 @ H_complement.T @ pi_C0.T) % 2        # |V₀|×|C₀|
-    incidence = H_X_prime.T.astype(np.uint8)         # |C₀|×|V₀|
+    pi_V0 = _projection(support, n)                          # π_{V₀} = f_1^T ∈ F₂^{|V₀|×n}
+    pi_C0 = _projection(data_checks, H_complement.shape[0])  # π_{C₀} ∈ F₂^{|C₀|×m_comp}
+    partial_1 = (pi_V0 @ H_complement.T @ pi_C0.T) % 2       # ∂_1, |V₀|×|C₀|
+    incidence = partial_1.T.astype(np.uint8)                # ∂_1^T, |C₀|×|V₀|
     return support, data_checks, incidence
 
 
 def _step2_gauge_fix(incidence: np.ndarray) -> np.ndarray:
     """Gauge fix (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1).
 
-    G = gauge = canonical row basis of ker((H_X')^T) = ker(incidence^T) over GF(2).
-    `incidence` = (H_X')^T (|C₀|×|V₀|); returns G of shape (r, |C₀|) where r = |C₀| - rank(H_X').
+    ∂_0 = canonical row basis of ker(∂_1) = left_null_space(incidence) = ker(incidence^T) over GF(2).
+    `incidence` = ∂_1^T (|C₀|×|V₀|); returns ∂_0 of shape (r, |C₀|) where r = |C₀| − rank(∂_1).
 
     Uses galois ``left_null_space`` (row-reduced) so the basis is deterministic.
     """
@@ -121,8 +122,8 @@ def _assemble_HX_L1(
 ) -> np.ndarray:
     """L=1 X-side block assembly: [[HX_data, 0], [S_X']] over GF(2).
 
-    S_X' = [f_X' | H_X'] where f_X' = π_{V₀} (indicator on data qubits) and
-    H_X' = incidence.T (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
+    S_X' = [f_1^T | ∂_1] where f_1^T = π_{V₀} (indicator on data qubits) and
+    ∂_1 = incidence.T (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
     Cain et al. arXiv:2603.28627 §B.1).
 
     Called by _step3_assemble (initial gadget assembly) and build_gadget_augmented
@@ -132,7 +133,7 @@ def _assemble_HX_L1(
     Args:
         HX_data: original code's X-check matrix, shape (mX, n), uint8.
         support_indices: indices of V₀ within the n data qubits, shape (|V₀|,).
-        incidence: (H_X')^T, shape (|C₀|, |V₀|), uint8.
+        incidence: ∂_1^T, shape (|C₀|, |V₀|), uint8.
 
     Returns:
         HX_merged: shape (mX + |V₀|, n + |C₀|), uint8.
@@ -140,11 +141,11 @@ def _assemble_HX_L1(
     mX, n = HX_data.shape
     n_v0, n_c0 = int(incidence.shape[1]), int(incidence.shape[0])
     top = np.hstack([HX_data, np.zeros((mX, n_c0), dtype=np.uint8)]).astype(np.uint8)
-    # S_X' rows = [f_X' | H_X'] : f_X' = π_{V₀} on data, H_X' = incidence.T on Q'.
-    f_X_prime = np.zeros((n_v0, n), dtype=np.uint8)
-    f_X_prime[np.arange(n_v0), np.asarray(support_indices)] = 1
-    H_X_prime = incidence.T.astype(np.uint8)
-    S_X_prime = np.hstack([f_X_prime, H_X_prime]).astype(np.uint8)
+    # S_X' rows = [f_1^T | ∂_1] : f_1^T = π_{V₀} on data, ∂_1 = incidence.T on Q'.
+    f_1_T = np.zeros((n_v0, n), dtype=np.uint8)
+    f_1_T[np.arange(n_v0), np.asarray(support_indices)] = 1
+    partial_1 = incidence.T.astype(np.uint8)
+    S_X_prime = np.hstack([f_1_T, partial_1]).astype(np.uint8)
     return np.vstack([top, S_X_prime]).astype(np.uint8)
 
 
@@ -160,11 +161,11 @@ def _step3_assemble(
     """Block assembly of HX_merged, HZ_merged (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
     Cain et al. arXiv:2603.28627 §B.1).
 
-    S'_meas rows go into the measurement-basis merged matrix; G=gauge rows go into
-    the complementary-basis merged matrix. f_Z = π_{C₀}^T extends original checks onto Q'.
+    S'_meas rows go into the measurement-basis merged matrix; ∂_0=gauge rows go into
+    the complementary-basis merged matrix. f_0 = π_{C₀}^T extends original checks onto Q'.
 
-    basis=X (default): S'_meas rows added to HX_merged; G rows added to HZ_merged.
-    basis=Z: S'_meas rows added to HZ_merged; G rows added to HX_merged (basis-symmetric dual).
+    basis=X (default): S'_meas rows added to HX_merged; ∂_0 rows added to HZ_merged.
+    basis=Z: S'_meas rows added to HZ_merged; ∂_0 rows added to HX_merged (basis-symmetric dual).
     """
     HX = np.asarray(code.matrix_x).astype(np.uint8)
     HZ = np.asarray(code.matrix_z).astype(np.uint8)
@@ -173,28 +174,28 @@ def _step3_assemble(
     nC = len(data_checks)
     r = gauge.shape[0]
 
-    # f_Z = π_{C₀}^T : extends the original Z-checks (basis=X) onto the new Q' ancillas.
+    # f_0 = π_{C₀}^T : extends the original Z-checks (basis=X) onto the new Q' ancillas.
     # _projection's sentinel rule zeroes the columns of boost-added Q' (data_checks == -1).
     m_comp = mZ if basis is Pauli.X else mX
-    f_Z = _projection(data_checks, m_comp).T.astype(np.uint8)   # (m_comp, |C₀|)
+    f_0 = _projection(data_checks, m_comp).T.astype(np.uint8)   # (m_comp, |C₀|)
 
     support_arr = np.asarray(support, dtype=np.int_)
 
     if basis is Pauli.X:
-        # S'_meas rows extend HX_merged; G rows extend HZ_merged
+        # S'_meas rows extend HX_merged; ∂_0 rows extend HZ_merged
         HX_merged = _assemble_HX_L1(HX, support_arr, incidence)
         HZ_merged = np.block(
             [
-                [HZ, f_Z],
+                [HZ, f_0],
                 [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
             ]
         ).astype(np.uint8)
     else:
-        # basis=Z (symmetric dual): S'_meas rows extend HZ_merged; G rows extend HX_merged
+        # basis=Z (symmetric dual): S'_meas rows extend HZ_merged; ∂_0 rows extend HX_merged
         HZ_merged = _assemble_HX_L1(HZ, support_arr, incidence)
         HX_merged = np.block(
             [
-                [HX, f_Z],
+                [HX, f_0],
                 [np.zeros((r, n), dtype=np.uint8), gauge.astype(np.uint8)],
             ]
         ).astype(np.uint8)
@@ -252,16 +253,16 @@ def build_gadget_augmented(
     *,
     basis: PauliXZ,
 ) -> GadgetLayout:
-    """Rebuild a GadgetLayout with (H_X')^T augmented by extra weight-2 rows
+    """Rebuild a GadgetLayout with ∂_1^T augmented by extra weight-2 rows
     (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1).
 
     Each row of ``incidence_extra`` (weight 2) corresponds to a new Q' (κ) qubit not
     backed by any original complementary-basis check. The function:
 
-    1. Stacks incidence_aug = [(H_X')^T; incidence_extra] (augmented |C₀|×|V₀| matrix).
-    2. Recomputes G_aug = ker(incidence_aug^T) via _step2_gauge_fix.
+    1. Stacks incidence_aug = [∂_1^T; incidence_extra] (augmented |C₀|×|V₀| matrix).
+    2. Recomputes ∂_0_aug = ker(incidence_aug^T) via _step2_gauge_fix.
     3. Calls _step3_assemble with -1 sentinels appended to C₀ for the new κ qubits
-       (their f_Z columns are zero, as no original check maps onto them).
+       (their f_0 columns are zero, as no original check maps onto them).
 
     The returned ``GadgetLayout.data_checks`` and ``Q_prime`` are extended to
     cover the new κ qubits; new κ indices come after the original ones.
@@ -280,8 +281,8 @@ def build_gadget_augmented(
     incidence_aug = np.vstack([incidence, incidence_extra]).astype(np.uint8)
     gauge_aug = _step2_gauge_fix(incidence_aug)
 
-    # _step3_assemble builds f_Z = π_{C₀}^T; we need C₀_aug to include -1 sentinels
-    # for the new κ qubits so their f_Z columns are all-zero (no original check maps
+    # _step3_assemble builds f_0 = π_{C₀}^T; we need C₀_aug to include -1 sentinels
+    # for the new κ qubits so their f_0 columns are all-zero (no original check maps
     # onto them). _projection's sentinel rule handles indices outside [0, m_comp).
     n_extra = incidence_extra.shape[0]
     data_checks_aug = tuple(data_checks) + tuple([-1] * n_extra)
