@@ -189,3 +189,22 @@ def test_bb_w1_distance_not_collapsed():
     yg = build_y_gadget(code, x=x, z=z)
     d = yg.merged_code.get_distance(bound=12)  # decoder upper bound
     assert d >= 4  # collapse below d_data=4 would make the bound return < 4
+
+
+def test_h_sym_rows_in_h_tilde_block_order() -> None:
+    """H_sym rows follow the H̃ formula order: block1 H_X(X), block2 χ_X(X),
+    block3 Y(mixed), block4 H_Z(Z), block5 χ_Z(Z), block6 cycles
+    (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D)."""
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    H = np.asarray(yg.H_sym).astype(int)
+    n = yg.merged_code.num_qudits
+    xparts = (H[:, :n] != 0).any(axis=1)
+    zparts = (H[:, n:] != 0).any(axis=1)
+    m_x = code.matrix_x.shape[0]
+    n_w = len(yg.W)
+    # block 1 (H_X) + block 2 (χ_X on V_X) are pure-X and come first
+    assert xparts[: m_x].all() and not zparts[: m_x].any(), "block 1 not pure-X-first"
+    # block 3 (Y on W) is mixed and follows the pure-X blocks
+    y0 = m_x + (yg.g_x.HX_merged.shape[0] - m_x - n_w)  # m_x + |V_X|
+    assert (xparts[y0 : y0 + n_w] & zparts[y0 : y0 + n_w]).all(), "block 3 not mixed"

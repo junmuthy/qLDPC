@@ -638,6 +638,29 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     encoding ``code.dimension − 1`` logicals with Ȳ = iX̄Z̄ in its stabilizer
     group.
 
+    The symplectic check matrix H̃ (Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.D) is assembled in formula order with one named
+    local variable per block.  Column layout per symplectic half:
+    ``[ data (n) | κ_x (k_x) | κ_z (k_z) ]``::
+
+        |   X-part (data | κ_x | κ_z)         |   Z-part (data | κ_x | κ_z)
+        |--------------------------------------|------------------------------------
+        |  H_X     0       π_{C₀^Z}^T         |   ·       ·        ·          block 1 (X-checks)
+        |  π_{V_X} ∂₁ˣ|_{V_X}  0              |   ·       ·        ·          block 2 (χ_X on V_X)
+        |  π_W     ∂₁ˣ|_W   0                 |  π_W      0       ∂₁ᶻ|_W      block 3 (Y on W, mixed)
+        |  ·       ·        ·                 |  H_Z    π_{C₀^X}^T  0         block 4 (Z-checks)
+        |  ·       ·        ·                 |  π_{V_Z}  0       ∂₁ᶻ|_{V_Z}  block 5 (χ_Z on V_Z)
+        |  0       0        ∂₀^Z              |   0      ∂₀^X      0          block 6 (cycles ∂₀)
+
+    Named-block mapping (each is a local variable in the assembly)::
+
+        Xcheck_rows = HX_out[:m_x]   # block 1: H_X ext onto κ_z = π_{C₀^Z}^T
+        chiX_rows   = HX_out[m_x:]   # block 2: π_{V_X} | ∂₁ˣ|_{V_X} | 0
+        Ymix_rows   = Y_stab         # block 3: mixed χ@W rows (apply_mixed_basis_merge)
+        Zcheck_rows = HZ_out[:m_z]   # block 4: H_Z ext onto κ_x = π_{C₀^X}^T
+        chiZ_rows   = HZ_out[m_z:]   # block 5: π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}
+        cycle_rows  = partial0        # block 6: ker(merged ∂₁) = ∂₀^Z / ∂₀^X
+
     Args:
         code: a CSS code carrying the logical qubit to be Y-measured.
         x: logical-X support, ``H_Z @ x == 0`` (mod 2); shape ``(n,)``.
@@ -722,18 +745,35 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
     # at |W|≥2.
     partial0 = _partial0_symplectic_rows(g_x, g_z, x, z, n=n, k_x=k_x, k_z=k_z)
 
-    rows_sym: list[np.ndarray] = []
-    for r in HX_out:
-        rows_sym.append(np.concatenate([r, np.zeros(n_merged, dtype=np.int_)]))
-    for r in HZ_out:
-        rows_sym.append(np.concatenate([np.zeros(n_merged, dtype=np.int_), r]))
-    for r in Y_stab:
-        rows_sym.append(r.astype(np.int_))
-    for r in partial0:
-        rows_sym.append(r.astype(np.int_))
+    # --- Assemble H̃ block-by-block in formula order (Ide, Gowda, Nadkarni,
+    # Dauphinais arXiv:2410.02753 §III.D; design spec §0). Column layout per
+    # symplectic half: [ data (n) | κ_x (k_x) | κ_z (k_z) ].
+
+    def _sym_x(rows: np.ndarray) -> np.ndarray:  # X-only rows → [X | 0]
+        return np.hstack([rows, np.zeros_like(rows)]).astype(np.int_)
+
+    def _sym_z(rows: np.ndarray) -> np.ndarray:  # Z-only rows → [0 | Z]
+        return np.hstack([np.zeros_like(rows), rows]).astype(np.int_)
+
+    # apply_mixed_basis_merge removed the χ@W rows into Y_stab, so:
+    Xcheck_rows = HX_out[:m_x]   # block 1: [H_X | 0 | π_{C₀^Z}^T]
+    chiX_rows   = HX_out[m_x:]   # block 2: [π_{V_X} | ∂₁ˣ|_{V_X} | 0]
+    Ymix_rows   = Y_stab         # block 3: [π_W|∂₁ˣ|_W|0 ‖ π_W|0|∂₁ᶻ|_W]
+    Zcheck_rows = HZ_out[:m_z]   # block 4: [H_Z | π_{C₀^X}^T | 0]
+    chiZ_rows   = HZ_out[m_z:]   # block 5: [π_{V_Z} | 0 | ∂₁ᶻ|_{V_Z}]
+    cycle_rows  = partial0       # block 6: [0|0|∂₀^Z ‖ 0|∂₀^X|0]
+
+    blocks = [
+        _sym_x(Xcheck_rows),
+        _sym_x(chiX_rows),
+        Ymix_rows.astype(np.int_),
+        _sym_z(Zcheck_rows),
+        _sym_z(chiZ_rows),
+        cycle_rows.astype(np.int_),
+    ]
     H_sym = (
-        np.array(rows_sym, dtype=np.int_)
-        if rows_sym
+        np.vstack([b for b in blocks if b.shape[0]])
+        if any(b.shape[0] for b in blocks)
         else np.zeros((0, 2 * n_merged), dtype=np.int_)
     )
 
