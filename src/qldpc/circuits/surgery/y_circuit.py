@@ -155,13 +155,20 @@ def _steane_logical_y_eigenstate_prep(
     circuit = stim.Circuit()
     circuit.append("RX", ids)  # |+⟩^n  (X̄ = +1, X-syndrome 0)
     # Measure each Z-stabilizer onto a fresh ancilla (random Z-syndrome on |+⟩^n).
+    # Reset and measure ALL m_z ancillas in single ticks (one R layer, one M
+    # layer) rather than a per-row R…CX…M staircase: the per-ancilla CX cascades
+    # in between are independent (each writes a distinct ancilla target, sharing
+    # only data controls, which commute), so batching is semantics-preserving and
+    # keeps the timeline diagram a clean reset → extract → readout. The M order
+    # (anc 0 … anc m_z-1) is unchanged, so the feedback target_rec(-(m_z-i))
+    # offsets below still address stabilizer i.
     anc_ids = [ancilla_base + i for i in range(m_z)]
+    circuit.append("R", anc_ids)
     for i in range(m_z):
         anc = anc_ids[i]
-        circuit.append("R", [anc])
         for q in np.flatnonzero(HZ[i]):
             circuit.append("CX", [ids[int(q)], anc])  # Z-parity of data → ancilla
-        circuit.append("M", [anc])
+    circuit.append("M", anc_ids)
     # Feedback X^{R·s} to cancel the syndrome → exact |X̄+⟩. Stabilizer i is the
     # (m_z - i)-th most recent measurement record.
     for i in range(m_z):
@@ -220,7 +227,30 @@ def _y_state_prep(
     kx_ids = data_cols[n_code : n_code + k_x]  # X-system ancillas → |0⟩, read Z
     kz_ids = data_cols[n_code + k_x :]  # Z-system ancillas → |+⟩, read X
 
-    circuit = _mixed_basis_qubit_coords(n_q, qubit_ids, y_ancilla_ids)
+    # First free qubit ID above all structural qubits — the base for the transient
+    # Y-eigenstate state-injection ancillas (m_z Z-syndrome ancillas allocated in
+    # ``_steane_logical_y_eigenstate_prep``). Reserve their IDs up front so they
+    # get QUBIT_COORDS in the same layout pass; without this they were emitted as
+    # coordinate-less wires (the R/M-only injection ancillas of the Y± preps).
+    prep_base = (
+        max([*qubit_ids.all_qubits, *y_ancilla_ids])
+        if (qubit_ids.all_qubits or y_ancilla_ids)
+        else -1
+    ) + 1
+    if data_init in ("Y+", "Y-"):
+        n_prep = yg.code.matrix_z.shape[0]
+        prep_ancilla_ids: tuple[int, ...] = tuple(range(prep_base, prep_base + n_prep))
+    else:
+        prep_ancilla_ids = ()
+
+    # Original code check counts: the first m_x / m_z rows of checks_x / checks_z
+    # are the original H_X / H_Z stabilizers; the rest are the new S_X' / S_Z'
+    # merge rows (block order of build_y_gadget, preserved by the row split).
+    m_x = yg.code.matrix_x.shape[0]
+    m_z = yg.code.matrix_z.shape[0]
+    circuit = _mixed_basis_qubit_coords(
+        n_code, m_x, m_z, qubit_ids, y_ancilla_ids, prep_ancilla_ids
+    )
 
     # --- State prep -----------------------------------------------------------
     # ``data_init`` is one of the six logical Pauli-basis eigenstates, named by
@@ -245,11 +275,8 @@ def _y_state_prep(
         circuit.append("RX", list(real_data_ids))  # |+⟩^n
         circuit.append("Z", [real_data_ids[q] for q in z_cols])  # Z̄ on supp(z) → |-̄⟩
     elif data_init in ("Y+", "Y-"):
-        prep_base = (
-            max([*qubit_ids.all_qubits, *y_ancilla_ids])
-            if (qubit_ids.all_qubits or y_ancilla_ids)
-            else -1
-        ) + 1
+        # ``prep_base`` (and the matching ``prep_ancilla_ids`` coords) were
+        # reserved above so the injection ancillas land in the layout.
         circuit += _steane_logical_y_eigenstate_prep(
             yg, real_data_ids, data_init=data_init, ancilla_base=prep_base
         )
@@ -310,6 +337,7 @@ def _y_qec_cycle(
     *,
     data_init: str | None,
     rounds: int,
+    batch_resets: bool = False,
 ) -> tuple[stim.Circuit, MeasurementRecord, dict[int, int], dict[int, Pauli]]:
     """Emit the split X/Z/Y multi-round QEC schedule and return the circuit +
     measurement record.
@@ -394,10 +422,73 @@ def _y_qec_cycle(
         y_phase_circuit.append("MX", list(y_ancilla_ids))
         y_phase_record.append({q: i for i, q in enumerate(y_ancilla_ids)})
 
+    # Assemble one round from the X / Z / Y phases. Two reset schedulings:
+    #
+    #   batch_resets=True (the noiseless circuit — the one that gets diagrammed):
+    #     hoist EVERY phase's ancilla reset into a single RX layer at the round
+    #     start, then emit the three measurement bodies (one TICK between each).
+    #     The timeline then shows one reset column followed by the X/Z/Y
+    #     measurement columns, with no reset interleaved into a measurement
+    #     moment. Resets carry no ordering constraint (a check ancilla just idles
+    #     in |+⟩ until its entangling gates), so this is semantics-free; the
+    #     measurement order X→Z→Y is preserved, so the subsystem-gauge
+    #     determinism is untouched.
+    #
+    #   batch_resets=False (under a noise model — the LER circuit): keep the
+    #     just-in-time per-phase resets (each phase resets its ancillas right
+    #     before using them), minimising ancilla idle time. Hoisting resets would
+    #     lengthen ancilla idle windows and add idle-depolarisation locations, so
+    #     we do NOT batch under noise.
+    #
+    # Either way the measurement record and the noiseless DEM are unchanged
+    # (resets create no records; the MX order within/between phases is fixed).
     one_round = stim.Circuit()
-    one_round += x_phase_circuit
-    one_round += z_phase_circuit
-    one_round += y_phase_circuit
+    if batch_resets:
+        # Diagram schedule: one reset layer, then a MERGED X+Z ancilla readout,
+        # then the Y readout on its own. The pure-X and pure-Z merged-code rows
+        # always commute (a pure-X row has zero Z-part, a pure-Z row zero X-part,
+        # and their data supports meet in even overlap by CSS), so the two
+        # |+>-ancilla MX readouts share one measurement moment with deterministic
+        # outcomes; each X ancilla is touched only by its own CX gates, so
+        # deferring the X readout past the Z-phase gates measures the same
+        # stabiliser exactly. The mixed y_v row can anticommute with the gauge in
+        # general, so the Y readout stays last and is never merged (Ide, Gowda,
+        # Nadkarni, Dauphinais arXiv:2410.02753 §III.D). Used only for the
+        # noiseless (diagrammed) circuit; the noisy LER path keeps the original
+        # split schedule below.
+        rx, x_body = _split_leading_reset(x_phase_circuit)
+        rz, z_body = _split_leading_reset(z_phase_circuit)
+        ry, y_body = _split_leading_reset(y_phase_circuit)
+        x_gates, x_mx = _split_trailing_measure(x_body)
+        z_gates, z_mx = _split_trailing_measure(z_body)
+        y_gates, y_mx = _split_trailing_measure(y_body)
+
+        def _tick() -> None:
+            if len(one_round):
+                one_round.append("TICK")
+
+        all_resets = rx + rz + ry
+        if all_resets:
+            one_round.append("RX", all_resets)
+        if len(x_gates):
+            _tick()
+            one_round += x_gates
+        if len(z_gates):
+            _tick()
+            one_round += z_gates
+        xz_mx = x_mx + z_mx
+        if xz_mx:
+            _tick()
+            one_round.append("MX", xz_mx)  # merged X+Z ancilla readout
+        if len(y_gates):
+            _tick()
+            one_round += y_gates
+        if y_mx:
+            _tick()
+            one_round.append("MX", y_mx)  # mixed y_v readout, kept separate
+    else:
+        for ph in (x_phase_circuit, z_phase_circuit, y_phase_circuit):
+            one_round += ph
     round_measurement_record = MeasurementRecord()
     round_measurement_record.append(x_phase_record)
     round_measurement_record.append(z_phase_record)
@@ -520,14 +611,20 @@ def _y_detach_and_readout(
     *,
     data_init: str | None,
     measurement_record: MeasurementRecord,
+    destructive_measure_data: bool = True,
 ) -> stim.Circuit:
-    """Emit mixed-basis MX/M/MY destructive readout of all qubits.
+    """Detach the κ ancillas; optionally destructively read out the data.
 
     Covers pipeline step 4 of ``build_single_y_ppm_circuit``:
       * κ_x ancillas → M (read in Z).
       * κ_z ancillas → MX (read in X).
       * SHIFT_COORDS tick.
-      * Data qubits → basis matching ``data_init`` (Y± → MY, X± → MX, Z± → M).
+      * Data qubits → basis matching ``data_init`` (Y± → MY, X± → MX, Z± → M)
+        — emitted only when ``destructive_measure_data`` is True.
+
+    The κ detach is the split that returns the bare code; it always runs. When
+    ``destructive_measure_data=False`` the real data qubits are left unmeasured
+    (non-destructive / detach-only mode) — the Ȳ result is the in-circuit obs0.
 
     Mutates ``measurement_record`` in-place with the new measurement slots.
     Returns the new circuit fragment.
@@ -538,13 +635,17 @@ def _y_detach_and_readout(
 
     circuit = stim.Circuit()
 
-    # --- Detach + destructive readout -----------------------------------------
+    # --- Detach (split): measure the κ gadget ancillas ------------------------
     if kx_ids:
         circuit.append("M", list(kx_ids))  # X-system ancilla read in Z
         measurement_record.append({q: i for i, q in enumerate(kx_ids)})
     if kz_ids:
         circuit.append("MX", list(kz_ids))  # Z-system ancilla read in X
         measurement_record.append({q: i for i, q in enumerate(kz_ids)})
+    if not destructive_measure_data:
+        return circuit  # detach-only: leave the data encoded
+
+    # --- Destructive data readout ---------------------------------------------
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     data_meas_op = (
         "MY"
@@ -794,6 +895,7 @@ def build_single_y_ppm_circuit(
     data_init: str | None = None,
     memory_logical: int | None = None,
     force_obs0: bool = False,
+    destructive_measure_data: bool = True,
 ) -> stim.Circuit:
     """Single logical-Y PPM measurement circuit (Ȳ = iX̄Z̄) for ``yg``.
 
@@ -847,6 +949,14 @@ def build_single_y_ppm_circuit(
     The Ȳ readout (obs0) is deterministic only on the Ȳ eigenstates (Y±); on the
     Z̄ (Z±) and X̄ (X±) eigenstates Ȳ anticommutes with the prepared logical, so
     obs0 is a genuine 50/50 (read via ``force_obs0``).
+
+    ``destructive_measure_data`` (default True): when False, detach-only /
+    non-destructive — the κ ancillas are measured (the split) but the data is
+    left encoded as the post-measurement logical state. obs0 (the in-circuit Ȳ
+    readout, fixed before detach) is still emitted; the destructive MY of the
+    data and the destructive final detectors are skipped. This sidesteps the
+    Y-specific X·Z=Y final-detector combination machinery entirely. Incompatible
+    with ``memory_logical`` (which reads a survivor from the destructive readout).
 
     ``memory_logical`` (survivor-memory mode). The Ȳ-on-q0 measurement preserves
     the other logicals of the code; their Z̄ are deterministic on the |0̄…0̄⟩ prep
@@ -907,30 +1017,40 @@ def build_single_y_ppm_circuit(
         raise ValueError(
             "force_obs0 and memory_logical each use observable index 0; set at most one"
         )
+    if memory_logical is not None and not destructive_measure_data:
+        raise ValueError(
+            "memory_logical reads a surviving logical from the destructive data "
+            "readout; it is incompatible with destructive_measure_data=False"
+        )
 
     # --- Phase 1: QUBIT_COORDS + state prep -----------------------------------
     circuit, ctx = _y_state_prep(yg, data_init=data_init)
 
     # --- Phase 2: split X/Z/Y QEC cycle (H̃ blocks 1,2 / 4,5 / 3) ------------
+    # Batch every per-round ancilla reset into one front layer for the noiseless
+    # circuit (clean timeline diagram); keep tight just-in-time resets under noise
+    # (minimal ancilla idle for LER). Semantics-free either way (see _y_qec_cycle).
     qec_circuit, measurement_record, row_to_check, qubit_final_meas = _y_qec_cycle(
-        ctx, yg, data_init=data_init, rounds=rounds
+        ctx, yg, data_init=data_init, rounds=rounds, batch_resets=noise_model is None
     )
     circuit += qec_circuit
 
-    # --- Phase 3: detach + destructive readout --------------------------------
+    # --- Phase 3: detach (+ destructive readout unless detach-only) -----------
     readout_circuit = _y_detach_and_readout(
         ctx, data_init=data_init,
         measurement_record=measurement_record,
+        destructive_measure_data=destructive_measure_data,
     )
     circuit += readout_circuit
 
-    # --- Phase 4: final detectors ---------------------------------------------
-    circuit += _y_final_detectors(
-        ctx,
-        row_to_check=row_to_check,
-        qubit_final_meas=qubit_final_meas,
-        measurement_record=measurement_record,
-    )
+    # --- Phase 4: final detectors (need the destructive data readout) ---------
+    if destructive_measure_data:
+        circuit += _y_final_detectors(
+            ctx,
+            row_to_check=row_to_check,
+            qubit_final_meas=qubit_final_meas,
+            measurement_record=measurement_record,
+        )
 
     # --- Phase 5a: obs0 (Ȳ eigenvalue, §III.C IN-CIRCUIT readout product) ----
     _y_emit_obs0(
@@ -972,6 +1092,54 @@ def _observable_is_deterministic(
         return True
     except ValueError:
         return False
+
+
+def _split_leading_reset(phase: stim.Circuit) -> tuple[list[int], stim.Circuit]:
+    """Split a phase circuit's leading ancilla reset off its body.
+
+    Both the EdgeColoring CSS phases and the Y-phase emit their ancilla reset
+    (``RX``) as the very first instruction (EdgeColoring then follows it with a
+    ``TICK`` before the first gate layer). Returns ``(reset_targets, body)``:
+    the qubit targets of that leading ``RX``, and the phase with the ``RX`` and
+    any immediately-following ``TICK``\\ s removed (so re-emitting ``TICK`` +
+    ``body`` yields exactly one moment barrier, no blank column). If the phase
+    does not start with ``RX`` it is returned unchanged with no targets.
+
+    Used by ``_y_qec_cycle`` under ``batch_resets`` to hoist all phase resets
+    into a single reset layer for a clean timeline diagram.
+    """
+    insts = list(phase)
+    if not insts or insts[0].name != "RX":
+        return [], phase
+    targets = [int(t.value) for t in insts[0].targets_copy()]
+    i = 1
+    while i < len(insts) and insts[i].name == "TICK":
+        i += 1
+    return targets, phase[i:]
+
+
+def _split_trailing_measure(body: stim.Circuit) -> tuple[stim.Circuit, list[int]]:
+    """Split a phase body's trailing ``MX`` off its gate layers.
+
+    A phase body (the phase with its leading reset already removed by
+    ``_split_leading_reset``) ends with the single ``MX`` that reads the phase's
+    ancillas, optionally preceded by a ``TICK``. Returns ``(gates, mx_targets)``
+    with that trailing ``MX`` and any ``TICK``\\ s right before it removed, so the
+    caller can re-emit the gates and a *merged* measurement with deliberate
+    moment barriers. If the body does not end with ``MX`` it is returned
+    unchanged with no targets.
+
+    Used by ``_y_qec_cycle`` under ``batch_resets`` to merge the X- and Z-phase
+    ancilla readouts into one measurement moment.
+    """
+    insts = list(body)
+    if not insts or insts[-1].name != "MX":
+        return body, []
+    targets = [int(t.value) for t in insts[-1].targets_copy()]
+    g = len(insts) - 1
+    while g > 0 and insts[g - 1].name == "TICK":
+        g -= 1
+    return body[:g], targets
 
 
 def _split_quditcode_into_virtual_cssc(
@@ -1035,26 +1203,56 @@ def _split_quditcode_into_virtual_cssc(
 
 
 def _mixed_basis_qubit_coords(
-    n_data: int,
+    n_code: int,
+    m_x: int,
+    m_z: int,
     qubit_ids: QubitIDs,
     y_ancilla_ids: tuple[int, ...] = (),
+    prep_ancilla_ids: tuple[int, ...] = (),
 ) -> stim.Circuit:
-    """Emit a simple sequential QUBIT_COORDS layout for mixed-basis joint PPM.
+    """Emit the per-role QUBIT_COORDS layout for the single-Y merged code.
 
-    Lanes: y=0 data, y=6 ancilla+bridge, y=2 X-checks, y=4 Z-checks,
-    y=3 Y-stab ancillas (cross-merge per Webster, Smith, Cohen
-    arXiv:2511.15989 §II.B.2).
+    Follows the same lane convention as ``_surgery_qubit_coordinates`` (the CSS
+    single/joint-PPM layout): data on y=0, gadget ancillas (Q') on y=1, and each
+    check family SPLIT into the original code checks vs the new merge rows. The
+    merged-code rows are assembled in the block order
+    ``[H_X | S_X' ‖ y_v ‖ H_Z | S_Z' ‖ ∂_0]`` (Ide, Gowda, Nadkarni, Dauphinais
+    arXiv:2410.02753 §III.D) and ``_split_quditcode_into_virtual_cssc`` preserves
+    it, so the first ``m_x`` of ``checks_x`` are the original X-stabilizers (H_X)
+    and the rest are the new S_X' merge rows — symmetrically for ``checks_z``.
+
+    Lanes (x = index within the lane, restarting at 0 per lane):
+      y=0  real data qubits      (first ``n_code`` columns of ``qubit_ids.data``)
+      y=1  κ_x/κ_z gadget ancillas (Q'; remaining ``qubit_ids.data`` columns)
+      y=2  original X-checks      (``checks_x[:m_x]`` = H_X)
+      y=3  new X-checks           (``checks_x[m_x:]``, the X-type merge ancillas)
+      y=4  original Z-checks      (``checks_z[:m_z]`` = H_Z)
+      y=5  new Z-checks           (``checks_z[m_z:]``, the Z-type merge ancillas)
+      y=6  mixed Y-rows: the ``y_v`` cross-merge ancillas + any ∂_0 cycle
+           ancillas (Webster, Smith, Cohen arXiv:2511.15989 §II.B.2; |W|≥2 adds
+           the cycle rows)
+      y=7  transient Y-eigenstate state-injection ancillas (the m_z Z-syndrome
+           measure ancillas of ``_steane_logical_y_eigenstate_prep``; present
+           only for ``data_init`` in {"Y+", "Y-"})
     """
     circuit = stim.Circuit()
     for i, qid in enumerate(qubit_ids.data):
-        lane = 0 if i < n_data else 6
-        circuit.append("QUBIT_COORDS", qid, (i, lane))
+        lane, x = (0, i) if i < n_code else (1, i - n_code)
+        circuit.append("QUBIT_COORDS", qid, (x, lane))
+    # X-checks: original H_X on y=2, new X-checks on y=3.
     for i, qid in enumerate(qubit_ids.checks_x):
-        circuit.append("QUBIT_COORDS", qid, (i, 2))
+        lane, x = (2, i) if i < m_x else (3, i - m_x)
+        circuit.append("QUBIT_COORDS", qid, (x, lane))
+    # Z-checks: original H_Z on y=4, new Z-checks on y=5.
     for i, qid in enumerate(qubit_ids.checks_z):
-        circuit.append("QUBIT_COORDS", qid, (i, 4))
+        lane, x = (4, i) if i < m_z else (5, i - m_z)
+        circuit.append("QUBIT_COORDS", qid, (x, lane))
+    # Mixed Y-rows (y_v cross-merge + ∂_0 cycles) on y=6.
     for i, qid in enumerate(y_ancilla_ids):
-        circuit.append("QUBIT_COORDS", qid, (i, 3))
+        circuit.append("QUBIT_COORDS", qid, (i, 6))
+    # Transient state-injection ancillas on y=7.
+    for i, qid in enumerate(prep_ancilla_ids):
+        circuit.append("QUBIT_COORDS", qid, (i, 7))
     return circuit
 
 
