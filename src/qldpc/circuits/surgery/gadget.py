@@ -139,7 +139,6 @@ def _assemble_HX_L1(
     """
     mX, n = HX_data.shape
     n_v0, n_c0 = int(incidence.shape[1]), int(incidence.shape[0])
-    n_merged = n + n_c0
     top = np.hstack([HX_data, np.zeros((mX, n_c0), dtype=np.uint8)]).astype(np.uint8)
     # S_X' rows = [f_X' | H_X'] : f_X' = π_{V₀} on data, H_X' = incidence.T on Q'.
     f_X_prime = np.zeros((n_v0, n), dtype=np.uint8)
@@ -161,7 +160,7 @@ def _step3_assemble(
     """Block assembly of HX_merged, HZ_merged (Webster, Smith, Cohen arXiv:2511.15989 §II.A;
     Cain et al. arXiv:2603.28627 §B.1).
 
-    S'_meas rows (χ) go into the measurement-basis merged matrix; G=gauge rows go into
+    S'_meas rows go into the measurement-basis merged matrix; G=gauge rows go into
     the complementary-basis merged matrix. f_Z = π_{C₀}^T extends original checks onto Q'.
 
     basis=X (default): S'_meas rows added to HX_merged; G rows added to HZ_merged.
@@ -182,7 +181,7 @@ def _step3_assemble(
     support_arr = np.asarray(support, dtype=np.int_)
 
     if basis is Pauli.X:
-        # χ rows extend HX_merged; G rows extend HZ_merged
+        # S'_meas rows extend HX_merged; G rows extend HZ_merged
         HX_merged = _assemble_HX_L1(HX, support_arr, incidence)
         HZ_merged = np.block(
             [
@@ -191,7 +190,7 @@ def _step3_assemble(
             ]
         ).astype(np.uint8)
     else:
-        # basis=Z (symmetric dual): χ rows extend HZ_merged; G rows extend HX_merged
+        # basis=Z (symmetric dual): S'_meas rows extend HZ_merged; G rows extend HX_merged
         HZ_merged = _assemble_HX_L1(HZ, support_arr, incidence)
         HX_merged = np.block(
             [

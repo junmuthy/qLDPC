@@ -128,15 +128,15 @@ def _surgery_qubit_coordinates(
 ) -> stim.Circuit:
     """Emit QUBIT_COORDS in surgery's per-role semantic lane layout.
 
-    Cain mapping: V_0 → support; κ ancillas → ancilla qubits (Q');
-    χ ancillas → S'_meas ancillas (= χ rows); G ancillas → S'_comp ancillas (= G rows).
+    Cain mapping: V_0 → support; κ ancillas → Q' qubits (Q_prime);
+    S'_meas ancillas (= S_X' rows); S'_comp ancillas (= G rows).
 
     Lanes:
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
                                 slot; we split them across y=0/1/6 here).
       y=1  ancilla qubits (Q')
       y=2  data H_X ancillas   (checks_x[:m_X])
-      y=3  S'_meas ancillas (= χ rows)
+      y=3  S'_meas ancillas (= S_X' rows)
                                (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
       y=4  data H_Z ancillas   (checks_z[:m_Z])
       y=5  S'_comp ancillas (= G rows)
@@ -147,7 +147,7 @@ def _surgery_qubit_coordinates(
     For basis=X, y is monotonic in qubit ID order (ids 0..6→y=0, 7..9→y=1,
     10..12→y=2, 13..15→y=3, 16..18→y=4, 19→y=5), so QUBIT_COORDS lines in
     the stringified circuit dump appear in increasing y order. basis=Z
-    breaks monotonicity because χ and G swap matrix slots, but the lane
+    breaks monotonicity because S_X' and G swap matrix slots, but the lane
     numbers remain stable: S'_meas always y=3, S'_comp always y=5.
 
     `joint=None` → single PPM. Otherwise pass (g_r, bridge, intercode).
@@ -217,7 +217,7 @@ def _surgery_qubit_coordinates(
             (i, 6),
         )
 
-    # X-check ancillas: data H_X on y=2, then either χ on y=3 (basis=X) or G on y=5 (basis=Z).
+    # X-check ancillas: data H_X on y=2, then either S_X' on y=3 (basis=X) or G on y=5 (basis=Z).
     is_basis_x = g_l.basis is Pauli.X
     m_X_total = m_X_l + m_X_r
     n_meas_total = n_meas_l + n_meas_r
@@ -226,7 +226,7 @@ def _surgery_qubit_coordinates(
     for i in range(m_X_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 2))
     if is_basis_x:
-        # χ rows on y=3 (within checks_x)
+        # S_X' rows on y=3 (within checks_x)
         for i in range(n_meas_total):
             circuit.append(
                 "QUBIT_COORDS",
@@ -242,7 +242,7 @@ def _surgery_qubit_coordinates(
                 (i, 5),
             )
 
-    # Z-check ancillas: data H_Z on y=4, then either G on y=5 (basis=X) or χ on y=3 (basis=Z).
+    # Z-check ancillas: data H_Z on y=4, then either G on y=5 (basis=X) or S_X' on y=3 (basis=Z).
     m_Z_total = m_Z_l + m_Z_r
     for i in range(m_Z_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 4))
@@ -290,7 +290,7 @@ def _check_lane_index_map(
 
     Lanes for checks (idx is x position within lane):
       lane=2: data H_X check ancillas (checks_x[:m_X_total])
-      lane=3: χ check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
+      lane=3: S_X' check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
       lane=4: data H_Z check ancillas (checks_z[:m_Z_total])
       lane=5: G check ancillas (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
       lane=7: bridge cycle check ancillas (joint PPM only; lane=6 = bridge data).
@@ -322,13 +322,13 @@ def _check_lane_index_map(
         result[qubit_ids.checks_z[i]] = (4, i)
 
     if is_basis_x:
-        # χ on lane=3 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
+        # S_X' on lane=3 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
         for i in range(n_meas_total):
             result[qubit_ids.checks_x[m_X_total + i]] = (3, i)
         for i in range(n_gauge_total):
             result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
     else:
-        # G on lane=5 in checks_x[m_X:]; χ on lane=3 in checks_z[m_Z:]
+        # G on lane=5 in checks_x[m_X:]; S_X' on lane=3 in checks_z[m_Z:]
         for i in range(n_gauge_total):
             result[qubit_ids.checks_x[m_X_total + i]] = (5, i)
         for i in range(n_meas_total):
@@ -375,14 +375,14 @@ def build_single_ppm_circuit(
     qubit_ids = QubitIDs.from_code(merged_code)
     n_data = gadget.code.num_qudits
     data_ids = qubit_ids.data[:n_data]
-    ancilla_ids = qubit_ids.data[n_data:]
+    Q_prime_ids = qubit_ids.data[n_data:]  # Q' ancilla qubit IDs
     bridge_ids: tuple[int, ...] = ()
 
     circuit = _surgery_qubit_coordinates(gadget, qubit_ids)
     circuit += _surgery_state_prep(
         gadget,
         data_ids,
-        ancilla_ids,
+        Q_prime_ids,
         bridge_ids,
         data_init=data_init,
     )
@@ -396,7 +396,7 @@ def build_single_ppm_circuit(
     circuit += _surgery_detach_and_readout(
         gadget,
         data_ids=data_ids,
-        ancilla_ids=ancilla_ids,
+        ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
@@ -431,7 +431,12 @@ def build_single_ppm_circuit(
     return circuit
 
 def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
-    """Inter-code joint stitch (g_l.code is not g_r.code). Handles both bases."""
+    """Inter-code joint stitch (g_l.code is not g_r.code). Handles both bases.
+
+    Builds M_meas (= H̃_X^joint when basis=X), the measured merged check matrix,
+    and M_comp (= H̃_Z^joint when basis=X), the complementary merged check matrix,
+    following Swaroop et al. (Swaroop, Jochym-O'Connor, Yoder) arXiv:2410.03628 §III.
+    """
     assert g_l.code is not g_r.code
     field = g_l.code.field
     g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
@@ -466,24 +471,28 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
 
     cl_data = slice(0, n_l)
     cr_data = slice(n_l, n_l + n_r)
-    cl_ancilla = slice(n_l + n_r, n_l + n_r + k_l)
-    cr_ancilla = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
+    Ql_prime = slice(n_l + n_r, n_l + n_r + k_l)
+    Qr_prime = slice(n_l + n_r + k_l, n_l + n_r + k_l + k_r)
     c_adapter = slice(n_l + n_r + k_l + k_r, n_merged)
 
-    # Build M_meas: data χ-carrier rows (left & right) + χ rows + adapter Π labels.
+    # H̃_X^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
+    #   row-block 0: H_X^(l) data check rows       (cols: Q_l)
+    #   row-block 1: H_X^(r) data check rows       (cols: Q_r)
+    #   row-block 2: S_X'^l rows = [f_X'^l | H_X'^l | Π_l labels]  (cols: Q_l, Q'_l, 𝒜)
+    #   row-block 3: S_X'^r rows = [f_X'^r | H_X'^r | Π_r labels]  (cols: Q_r, Q'_r, 𝒜)
     M_meas = np.zeros(
         (m_meas_l_data + m_meas_r_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_meas[:m_meas_l_data, cl_data] = M_meas_l[:m_meas_l_data, :n_l]
     M_meas[m_meas_l_data : m_meas_l_data + m_meas_r_data, cr_data] = M_meas_r[:m_meas_r_data, :n_r]
-    meas_l_rows = M_meas_l[m_meas_l_data:, :]
-    meas_r_rows = M_meas_r[m_meas_r_data:, :]
+    S_prime_l = M_meas_l[m_meas_l_data:, :]  # S_X'^l rows = [f_X'^l | H_X'^l]
+    S_prime_r = M_meas_r[m_meas_r_data:, :]  # S_X'^r rows = [f_X'^r | H_X'^r]
     meas_start = m_meas_l_data + m_meas_r_data
-    M_meas[meas_start : meas_start + len(g_l.support), cl_data] = meas_l_rows[:, :n_l]
-    M_meas[meas_start : meas_start + len(g_l.support), cl_ancilla] = meas_l_rows[:, n_l:]
-    M_meas[meas_start + len(g_l.support) :, cr_data] = meas_r_rows[:, :n_r]
-    M_meas[meas_start + len(g_l.support) :, cr_ancilla] = meas_r_rows[:, n_r:]
+    M_meas[meas_start : meas_start + len(g_l.support), cl_data] = S_prime_l[:, :n_l]
+    M_meas[meas_start : meas_start + len(g_l.support), Ql_prime] = S_prime_l[:, n_l:]
+    M_meas[meas_start + len(g_l.support) :, cr_data] = S_prime_r[:, :n_r]
+    M_meas[meas_start + len(g_l.support) :, Qr_prime] = S_prime_r[:, n_r:]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_meas[meas_start + v_idx, c_adapter.start + lab] = 1
@@ -491,23 +500,28 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
         if lab >= 0:
             M_meas[meas_start + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
-    # Build M_comp: co-carrier data rows (with κ extension) + G_aug + new cycle.
+    # H̃_Z^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
+    #   row-block 0: H_Z^(l) data check rows + f_Z^(l) ext. onto Q'_l  (cols: Q_l, Q'_l)
+    #   row-block 1: H_Z^(r) data check rows + f_Z^(r) ext. onto Q'_r  (cols: Q_r, Q'_r)
+    #   row-block 2: G_l gauge rows                                      (cols: Q'_l)
+    #   row-block 3: G_r gauge rows                                      (cols: Q'_r)
+    #   row-block 4: bridge cycle rows [T_l | T_r | H_R]                (cols: Q'_l, Q'_r, 𝒜)
     M_comp = np.zeros(
         (m_comp_l_data + m_comp_r_data + r_l + r_r + (w - 1), n_merged),
         dtype=np.int_,
     )
     M_comp[:m_comp_l_data, cl_data] = M_comp_l[:m_comp_l_data, :n_l]
-    M_comp[:m_comp_l_data, cl_ancilla] = M_comp_l[:m_comp_l_data, n_l:]
+    M_comp[:m_comp_l_data, Ql_prime] = M_comp_l[:m_comp_l_data, n_l:]
     M_comp[m_comp_l_data : m_comp_l_data + m_comp_r_data, cr_data] = M_comp_r[:m_comp_r_data, :n_r]
-    M_comp[m_comp_l_data : m_comp_l_data + m_comp_r_data, cr_ancilla] = M_comp_r[
+    M_comp[m_comp_l_data : m_comp_l_data + m_comp_r_data, Qr_prime] = M_comp_r[
         :m_comp_r_data, n_r:
     ]
     g_start = m_comp_l_data + m_comp_r_data
-    M_comp[g_start : g_start + r_l, cl_ancilla] = M_comp_l[m_comp_l_data:, n_l:]
-    M_comp[g_start + r_l : g_start + r_l + r_r, cr_ancilla] = M_comp_r[m_comp_r_data:, n_r:]
+    M_comp[g_start : g_start + r_l, Ql_prime] = M_comp_l[m_comp_l_data:, n_l:]
+    M_comp[g_start + r_l : g_start + r_l + r_r, Qr_prime] = M_comp_r[m_comp_r_data:, n_r:]
     cyc_start = g_start + r_l + r_r
-    M_comp[cyc_start:, cl_ancilla] = bridge.T_l
-    M_comp[cyc_start:, cr_ancilla] = bridge.T_r
+    M_comp[cyc_start:, Ql_prime] = bridge.T_l
+    M_comp[cyc_start:, Qr_prime] = bridge.T_r
     M_comp[cyc_start:, c_adapter] = bridge.H_R
 
     if bridge.basis is Pauli.X:
@@ -518,10 +532,14 @@ def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
 def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
     """Intra-code joint stitch (g_l.code is g_r.code). Handles both bases.
 
+    Builds M_meas (= H̃_X^joint when basis=X), the measured merged check matrix,
+    and M_comp (= H̃_Z^joint when basis=X), the complementary merged check matrix,
+    following Swaroop et al. (Swaroop, Jochym-O'Connor, Yoder) arXiv:2410.03628 §III.
+
     Differences from _stitch_intercode:
       - Shared data check rows (count = m_meas/comp_data once, not l+r).
       - Shared data column block (n columns, not n_l + n_r).
-      - χ rows from both sides write into the SAME data-column slice.
+      - S_X'^s rows from both sides write into the SAME data-column slice.
     """
     assert g_l.code is g_r.code
     field = g_l.code.field
@@ -550,22 +568,25 @@ def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
     r_l, r_r = g_l_aug.gauge.shape[0], g_r_aug.gauge.shape[0]
 
     c_data = slice(0, n)
-    cl_ancilla = slice(n, n + k_l)
-    cr_ancilla = slice(n + k_l, n + k_l + k_r)
+    Ql_prime = slice(n, n + k_l)
+    Qr_prime = slice(n + k_l, n + k_l + k_r)
     c_adapter = slice(n + k_l + k_r, n_merged)
 
-    # Build M_meas: shared data check rows + χ rows (both sides into shared data).
+    # H̃_X^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
+    #   row-block 0: H_X data check rows (shared)                     (cols: Q)
+    #   row-block 1: S_X'^l rows = [f_X'^l | H_X'^l | Π_l labels]   (cols: Q, Q'_l, 𝒜)
+    #   row-block 2: S_X'^r rows = [f_X'^r | H_X'^r | Π_r labels]   (cols: Q, Q'_r, 𝒜)
     M_meas = np.zeros(
         (m_meas_data + len(g_l.support) + len(g_r.support), n_merged),
         dtype=np.int_,
     )
     M_meas[:m_meas_data, c_data] = M_meas_l[:m_meas_data, :n]  # shared
-    meas_l_rows = M_meas_l[m_meas_data:, :]
-    meas_r_rows = M_meas_r[m_meas_data:, :]
-    M_meas[m_meas_data : m_meas_data + len(g_l.support), c_data] = meas_l_rows[:, :n]
-    M_meas[m_meas_data : m_meas_data + len(g_l.support), cl_ancilla] = meas_l_rows[:, n:]
-    M_meas[m_meas_data + len(g_l.support) :, c_data] = meas_r_rows[:, :n]
-    M_meas[m_meas_data + len(g_l.support) :, cr_ancilla] = meas_r_rows[:, n:]
+    S_prime_l = M_meas_l[m_meas_data:, :]  # S_X'^l rows = [f_X'^l | H_X'^l]
+    S_prime_r = M_meas_r[m_meas_data:, :]  # S_X'^r rows = [f_X'^r | H_X'^r]
+    M_meas[m_meas_data : m_meas_data + len(g_l.support), c_data] = S_prime_l[:, :n]
+    M_meas[m_meas_data : m_meas_data + len(g_l.support), Ql_prime] = S_prime_l[:, n:]
+    M_meas[m_meas_data + len(g_l.support) :, c_data] = S_prime_r[:, :n]
+    M_meas[m_meas_data + len(g_l.support) :, Qr_prime] = S_prime_r[:, n:]
     for v_idx, lab in enumerate(bridge.label_l):
         if lab >= 0:
             M_meas[m_meas_data + v_idx, c_adapter.start + lab] = 1
@@ -573,20 +594,24 @@ def _stitch_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> C
         if lab >= 0:
             M_meas[m_meas_data + len(g_l.support) + v_idx, c_adapter.start + lab] = 1
 
-    # Build M_comp: shared data co-carrier rows with κ extension on BOTH sides,
-    # then G_l, G_r, then new cycle.
+    # H̃_Z^joint block structure (Swaroop et al. arXiv:2410.03628 §III):
+    #   row-block 0: H_Z data check rows + f_Z^(l) onto Q'_l + f_Z^(r) onto Q'_r
+    #                                                         (cols: Q, Q'_l, Q'_r)
+    #   row-block 1: G_l gauge rows                           (cols: Q'_l)
+    #   row-block 2: G_r gauge rows                           (cols: Q'_r)
+    #   row-block 3: bridge cycle rows [T_l | T_r | H_R]     (cols: Q'_l, Q'_r, 𝒜)
     M_comp = np.zeros(
         (m_comp_data + r_l + r_r + (w - 1), n_merged),
         dtype=np.int_,
     )
     M_comp[:m_comp_data, c_data] = M_comp_l[:m_comp_data, :n]
-    M_comp[:m_comp_data, cl_ancilla] = M_comp_l[:m_comp_data, n:]
-    M_comp[:m_comp_data, cr_ancilla] = M_comp_r[:m_comp_data, n:]
-    M_comp[m_comp_data : m_comp_data + r_l, cl_ancilla] = M_comp_l[m_comp_data:, n:]
-    M_comp[m_comp_data + r_l : m_comp_data + r_l + r_r, cr_ancilla] = M_comp_r[m_comp_data:, n:]
+    M_comp[:m_comp_data, Ql_prime] = M_comp_l[:m_comp_data, n:]
+    M_comp[:m_comp_data, Qr_prime] = M_comp_r[:m_comp_data, n:]
+    M_comp[m_comp_data : m_comp_data + r_l, Ql_prime] = M_comp_l[m_comp_data:, n:]
+    M_comp[m_comp_data + r_l : m_comp_data + r_l + r_r, Qr_prime] = M_comp_r[m_comp_data:, n:]
     cyc_start = m_comp_data + r_l + r_r
-    M_comp[cyc_start:, cl_ancilla] = bridge.T_l
-    M_comp[cyc_start:, cr_ancilla] = bridge.T_r
+    M_comp[cyc_start:, Ql_prime] = bridge.T_l
+    M_comp[cyc_start:, Qr_prime] = bridge.T_r
     M_comp[cyc_start:, c_adapter] = bridge.H_R
 
     if bridge.basis is Pauli.X:
@@ -603,7 +628,7 @@ def _stitch_to_joint_csscode(
 
     Dispatches on the structural axis (g_l.code is g_r.code → intra-code
     shares data; otherwise inter-code).  Each branch handles both
-    bridge.basis values internally via the χ-carrier abstraction.
+    bridge.basis values internally via the M_meas/M_comp abstraction.
     """
     if g_l.code is g_r.code:
         return _stitch_intracode(g_l, g_r, bridge)
@@ -761,7 +786,7 @@ def _build_joint_ppm_circuit_same_basis(
     else:
         data_ids = qubit_ids.data[:n_l]
         support_combined = tuple(g_l.support) + tuple(g_r.support)
-    ancilla_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
+    Q_prime_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]  # Q' ancilla qubit IDs
     bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
     assert len(bridge_ids) == w
 
@@ -774,7 +799,7 @@ def _build_joint_ppm_circuit_same_basis(
     circuit += _surgery_state_prep(
         g_l,
         data_ids,
-        ancilla_ids,
+        Q_prime_ids,
         bridge_ids,
         data_init=expanded_data_init,
     )
@@ -789,7 +814,7 @@ def _build_joint_ppm_circuit_same_basis(
     circuit += _surgery_detach_and_readout(
         g_l,
         data_ids=data_ids,
-        ancilla_ids=ancilla_ids,
+        ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
     )
@@ -801,8 +826,8 @@ def _build_joint_ppm_circuit_same_basis(
         joint=(g_r, bridge, intercode),
     )
 
-    # χ check IDs: data H_X^(l) rows occupy first mX_l indices in
-    # qubit_ids.checks_x, then m_X_r (inter-code), then χ^(l), then χ^(r).
+    # S_X'^s check IDs: data H_X^(l) rows occupy first mX_l indices in
+    # qubit_ids.checks_x, then m_X_r (inter-code), then S_X'^l, then S_X'^r.
     if bridge.basis is Pauli.X:
         check_ids = qubit_ids.checks_x
         m_l = g_l.code.matrix_x.shape[0]
@@ -1091,7 +1116,7 @@ def _surgery_final_detectors(
             _emit_detector(HX[kk], qubit_ids.checks_x[kk])
         for kk in range(m_Z, HZ.shape[0]):
             _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-    else:  # Pauli.Z (symmetric: chi in HZ, G in HX)
+    else:  # Pauli.Z (symmetric: S_X' in HZ, G in HX)
         for kk in range(m_Z):
             _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
         for kk in range(m_X, HX.shape[0]):
