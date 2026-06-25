@@ -18,16 +18,34 @@ from .gadget import GadgetLayout
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class Bridge:
-    """Universal adapter between two GadgetLayouts (Swaroop et al. arXiv:2410.03628 §IV / §VII).
+    """Universal adapter between two GadgetLayouts.
 
-    Cain mapping: V_0 → support; F → incidence; κ → ancilla.
+    Implements the universal adapter construction of Swaroop et al.
+    (Swaroop, Jochym-O'Connor, Yoder) arXiv:2410.03628 §III.
 
-    Same-basis fields match docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §1.
-    Mixed-basis fields (Y_stab, merge_qubits, obs0_xor_map, x_leftover_indices,
-    z_leftover_indices) implement the Webster–Smith–Cohen arXiv:2511.15989 §II.B.2
-    cross-merge for joint Pauli-product measurement of different-basis logicals
-    (e.g. Z̄_l ⊗ X̄_r). They default to None / () for same-basis bridges and
-    are populated only by build_bridge's mixed-basis dispatch path.
+    For each side s ∈ {l, r}, the SkipTree (Swaroop et al. arXiv:2410.03628 §III)
+    produces a matrix T_s and a permutation P_{σ_s} acting on the port 𝒫_s.
+    The port-label block π_{𝒫_s}^T P_{σ_s} selects and reorders the port columns
+    of the augmented incidence matrix H_X'^{s,aug}, satisfying the SkipTree identity:
+
+        T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
+
+    where H_R is the canonical repetition-code parity-check matrix stored in
+    ``Bridge.H_R``.  This identity guarantees CSS commutation between the adapter
+    ancillas and the merged-code gauge generators.
+
+    Cheeger-distance preservation (same-basis) is guaranteed by
+    Cross et al. arXiv:2407.18393 Thm 6.  Port-subgraph cellulation (to cap
+    basis cycle length) follows Williamson & Yoder arXiv:2410.02213.
+
+    Same-basis fields (``width``, ``port_l/r``, ``label_l/r``, ``T_l/r``,
+    ``H_R``, ``g_l/r_aug``) are populated for both same-basis and mixed-basis
+    bridges.  Mixed-basis fields (``Y_stab``, ``merge_qubits``, ``obs0_xor_map``,
+    ``x_leftover_indices``, ``z_leftover_indices``) implement the
+    Webster–Smith–Cohen arXiv:2511.15989 §II.B.2 cross-merge for joint
+    Pauli-product measurement of different-basis logicals (e.g. Z̄_l ⊗ X̄_r).
+    They default to None / () for same-basis bridges and are populated only by
+    the mixed-basis dispatch path in ``_stitch_to_joint_code``.
     """
 
     width: int  # w = |𝒜| (adapter qubits)
@@ -72,7 +90,19 @@ def _skip_tree(
     root: int = 0,
     edge_index_verts: dict[tuple[int, int], int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """SkipTree basis transform (Swaroop et al. arXiv:2410.03628 §III). Returns T, P."""
+    """SkipTree basis transform (Swaroop et al. (Swaroop, Jochym-O'Connor, Yoder) arXiv:2410.03628 §III).
+
+    Returns (T, P) where T has shape (n-1, |E|) and P is an n×n permutation
+    matrix encoding the SkipTree vertex labeling σ.  Together they satisfy the
+    SkipTree identity:
+
+        T · G · P = H_R
+
+    where G is the graph incidence matrix and H_R is the canonical rep-code
+    parity-check matrix.  The port-label block π_{𝒫_s}^T P_{σ_s} selects
+    port columns of the augmented incidence H_X'^{s,aug} and reorders them to
+    match H_R's column convention.
+    """
     n = S.number_of_nodes()
     index = 0
     label = [0] * n
@@ -312,11 +342,22 @@ def _run_skiptree_on_port_subgraph(
 ) -> tuple[np.ndarray, list[int]]:
     """Run SkipTree on the induced port subgraph; embed result back onto F_aug rows.
 
+    Implements the port-subgraph restriction step of Swaroop et al.
+    (Swaroop, Jochym-O'Connor, Yoder) arXiv:2410.03628 §III.
+
     The induced subgraph's vertex IDs are relabeled to [0, |port|) so the n×n P
-    allocation inside ``_skip_tree`` is square. The output T is then re-expressed
-    onto the original F_aug edge ordering (rows of F_aug index the κ qubits =
-    edges of G_aux_full). ``root_port_idx`` selects which entry of ``port`` is
-    the SkipTree root.
+    allocation inside ``_skip_tree`` is square.  The output T is then
+    re-expressed onto the original F_aug edge ordering (rows of F_aug index the
+    κ qubits = edges of G_aux_full).  ``root_port_idx`` selects which entry of
+    ``port`` is the SkipTree root.
+
+    The result satisfies the SkipTree identity on the port subgraph:
+
+        T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
+
+    where π_{𝒫_s} is the port-selection matrix (rows = port vertices of
+    H_X'^{s,aug}) and P_{σ_s} is the permutation returned by ``_skip_tree``
+    encoding the SkipTree label assignment σ_s.
 
     Returns (T_full, labels) where T_full has shape (w-1, F_aug.shape[0]) and
     labels[orig_v] = k iff orig_v ∈ port and got SkipTree label k (else -1).
@@ -392,25 +433,40 @@ def build_bridge(
     spanning_tree_root_r: int = 0,
     cellulate_max_len: int | None = None,
 ) -> Bridge:
-    """Universal-adapter bridge between two gadgets (Swaroop et al. arXiv:2410.03628 §IV).
+    """Build a universal-adapter bridge between two gadgets.
 
-    Cain mapping: V_0^(l) → support^(l); F → incidence; extra_kappa → extra_ancilla.
+    Implements the construction of Swaroop et al. (Swaroop, Jochym-O'Connor,
+    Yoder) arXiv:2410.03628 §III.  For each side s ∈ {l, r}:
 
-    When ``g_l.basis == g_r.basis``, returns a same-basis CSS bridge (legacy
-    behavior). When ``g_l.basis != g_r.basis``, returns a mixed-basis bridge
-    (basis_l ≠ basis_r) with mixed-basis fields (Y_stab, obs0_xor_map, ...)
-    left UNPOPULATED — the Webster–Smith–Cohen (arXiv:2511.15989 §II.B.2)
-    cross-merge populates them during ``_stitch_to_joint_code`` (see
-    circuits/surgery/circuit.py), at which point the resulting Bridge instance
-    has the merged-code data attached.
+      1. Build the auxiliary graph G_aux^(s) from weight-2 rows of F^(s)
+         (the gadget incidence matrix, notation from arXiv:2410.03628 §III).
+      2. Augment G_aux^(s) so that the induced subgraph on port 𝒫_s is
+         connected (connectivity edges → extra_ancilla_s).
+      3. Cellulate the port subgraph to cap basis cycle length, following
+         Williamson & Yoder arXiv:2410.02213.
+         Cheeger-distance preservation is guaranteed by Cross et al.
+         arXiv:2407.18393 Thm 6.
+      4. Run SkipTree (Swaroop et al. arXiv:2410.03628 §III) on the spanning
+         tree of the port subgraph, yielding T_s and permutation P_{σ_s}.
+         The port-label block π_{𝒫_s}^T P_{σ_s} selects and reorders port
+         columns of H_X'^{s,aug}, satisfying the SkipTree identity:
 
-    See docs/superpowers/specs/2026-06-09-joint-ppm-bridge-design.md §2 for the
-    7-step recipe. ``spanning_tree_root_s`` is the index INTO the port tuple of
-    the SkipTree root vertex on side s.
+             T_s (H_X'^{s,aug})^T π_{𝒫_s}^T = H_R P_{σ_s}^T
 
-    ``cellulate_max_len`` caps port-subgraph basis cycle length. When ``None``
-    (default), it is set to ``max`` of the basis-side stabilizer row weights of
-    the two codes — each side measured against its own basis.
+      5. Rebuild augmented gadgets g_l_aug / g_r_aug from the combined extras.
+
+    ``spanning_tree_root_s`` is the index INTO the port tuple of the SkipTree
+    root vertex on side s.
+
+    When ``g_l.basis == g_r.basis``, returns a same-basis CSS bridge.
+    When ``g_l.basis != g_r.basis``, returns a mixed-basis bridge (basis_l ≠
+    basis_r) with mixed-basis fields (Y_stab, obs0_xor_map, ...) left
+    UNPOPULATED — the Webster–Smith–Cohen (arXiv:2511.15989 §II.B.2)
+    cross-merge populates them during ``_stitch_to_joint_code``.
+
+    ``cellulate_max_len`` caps port-subgraph basis cycle length.  When ``None``
+    (default), it is set to the maximum basis-side stabilizer row weight across
+    both sides.
     """
     basis_l = g_l.basis
     basis_r = g_r.basis
