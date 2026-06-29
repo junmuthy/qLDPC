@@ -185,7 +185,7 @@ def logical_state_init(code: CSSCode, state: str, *, log_idx: int) -> str:
     ``code.get_logical_ops(Pauli.Z)[log_idx]`` (or ``[Pauli.X]`` for
     basis=X). The helper does NOT verify this; if indices disagree the
     prep targets a logical qubit that the gadget doesn't measure, and
-    the obs0 outcome is silently random.
+    the L / block readout is silently random.
 
     The returned string has length ``code.num_qudits``. Plug it straight
     into ``build_single_ppm_circuit(..., data_init=...)`` or wrap with a
@@ -1162,9 +1162,9 @@ def _surgery_qec_cycle(
     ``single_sector`` (CSS-type PPM only): emit DETECTORs for the measured-basis
     checks alone (``checks_x`` for X̄, ``checks_z`` for Z̄), dropping the
     complementary sector. All checks are still *measured* (the merge needs them);
-    only their detectors are skipped. Valid because obs0 = X̄/Z̄ is flipped solely
-    by the opposite single error type, which fires the measured-basis sector — so
-    the complementary detectors carry no obs0 fault distance, only correlated
+    only their detectors are skipped. Valid because the time-like L (X̄/Z̄) is flipped
+    solely by the opposite single error type, which fires the measured-basis sector — so
+    the complementary detectors carry no L fault distance, only correlated
     soft-info / off-basis error correction (arXiv:2410.02753 §3).
     """
     strategy = EdgeColoring()

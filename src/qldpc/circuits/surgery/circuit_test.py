@@ -2097,7 +2097,7 @@ def test_block_observable_targets_adds_qprime_records_for_deformation():
 
 def _bb_36_8_code() -> object:
     """In-repo BBCode [[36, 8]] (dimension 8) — the k>=2 fixture used elsewhere in
-    this file (see test_build_single_ppm_circuit_block_observables)."""
+    this file (see test_build_single_ppm_circuit_block_observables_full_k_block)."""
     import sympy
 
     xs, ys = sympy.symbols("x y")
