@@ -16,27 +16,23 @@ from ._webster_fixture import (
 )
 
 
-def test_classify_reliable_round1_checks_basis_x() -> None:
-    """For basis=X: reliable round-1 checks are data H_X (first m_X X-checks)
-    plus gauge-fix G (last n_comp_checks Z-checks)."""
-    import galois
-
+def test_reliable_checks_match_basis_x_reproduces_hx_and_gauge_slice() -> None:
+    """Match-basis (experiment_basis=X on X-gadget): _reliable_checks reproduces
+    the prior index-slicing — data H_X (first m_X X-checks) plus gauge-fix G (last
+    n_comp_checks Z-checks)."""
     from qldpc.circuits.bookkeeping import QubitIDs
-    from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.surgery.circuit import _gadget_merged_csscode, _reliable_checks
     from qldpc.circuits.surgery.gadget import build_gadget
-    from qldpc.codes.common import CSSCode
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
-    F2 = galois.GF(2)
-    merged = CSSCode(
-        F2(g.HX_merged.astype(np.int_).tolist()),
-        F2(g.HZ_merged.astype(np.int_).tolist()),
-        is_subsystem_code=False,
-    )
+    merged = _gadget_merged_csscode(g)
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, qubit_ids)
+    n_data = code.num_qudits
+    reliable = _reliable_checks(
+        g, merged, qubit_ids, experiment_basis=Pauli.X, n_data=n_data
+    )
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
     # Reliable X-checks: first m_X of checks_x (the original data H_X rows)
@@ -47,27 +43,23 @@ def test_classify_reliable_round1_checks_basis_x() -> None:
     assert set(reliable) == expected, f"reliable={set(reliable)}, expected={expected}"
 
 
-def test_classify_reliable_round1_checks_basis_z() -> None:
-    """For basis=Z: reliable round-1 checks are data H_Z (first m_Z Z-checks)
-    plus gauge-fix G (last n_comp_checks X-checks)."""
-    import galois
-
+def test_reliable_checks_match_basis_z_reproduces_hz_and_gauge_slice() -> None:
+    """Match-basis (experiment_basis=Z on Z-gadget): _reliable_checks reproduces
+    the prior index-slicing — data H_Z (first m_Z Z-checks) plus gauge-fix G (last
+    n_comp_checks X-checks)."""
     from qldpc.circuits.bookkeeping import QubitIDs
-    from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks
+    from qldpc.circuits.surgery.circuit import _gadget_merged_csscode, _reliable_checks
     from qldpc.circuits.surgery.gadget import build_gadget
-    from qldpc.codes.common import CSSCode
 
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
     g = build_gadget(code, z, basis=Pauli.Z)
-    F2 = galois.GF(2)
-    merged = CSSCode(
-        F2(g.HX_merged.astype(np.int_).tolist()),
-        F2(g.HZ_merged.astype(np.int_).tolist()),
-        is_subsystem_code=False,
-    )
+    merged = _gadget_merged_csscode(g)
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, qubit_ids)
+    n_data = code.num_qudits
+    reliable = _reliable_checks(
+        g, merged, qubit_ids, experiment_basis=Pauli.Z, n_data=n_data
+    )
     m_X = code.matrix_x.shape[0]
     m_Z = code.matrix_z.shape[0]
     # basis=Z: data H_Z rows are first m_Z Z-checks; G rows are last g.partial_0.shape[0] X-checks
@@ -75,6 +67,47 @@ def test_classify_reliable_round1_checks_basis_z() -> None:
     expected_x_reliable = set(qubit_ids.checks_x[m_X:])
     expected = expected_z_reliable | expected_x_reliable
     assert set(reliable) == expected
+
+
+def test_reliable_checks_match_basis_x_gadget_reproduces_hx_and_gauge() -> None:
+    """Match-basis (experiment_basis=X on X-gadget): the per-qubit basis rule
+    marks the original H_X data rows reliable and the original H_Z data rows
+    (which touch X-init data) unreliable."""
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery.circuit import _gadget_merged_csscode, _reliable_checks
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()  # [[7,1,3]] Steane; repo fixture for the brief's _x_gadget
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    merged = _gadget_merged_csscode(g)
+    qids = QubitIDs.from_code(merged)
+    n_data = code.num_qudits
+    rel = set(_reliable_checks(g, merged, qids, experiment_basis=Pauli.X, n_data=n_data))
+    m_X = code.matrix_x.shape[0]
+    m_Z = code.matrix_z.shape[0]
+    # original H_X rows are reliable; original H_Z rows (touch X-init data) are NOT
+    assert set(qids.checks_x[:m_X]) <= rel
+    assert not (set(qids.checks_z[:m_Z]) & rel)
+
+
+def test_reliable_checks_opposite_basis_z_experiment_makes_all_z_checks_reliable() -> None:
+    """Opposite-basis (experiment_basis=Z on X-gadget): data |0> + Q' |0> means
+    every Z-type merged check is reliable and no X-type check is."""
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery.circuit import _gadget_merged_csscode, _reliable_checks
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    merged = _gadget_merged_csscode(g)
+    qids = QubitIDs.from_code(merged)
+    n_data = code.num_qudits
+    rel = set(_reliable_checks(g, merged, qids, experiment_basis=Pauli.Z, n_data=n_data))
+    # data |0> + Q' |0>  => every Z-type merged check is reliable; no X-type check is
+    assert set(qids.checks_z) <= rel
+    assert not (set(qids.checks_x) & rel)
 
 
 def test_surgery_state_prep_basis_x_resets() -> None:
@@ -142,7 +175,7 @@ def test_surgery_qec_cycle_round_1_detectors_classified() -> None:
     import galois
 
     from qldpc.circuits.bookkeeping import QubitIDs
-    from qldpc.circuits.surgery.circuit import _classify_reliable_round1_checks, _surgery_qec_cycle
+    from qldpc.circuits.surgery.circuit import _reliable_checks, _surgery_qec_cycle
     from qldpc.circuits.surgery.gadget import build_gadget
     from qldpc.codes.common import CSSCode
 
@@ -156,13 +189,18 @@ def test_surgery_qec_cycle_round_1_detectors_classified() -> None:
         is_subsystem_code=False,
     )
     qubit_ids = QubitIDs.from_code(merged)
-    reliable = _classify_reliable_round1_checks(g, qubit_ids)
+    n_data = code.num_qudits
+    reliable = _reliable_checks(
+        g, merged, qubit_ids, experiment_basis=g.basis, n_data=n_data
+    )
 
     circuit, meas_rec, det_rec = _surgery_qec_cycle(
         g,
         merged,
         num_rounds=2,
         qubit_ids=qubit_ids,
+        experiment_basis=g.basis,
+        n_data=n_data,
     )
     # Count round-1 1-arg DETECTORs (those appearing before any REPEAT_BLOCK).
     text = str(circuit)
@@ -349,8 +387,8 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis: PauliXZ) -
     """
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit import (
-        _classify_reliable_round1_checks,
         _gadget_merged_csscode,
+        _reliable_checks,
         _surgery_detach_and_readout,
         _surgery_final_detectors,
         _surgery_qec_cycle,
@@ -368,7 +406,9 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis: PauliXZ) -
     ancilla_ids = qubit_ids.data[n_data:]
 
     # Simulate the pipeline through detach (we need measurement_record populated).
-    _qec, mrec, _det = _surgery_qec_cycle(g, merged, num_rounds=2, qubit_ids=qubit_ids)
+    _qec, mrec, _det = _surgery_qec_cycle(
+        g, merged, num_rounds=2, qubit_ids=qubit_ids, experiment_basis=g.basis, n_data=n_data
+    )
     _surgery_detach_and_readout(
         g,
         data_ids=data_ids,
@@ -378,9 +418,13 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis: PauliXZ) -
         experiment_basis=g.basis,
     )
 
-    circuit = _surgery_final_detectors(g, merged, qubit_ids, measurement_record=mrec)
+    circuit = _surgery_final_detectors(
+        g, merged, qubit_ids, measurement_record=mrec, experiment_basis=g.basis, n_data=n_data
+    )
     n_final_det = str(circuit).count("DETECTOR")
-    expected = len(_classify_reliable_round1_checks(g, qubit_ids))
+    expected = len(
+        _reliable_checks(g, merged, qubit_ids, experiment_basis=g.basis, n_data=n_data)
+    )
     assert n_final_det == expected, (
         f"basis={basis}: emitted {n_final_det} DETECTORs, expected {expected}"
     )
@@ -1582,9 +1626,9 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
     # invariant under prep-time X errors and therefore stays at 0).
     #
     # The round-1 reliable detectors are emitted in data-H_Z row order
-    # (set by _classify_reliable_round1_checks iterating
-    # qubit_ids.checks_z[:m_Z]), so deterministic_zero_round1[j]
-    # corresponds to H_Z row j.
+    # (set by _reliable_checks iterating qubit_ids.checks_z in row order,
+    # of which the reliable ones are the first m_Z data H_Z rows), so
+    # deterministic_zero_round1[j] corresponds to H_Z row j.
     clean_sampler = clean_circuit.compile_detector_sampler()
     clean_events, _ = clean_sampler.sample(
         shots=256,

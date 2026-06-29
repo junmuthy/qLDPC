@@ -494,6 +494,8 @@ def build_single_ppm_circuit(
         merged_code,
         num_rounds=rounds,
         qubit_ids=qubit_ids,
+        experiment_basis=gadget.basis,  # placeholder: Tasks 6/7 thread the real param
+        n_data=n_data,
         single_sector=single_sector,
     )
     circuit += qec_cycle
@@ -512,6 +514,8 @@ def build_single_ppm_circuit(
             merged_code,
             qubit_ids,
             measurement_record=measurement_record,
+            experiment_basis=gadget.basis,  # placeholder: Tasks 6/7 thread the real param
+            n_data=n_data,
             single_sector=single_sector,
         )
 
@@ -922,11 +926,14 @@ def _build_joint_ppm_circuit_same_basis(
         experiment_basis=g_l.basis,  # placeholder: Tasks 6/7 thread the real param
         data_init=expanded_data_init,
     )
+    n_data = n_l + n_r  # data columns: n_l + n_r (intercode) or n_l (n_r = 0)
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
         g_l,
         joint_code,
         num_rounds=rounds,
         qubit_ids=qubit_ids,
+        experiment_basis=g_l.basis,  # placeholder: Tasks 6/7 thread the real param
+        n_data=n_data,
         joint=(g_r, bridge, intercode),
     )
     circuit += qec_cycle
@@ -945,6 +952,8 @@ def _build_joint_ppm_circuit_same_basis(
             joint_code,
             qubit_ids,
             measurement_record=measurement_record,
+            experiment_basis=g_l.basis,  # placeholder: Tasks 6/7 thread the real param
+            n_data=n_data,
             joint=(g_r, bridge, intercode),
         )
 
@@ -980,32 +989,57 @@ def _build_joint_ppm_circuit_same_basis(
     return circuit, joint_code
 
 
-def _classify_reliable_round1_checks(
+def _reliable_checks(
     gadget: GadgetLayout,
+    merged_code: CSSCode,
     qubit_ids: QubitIDs,
     *,
-    g_r: GadgetLayout | None = None,
-    intercode: bool = False,
+    experiment_basis: PauliXZ,
+    n_data: int,
+    joint: tuple[GadgetLayout, Bridge, bool] | None = None,
 ) -> tuple[int, ...]:
-    """Check ancillas with deterministic round-1 syndrome given surgery init state.
+    """Merged checks deterministic at round 1 == reconstructable from final readout.
 
-    Single-gadget (``g_r=None``): reliable = data-basis rows + gauge (S'_comp)
-    rows. Joint-code (``g_r`` set): the same split spanning both gadgets — for
-    inter-code the right gadget's data-check rows extend the data block
-    (offsets m_X_l+m_X_r etc.); the bridge's new cycle rows live in the gauge
-    block. Intra-code joints share data, so ``intercode=False`` (m_*_r = 0).
+    A CSS check is deterministic iff every qubit in its support is initialized in
+    the basis matching the check's Pauli type. Data qubits are in
+    ``experiment_basis``; ``Q'``/bridge qubits are in complement(``gadget.basis``).
+    This is the unifying rule of the design (Cain et al. arXiv:2603.28627
+    Appendix D): the round-1-deterministic set and the final-reconstructable set
+    coincide, computed directly from the merged check matrices + the per-qubit
+    init basis (no index-slicing, so it is correct for single and joint alike).
+
+    Emission order matches ``qubit_ids.check`` (all X-checks, then all Z-checks),
+    so the round-1 and final detectors land in the same order as before.
+
+    ``joint`` is accepted for signature parity with the QEC-cycle / final-detector
+    call sites; the per-qubit basis vector already accounts for both gadgets'
+    data columns (via ``n_data``) and the shared ``Q'``/bridge block, so the rule
+    needs no extra branch for the joint case.
     """
-    m_X_l = gadget.code.matrix_x.shape[0]
-    m_Z_l = gadget.code.matrix_z.shape[0]
-    m_X_r = g_r.code.matrix_x.shape[0] if (g_r is not None and intercode) else 0
-    m_Z_r = g_r.code.matrix_z.shape[0] if (g_r is not None and intercode) else 0
-    if gadget.basis is Pauli.X:
-        reliable_x = qubit_ids.checks_x[: m_X_l + m_X_r]  # data S_X rows (det. +1)
-        reliable_z = qubit_ids.checks_z[m_Z_l + m_Z_r :]  # gauge (S'_comp) + cycle
-    else:
-        reliable_x = qubit_ids.checks_x[m_X_l + m_X_r :]  # gauge (S'_comp) + cycle
-        reliable_z = qubit_ids.checks_z[: m_Z_l + m_Z_r]  # data S_Z rows
-    return tuple(reliable_x) + tuple(reliable_z)
+    del joint  # rule is purely support + per-qubit init basis
+    HX = np.asarray(merged_code.matrix_x).astype(np.uint8)
+    HZ = np.asarray(merged_code.matrix_z).astype(np.uint8)
+    n_merged = merged_code.num_qudits
+    # per-qubit init basis: True = X-basis init, False = Z-basis init.
+    # X-gadget -> Q'/bridge in Z (False); Z-gadget -> Q'/bridge in X (True).
+    anc_is_x = gadget.basis is Pauli.Z
+    data_is_x = experiment_basis is Pauli.X
+    x_init = np.zeros(n_merged, dtype=bool)
+    x_init[:n_data] = data_is_x
+    x_init[n_data:] = anc_is_x
+
+    reliable: list[int] = []
+    # X-type checks: deterministic iff support is fully within X-init qubits.
+    for r in range(HX.shape[0]):
+        supp = np.nonzero(HX[r])[0]
+        if supp.size and x_init[supp].all():
+            reliable.append(qubit_ids.checks_x[r])
+    # Z-type checks: deterministic iff support is fully within Z-init qubits.
+    for r in range(HZ.shape[0]):
+        supp = np.nonzero(HZ[r])[0]
+        if supp.size and (~x_init[supp]).all():
+            reliable.append(qubit_ids.checks_z[r])
+    return tuple(reliable)
 
 
 def _surgery_state_prep(
@@ -1099,6 +1133,8 @@ def _surgery_qec_cycle(
     num_rounds: int,
     qubit_ids: QubitIDs,
     *,
+    experiment_basis: PauliXZ,
+    n_data: int,
     joint: tuple[GadgetLayout, Bridge, bool] | None = None,
     single_sector: bool = False,
 ) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
@@ -1118,17 +1154,17 @@ def _surgery_qec_cycle(
     """
     strategy = EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
-    if joint is None:
-        reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
-        lane_idx = _check_lane_index_map(gadget, qubit_ids)
-    else:
-        g_r, _bridge, intercode = joint
-        reliable = set(
-            _classify_reliable_round1_checks(
-                gadget, qubit_ids, g_r=g_r, intercode=intercode
-            )
+    reliable = set(
+        _reliable_checks(
+            gadget,
+            merged_code,
+            qubit_ids,
+            experiment_basis=experiment_basis,
+            n_data=n_data,
+            joint=joint,
         )
-        lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
+    )
+    lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
     all_check_ids = qubit_ids.check
     # Checks whose syndrome becomes a DETECTOR. single_sector keeps only the
     # measured-basis sector; all checks are still measured by ``one_round``.
@@ -1250,28 +1286,45 @@ def _surgery_final_detectors(
     qubit_ids: QubitIDs,
     *,
     measurement_record: MeasurementRecord,
+    experiment_basis: PauliXZ,
+    n_data: int,
     joint: tuple[GadgetLayout, Bridge, bool] | None = None,
     single_sector: bool = False,
 ) -> stim.Circuit:
-    """Emit DETECTORs for reliable stabs inferable from final readouts.
+    """Emit DETECTORs for checks reconstructable from the final readouts.
 
-    For basis=X: data H_X (from Mx data) + G (from Mz κ).
-    For basis=Z: data H_Z (from Mz data) + G (from Mx κ).
-    Each DETECTOR XORs ⊕(final M-record on stab support) ⊕ last-round syndrome.
-    Joint-PPM (``joint=(g_r, bridge, intercode)``) spans both gadgets' data rows.
+    The reconstructable set is exactly ``_reliable_checks`` (same per-qubit basis
+    rule used for round-1 detectors): a CSS check is final-reconstructable iff its
+    support lies entirely within matching-basis qubits (data in
+    ``experiment_basis``; ``Q'``/bridge in complement(``gadget.basis``)). For the
+    match-basis paths this reproduces the prior "data H_X from M data + gauge G
+    from M Q'" split exactly (Cain et al. arXiv:2603.28627 Appendix D).
+
+    Each DETECTOR XORs ⊕(final M-record on the stab support) ⊕ last-round syndrome.
+    Joint-PPM (``joint=(g_r, bridge, intercode)``) spans both gadgets' data rows
+    automatically via ``n_data``.
 
     ``single_sector`` drops the complementary-basis gauge (G) detectors, matching
     the QEC-cycle filter — only the measured-basis data stabs are inferred.
     """
-    m_X = gadget.code.matrix_x.shape[0]
-    m_Z = gadget.code.matrix_z.shape[0]
-    if joint is not None:
-        g_r, _bridge, intercode = joint
-        if intercode:
-            m_X += g_r.code.matrix_x.shape[0]
-            m_Z += g_r.code.matrix_z.shape[0]
     HX = np.asarray(merged_code.matrix_x).astype(np.uint8)
     HZ = np.asarray(merged_code.matrix_z).astype(np.uint8)
+    reliable = set(
+        _reliable_checks(
+            gadget,
+            merged_code,
+            qubit_ids,
+            experiment_basis=experiment_basis,
+            n_data=n_data,
+            joint=joint,
+        )
+    )
+    if single_sector:
+        # Keep only measured-basis checks (drops the complementary gauge G).
+        measured = set(
+            qubit_ids.checks_x if gadget.basis is Pauli.X else qubit_ids.checks_z
+        )
+        reliable &= measured
 
     circuit = stim.Circuit()
     lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
@@ -1283,18 +1336,20 @@ def _surgery_final_detectors(
         lane, idx = lane_idx[check_id]
         circuit.append("DETECTOR", targets, (idx, lane, 0))
 
+    def _emit_sector(H: np.ndarray, check_ids: tuple[int, ...]) -> None:
+        for kk in range(H.shape[0]):
+            cid = check_ids[kk]
+            if cid in reliable:
+                _emit_detector(H[kk], cid)
+
+    # Measured-basis sector first, then the complementary sector — matching the
+    # prior emission order so existing match-basis circuits stay byte-identical.
     if gadget.basis is Pauli.X:
-        for kk in range(m_X):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
-        if not single_sector:  # complementary-basis gauge G (Mz κ)
-            for kk in range(m_Z, HZ.shape[0]):
-                _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-    else:  # Pauli.Z (symmetric: S_X' in HZ, G in HX)
-        for kk in range(m_Z):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-        if not single_sector:  # complementary-basis gauge G (Mx κ)
-            for kk in range(m_X, HX.shape[0]):
-                _emit_detector(HX[kk], qubit_ids.checks_x[kk])
+        _emit_sector(HX, qubit_ids.checks_x)
+        _emit_sector(HZ, qubit_ids.checks_z)
+    else:
+        _emit_sector(HZ, qubit_ids.checks_z)
+        _emit_sector(HX, qubit_ids.checks_x)
 
     return circuit
 
