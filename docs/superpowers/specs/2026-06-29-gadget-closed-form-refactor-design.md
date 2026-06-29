@@ -41,6 +41,18 @@ keeping every downstream contract byte-identical.
 - `basis=Z` realised as the X↔Z dual of the X core (mirrors main.tex §4.2
   "apply the X↔Z dual of §2"), not a parallel branch.
 
+### 2.1 `_restrict` as the shared kernel (forward context)
+
+The joint-PPM (`circuit.py` `_stitch_*`) and Y/mixed-PPM (`y_gadget.py`)
+constructions are slated for the same closed-form flattening in follow-on specs.
+They are only loosely coupled to the single gadget: the **one** genuinely shared
+piece is `_restrict` (the useful quantities V0 / C0 / incidence / gauge). Each
+construction then assembles its own `H̃` directly from main.tex (§2.1 single,
+§3 joint, §4 Y) rather than reusing another's merged matrices. This spec
+therefore lands `_restrict` as a deliberately small, stable, unified primitive;
+the joint/Y refactors consume it without depending on `_x_merged` or
+`build_gadget_augmented`.
+
 **Non-goals (out of scope)**
 - No change to `GadgetLayout`'s fields, names, or types.
 - No change to `circuit.py`, `cheeger.py`, `y_gadget.py`, `y_circuit.py`.
@@ -79,19 +91,22 @@ class GadgetLayout:          # UNCHANGED — 10 fields
     code; x; support; data_checks; incidence; partial_0
     HX_merged; HZ_merged; Q_prime; basis
 
-# ── reuse primitive (bridge.py also calls this) ──
-def _restrict(H_complement, x) -> (support, data_checks, incidence):
-    """V0 = supp(x); C0 = complement-basis checks touching V0;
-    incidence = ∂_1^T = H_complement[C0, V0]  (|C0|×|V0|, edge-vertex)."""
+# ── unified shared kernel (the ONE reused primitive; bridge.py + the future
+#    joint/Y refactors all consume this — see §2.1) ──
+def _restrict(H_complement, x) -> (support, data_checks, incidence, partial_0):
+    """The useful quantities of main.tex §2.1, in one place:
+       V0 = supp(x); C0 = complement-basis checks touching V0;
+       incidence = ∂_1^T = H_complement[C0, V0]  (|C0|×|V0|, edge-vertex);
+       partial_0 = ker(∂_1) = GF2(incidence).left_null_space()."""
 
 # ── core: main.tex §2.1 closed form, X̄ frame only ──
 def _x_merged(H_X, H_Z, x, incidence_extra=None)
         -> (support, data_checks, incidence, partial_0, HX, HZ):
-    support, C0, incidence = _restrict(H_Z, x)
+    support, C0, incidence, partial_0 = _restrict(H_Z, x)
     if incidence_extra is not None:                  # boost/joint κ rows
         incidence = vstack([incidence, incidence_extra])
-    d1        = incidence.T                           # ∂_1 (vertex-edge), |V0|×|C0_aug|
-    partial_0 = GF2(incidence).left_null_space()      # ker(∂_1) = ∂_0
+        partial_0 = GF2(incidence).left_null_space()  # gauge re-derived on stacked ∂_1^T
+    d1 = incidence.T                                  # ∂_1 (vertex-edge), |V0|×|C0_aug|
     f1T       = π_{V0}                                # |V0|×n indicator on support
     f0        = π_{C0}^T with zero columns for the extra κ   # replaces _projection sentinel
     HX = [[H_X, 0  ], [f1T, d1       ]]
@@ -141,9 +156,10 @@ recover the un-augmented incidence. Resolution: keep `_restrict` as a real
 primitive (it has a genuine second consumer — not redundant indirection) and
 change the bridge import + call site from `_step1_restriction(code, x, basis=…)`
 to `_restrict(H_complement, x)`, selecting `H_complement` by basis at the call
-site (`code.matrix_z` for X, `code.matrix_x` for Z). This is a ~3-line change in
-`bridge.py` (`_build_combined_extras` helper, lines ~517-526). No other file
-changes.
+site (`code.matrix_z` for X, `code.matrix_x` for Z). bridge only needs the
+`incidence` element of the tuple and ignores the unified `_restrict`'s extra
+returns (`data_checks`, `partial_0`). This is a ~3-line change in `bridge.py`
+(`_build_combined_extras` helper, lines ~517-526). No other file changes.
 
 ## 6. Test changes (`gadget_test.py`)
 
