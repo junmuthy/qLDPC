@@ -1807,3 +1807,31 @@ def test_single_ppm_dem_ok_bb_36_8_with_boost() -> None:
     stripped = keep_only_observable(circuit, keep_idx=0)
     dem = stripped.detector_error_model(approximate_disjoint_errors=True)
     assert dem.num_detectors > 0
+
+
+def test_gf2_solve_consistent_returns_particular_solution():
+    from qldpc.circuits.surgery.circuit import _gf2_solve
+
+    A = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    b = np.array([1, 0], dtype=np.uint8)
+    x = _gf2_solve(A, b)
+    assert x is not None
+    assert np.array_equal((A @ x) % 2, b)
+
+
+def test_gf2_solve_inconsistent_returns_none():
+    from qldpc.circuits.surgery.circuit import _gf2_solve
+
+    A = np.array([[1, 0], [1, 0], [0, 0]], dtype=np.uint8)
+    b = np.array([1, 0, 0], dtype=np.uint8)  # rows 0,1 demand x0=1 and x0=0
+    assert _gf2_solve(A, b) is None
+
+
+def test_gf2_solve_zero_rhs_returns_zero_vector():
+    from qldpc.circuits.surgery.circuit import _gf2_solve
+
+    A = np.array([[1, 1], [0, 1]], dtype=np.uint8)
+    b = np.array([0, 0], dtype=np.uint8)
+    x = _gf2_solve(A, b)
+    assert x is not None
+    assert np.array_equal(x, np.zeros(2, dtype=np.uint8))

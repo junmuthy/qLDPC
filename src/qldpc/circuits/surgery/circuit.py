@@ -7,6 +7,7 @@ References:
 
 from __future__ import annotations
 
+import galois
 import numpy as np
 import stim
 
@@ -18,6 +19,32 @@ from qldpc.objects import Pauli
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
+
+GF2 = galois.GF(2)
+
+
+def _gf2_solve(A: np.ndarray, b: np.ndarray) -> np.ndarray | None:
+    """Particular solution to ``A x = b`` over GF(2), or None if inconsistent.
+
+    Free variables are set to 0. Uses row reduction of the augmented matrix
+    [A | b] via galois; a pivot-free row with nonzero RHS means inconsistency.
+    """
+    A = np.asarray(A).astype(np.int_) % 2
+    b = np.asarray(b).astype(np.int_).reshape(-1) % 2
+    m, n = A.shape
+    if m == 0:
+        return np.zeros(n, dtype=np.uint8)
+    aug = GF2(np.hstack([A, b.reshape(-1, 1)]))
+    rref = np.asarray(aug.row_reduce()).astype(np.int_)
+    x = np.zeros(n, dtype=np.uint8)
+    for row in rref:
+        nz = np.nonzero(row[:n])[0]
+        if nz.size == 0:
+            if row[n]:
+                return None  # 0 == 1 : inconsistent
+            continue
+        x[nz[0]] = row[n]
+    return x
 
 
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
