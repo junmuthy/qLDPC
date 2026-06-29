@@ -1867,3 +1867,38 @@ def test_commuting_basis_general_L_combines_multiple_anticommuters():
     basis = _commuting_logical_basis(logical_ops, L)
     assert basis.shape == (1, 3)
     assert ((basis @ L) % 2 == 0).all()
+
+
+def test_block_observable_targets_no_deformation_when_data_only_valid():
+    from qldpc.circuits.surgery.circuit import _block_observable_targets
+    from qldpc.codes.common import CSSCode
+
+    # Merged code = a code where a data-only Z logical already commutes with all X.
+    # Use a 2-qubit code with HX empty, HZ empty (1 logical), Q' = none.
+    merged = CSSCode(
+        np.zeros((0, 1), dtype=int),
+        np.zeros((0, 1), dtype=int),
+        is_subsystem_code=False,
+    )
+    col_record = {0: stim.target_rec(-1)}
+    w = np.array([1], dtype=np.uint8)  # Z on the single data qubit
+    targets = _block_observable_targets(merged, Pauli.Z, w, n_data=1, col_record=col_record)
+    assert targets == [stim.target_rec(-1)]
+
+
+def test_block_observable_targets_adds_qprime_records_for_deformation():
+    from qldpc.circuits.surgery.circuit import _block_observable_targets
+    from qldpc.codes.common import CSSCode
+
+    # merged X-check forces a Z logical to deform onto the Q' column.
+    # cols: 0 = data, 1 = Q'.  HX_merged = [[1,1]] (one X-check on data0 & Q').
+    merged = CSSCode(
+        np.array([[1, 1]], dtype=int),
+        np.zeros((0, 2), dtype=int),
+        is_subsystem_code=False,
+    )
+    col_record = {0: stim.target_rec(-2), 1: stim.target_rec(-1)}
+    w = np.array([1, 0], dtype=np.uint8)  # data-only Z on col 0 anticommutes with the X-check
+    targets = _block_observable_targets(merged, Pauli.Z, w, n_data=1, col_record=col_record)
+    # deformed rep must add the Q' column (col 1) so it commutes with the X-check
+    assert set(targets) == {stim.target_rec(-2), stim.target_rec(-1)}

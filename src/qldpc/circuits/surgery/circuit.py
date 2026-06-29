@@ -72,6 +72,42 @@ def _commuting_logical_basis(logical_ops: np.ndarray, L_support: np.ndarray) -> 
     return np.array(rows, dtype=np.uint8).reshape(-1, logical_ops.shape[1])
 
 
+def _block_observable_targets(
+    merged_code: CSSCode,
+    experiment_basis: Pauli,
+    w: np.ndarray,
+    n_data: int,
+    col_record: dict[int, stim.target_rec],
+) -> list[stim.target_rec]:
+    """End-of-circuit targets for the frame-corrected merged-code rep of logical ``w``.
+
+    ``w`` is the bare-code logical support (length n_data, ``experiment_basis`` type).
+    The deformed representative v = w ⊕ c commutes with every opposite-type merged
+    check, where c lives on the non-data columns (Q' + bridge) and is read from the
+    split. Pauli-frame correction folded into the observable (no physical gates),
+    per Cain et al. arXiv:2603.28627 Appendix D.
+    """
+    # opposite-type checks: an experiment_basis logical must commute with them.
+    M_opp = (
+        np.asarray(merged_code.matrix_z).astype(np.uint8)
+        if experiment_basis is Pauli.X
+        else np.asarray(merged_code.matrix_x).astype(np.uint8)
+    )
+    n_merged = merged_code.num_qudits
+    corr_cols = np.arange(n_data, n_merged)  # Q' + bridge
+    # ``w`` is the bare-code logical support on the data columns (length n_data);
+    # accept a longer (full merged-width) array by reading only its data prefix.
+    w = np.asarray(w).astype(np.uint8).reshape(-1)[:n_data]
+    if M_opp.shape[0] == 0:
+        c = np.zeros(corr_cols.size, dtype=np.uint8)
+    else:
+        syndrome = (M_opp[:, :n_data] @ w) % 2
+        c = _gf2_solve(M_opp[:, corr_cols], syndrome)
+        assert c is not None, "logical w does not commute with L (unsolvable deformation)"
+    support_cols = list(np.nonzero(w)[0]) + [int(corr_cols[j]) for j in np.nonzero(c)[0]]
+    return [col_record[col] for col in support_cols]
+
+
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
     return CSSCode(
         g.HX_merged.astype(np.int_),
