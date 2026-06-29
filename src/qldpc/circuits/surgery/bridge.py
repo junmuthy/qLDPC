@@ -514,16 +514,20 @@ def build_bridge(
     extra_ancilla_l = _edges_to_incidence_extra(extras_l_edges, len(g_l.support))
     extra_ancilla_r = _edges_to_incidence_extra(extras_r_edges, len(g_r.support))
 
-    from .gadget import _step1_restriction, build_gadget_augmented
+    from qldpc.objects import Pauli
+
+    from .gadget import _restrict, build_gadget_augmented
 
     # boost_gadget appends weight-2 κ' rows to g_l.incidence beyond the original
-    # _step1_restriction output. These rows must be preserved when assembling
+    # _restrict incidence (∂_1^T). These rows must be preserved when assembling
     # g_l_aug — SkipTree runs against G_aux (built from boosted g_l.incidence)
     # but T_full is embedded into g_l_aug.incidence; dropping boost rows leaves
     # tree edges through boost-κ' silently zeroed and breaks the invariant
     # T_s · F_aug · P_s = H_R.
-    _, _, _orig_inc_l = _step1_restriction(g_l.code, g_l.x, basis=basis_l)
-    _, _, _orig_inc_r = _step1_restriction(g_r.code, g_r.x, basis=basis_r)
+    _Hc_l = g_l.code.matrix_z if basis_l is Pauli.X else g_l.code.matrix_x
+    _Hc_r = g_r.code.matrix_z if basis_r is Pauli.X else g_r.code.matrix_x
+    _orig_inc_l = _restrict(_Hc_l, g_l.x)[2]
+    _orig_inc_r = _restrict(_Hc_r, g_r.x)[2]
     boost_extras_l = g_l.incidence[_orig_inc_l.shape[0] :].astype(np.uint8)
     boost_extras_r = g_r.incidence[_orig_inc_r.shape[0] :].astype(np.uint8)
     combined_extras_l = np.vstack([boost_extras_l, extra_ancilla_l.astype(np.uint8)])

@@ -593,7 +593,7 @@ def _bb_72_12():
 def test_build_bridge_skiptree_invariant_holds_after_boost() -> None:
     """T_s · F_aug · P_s = H_R must hold even when g_l/g_r are boosted.
 
-    Regression: build_bridge rebuilds g_l_aug via _step1_restriction on the
+    Regression: build_bridge rebuilds g_l_aug via _restrict on the
     ORIGINAL (un-boosted) code+x+basis, dropping boost-added κ' rows from
     g_l.incidence. SkipTree T_l is computed against the boosted G_aux but
     embedded into unboosted g_l_aug.incidence → tree edges through boost-κ'
