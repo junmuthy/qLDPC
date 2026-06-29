@@ -99,7 +99,9 @@ def test_surgery_state_prep_basis_x_resets() -> None:
     n_data = code.num_qudits
     data_ids = qubit_ids.data[:n_data]
     ancilla_ids = qubit_ids.data[n_data:]
-    circuit = _surgery_state_prep(g, data_ids, ancilla_ids, bridge_ids=())
+    circuit = _surgery_state_prep(
+        g, data_ids, ancilla_ids, bridge_ids=(), experiment_basis=g.basis
+    )
     text = str(circuit)
     assert f"RX {' '.join(str(q) for q in data_ids)}" in text
     assert f"R {' '.join(str(q) for q in ancilla_ids)}" in text
@@ -127,7 +129,9 @@ def test_surgery_state_prep_basis_z_resets() -> None:
     n_data = code.num_qudits
     data_ids = qubit_ids.data[:n_data]
     ancilla_ids = qubit_ids.data[n_data:]
-    circuit = _surgery_state_prep(g, data_ids, ancilla_ids, bridge_ids=())
+    circuit = _surgery_state_prep(
+        g, data_ids, ancilla_ids, bridge_ids=(), experiment_basis=g.basis
+    )
     text = str(circuit)
     assert f"R {' '.join(str(q) for q in data_ids)}" in text
     assert f"RX {' '.join(str(q) for q in ancilla_ids)}" in text
@@ -191,6 +195,7 @@ def test_surgery_detach_and_readout_basis_x_measures_ancilla_then_data() -> None
         ancilla_ids=ancilla_ids,
         bridge_ids=bridge_ids,
         measurement_record=meas_rec,
+        experiment_basis=g.basis,
     )
     text = str(circuit)
     # ancilla measured first (in Z), then data (in X)
@@ -219,12 +224,66 @@ def test_surgery_detach_and_readout_basis_z_measures_ancilla_in_x_then_data_in_z
         ancilla_ids=ancilla_ids,
         bridge_ids=(),
         measurement_record=meas_rec,
+        experiment_basis=g.basis,
     )
     text = str(circuit)
     m_ancilla_idx = text.find(f"MX {' '.join(str(q) for q in ancilla_ids)}")
     m_data_idx = text.find(f"M {' '.join(str(q) for q in data_ids)}")
     assert m_ancilla_idx >= 0 and m_data_idx >= 0
     assert m_ancilla_idx < m_data_idx
+
+
+def test_state_prep_z_experiment_on_x_gadget_inits_data_in_z() -> None:
+    """experiment_basis=Z on an X-gadget: data init in Z (R), no RX on data.
+
+    The data init/readout basis is decoupled from gadget.basis (Cain et al.
+    arXiv:2603.28627 Appendix D). For an X-gadget the ancilla (basis-X
+    complement) inits with R, so an experiment_basis=Z data init (also R) means
+    the circuit contains no RX at all.
+    """
+    from qldpc.circuits.surgery.circuit import _surgery_state_prep
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()  # [[7,1,3]] Steane; repo fixture for the brief's _x_gadget
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    data_ids = tuple(range(g.code.num_qudits))
+    anc_ids = tuple(range(g.code.num_qudits, g.code.num_qudits + len(g.Q_prime)))
+    circ = _surgery_state_prep(g, data_ids, anc_ids, experiment_basis=Pauli.Z)
+    text = str(circ)
+    # data in Z -> R on data; ancilla (X-gadget complement = Z) -> R on ancilla; no RX
+    assert "RX" not in text
+    assert "R " in text or text.strip().startswith("R")
+
+
+def test_detach_readout_z_experiment_on_x_gadget_measures_data_in_z() -> None:
+    """experiment_basis=Z on an X-gadget: data readout in Z (M), no MX.
+
+    Data readout basis is decoupled from gadget.basis (Cain et al.
+    arXiv:2603.28627 Appendix D): experiment_basis=Z -> M on data. The X-gadget
+    ancilla detach op is also M, so the circuit contains no MX.
+    """
+    from qldpc.circuits.bookkeeping import MeasurementRecord
+    from qldpc.circuits.surgery.circuit import _surgery_detach_and_readout
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    data_ids = tuple(range(g.code.num_qudits))
+    anc_ids = tuple(range(g.code.num_qudits, g.code.num_qudits + len(g.Q_prime)))
+    rec = MeasurementRecord()
+    circ = _surgery_detach_and_readout(
+        g,
+        data_ids=data_ids,
+        ancilla_ids=anc_ids,
+        bridge_ids=(),
+        measurement_record=rec,
+        experiment_basis=Pauli.Z,
+    )
+    text = str(circ)
+    assert "MX" not in text  # data measured with M (Z), ancilla measured with M (Z)
+    assert "M " in text or "\nM" in text
 
 
 def test_surgery_observable_emits_two_observable_include() -> None:
@@ -316,6 +375,7 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis: PauliXZ) -
         ancilla_ids=ancilla_ids,
         bridge_ids=(),
         measurement_record=mrec,
+        experiment_basis=g.basis,
     )
 
     circuit = _surgery_final_detectors(g, merged, qubit_ids, measurement_record=mrec)

@@ -15,7 +15,7 @@ from qldpc.circuits.bookkeeping import DetectorRecord, MeasurementRecord, QubitI
 from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
 from qldpc.circuits.noise_model import NoiseModel
 from qldpc.codes.common import CSSCode, QuditCode
-from qldpc.objects import Pauli
+from qldpc.objects import Pauli, PauliXZ
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
@@ -486,6 +486,7 @@ def build_single_ppm_circuit(
         data_ids,
         Q_prime_ids,
         bridge_ids,
+        experiment_basis=gadget.basis,  # placeholder: Tasks 6/7 thread the real param
         data_init=data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
@@ -502,6 +503,7 @@ def build_single_ppm_circuit(
         ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
+        experiment_basis=gadget.basis,  # placeholder: Tasks 6/7 thread the real param
         destructive_measure_data=destructive_measure_data,
     )
     if destructive_measure_data:
@@ -917,6 +919,7 @@ def _build_joint_ppm_circuit_same_basis(
         data_ids,
         Q_prime_ids,
         bridge_ids,
+        experiment_basis=g_l.basis,  # placeholder: Tasks 6/7 thread the real param
         data_init=expanded_data_init,
     )
     qec_cycle, measurement_record, _ = _surgery_qec_cycle(
@@ -933,6 +936,7 @@ def _build_joint_ppm_circuit_same_basis(
         ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
+        experiment_basis=g_l.basis,  # placeholder: Tasks 6/7 thread the real param
         destructive_measure_data=destructive_measure_data,
     )
     if destructive_measure_data:
@@ -1010,13 +1014,20 @@ def _surgery_state_prep(
     ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...] = (),
     *,
+    experiment_basis: PauliXZ,
     data_init: str | None = None,
 ) -> stim.Circuit:
     """Init data/ancilla/bridge qubits at the start of a surgery PPM circuit.
 
-    Default (``data_init=None``):
-      basis=X → data |+⟩ (RX), ancilla + bridge |0⟩ (R)
-      basis=Z → data |0⟩ (R),  ancilla + bridge |+⟩ (RX)
+    Data default init (``data_init=None``) follows ``experiment_basis``, which is
+    decoupled from ``gadget.basis`` (Cain et al. arXiv:2603.28627 Appendix D):
+      experiment_basis=X → data |+⟩ (RX)
+      experiment_basis=Z → data |0⟩ (R)
+
+    ancilla + bridge init follows the COMPLEMENT of ``gadget.basis`` (the merge
+    mechanics, independent of ``experiment_basis``):
+      basis=X → ancilla + bridge |0⟩ (R)
+      basis=Z → ancilla + bridge |+⟩ (RX)
 
     Optional ``data_init`` overrides per-data-qubit initial state. Each
     character selects a state for the data qubit at the same position:
@@ -1031,7 +1042,7 @@ def _surgery_state_prep(
     and always follows the protocol default (basis-complement +1 eigenstate).
     """
     if data_init is None:
-        default_char = "+" if gadget.basis is Pauli.X else "0"
+        default_char = "+" if experiment_basis is Pauli.X else "0"
         per_qubit = default_char * len(data_ids)
     else:
         if len(data_init) == 1:
@@ -1295,6 +1306,7 @@ def _surgery_detach_and_readout(
     ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...],
     measurement_record: MeasurementRecord,
+    experiment_basis: PauliXZ,
     destructive_measure_data: bool = True,
 ) -> stim.Circuit:
     """Detach the κ/bridge ancillas; optionally destructively measure the data.
@@ -1302,11 +1314,16 @@ def _surgery_detach_and_readout(
     Mκ (the split that returns the bare code) always runs. When
     ``destructive_measure_data`` is True the data is then measured destructively
     (SHIFT_COORDS then Mdata); when False the data is left encoded (detach-only).
+
+    The ancilla/bridge detach op follows the COMPLEMENT of ``gadget.basis`` (the
+    split): basis=X → M, basis=Z → MX. The data readout op follows
+    ``experiment_basis`` (decoupled from gadget.basis, Cain et al.
+    arXiv:2603.28627 Appendix D): experiment_basis=X → MX, experiment_basis=Z → M.
     """
     circuit = stim.Circuit()
     detach_qubits = list(ancilla_ids) + list(bridge_ids)
     ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
-    data_op = "MX" if gadget.basis is Pauli.X else "M"
+    data_op = "MX" if experiment_basis is Pauli.X else "M"
     circuit.append(ancilla_op, detach_qubits)
     measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
     if not destructive_measure_data:
