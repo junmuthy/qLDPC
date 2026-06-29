@@ -1835,3 +1835,35 @@ def test_gf2_solve_zero_rhs_returns_zero_vector():
     x = _gf2_solve(A, b)
     assert x is not None
     assert np.array_equal(x, np.zeros(2, dtype=np.uint8))
+
+
+def test_commuting_basis_all_commute_returns_all():
+    from qldpc.circuits.surgery.circuit import _commuting_logical_basis
+
+    logical_ops = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.uint8)
+    L = np.array([0, 0, 0], dtype=np.uint8)  # symplectic product 0 with everything
+    basis = _commuting_logical_basis(logical_ops, L)
+    assert basis.shape == (2, 3)
+    assert np.array_equal(basis, logical_ops)
+
+
+def test_commuting_basis_drops_one_when_one_anticommutes():
+    from qldpc.circuits.surgery.circuit import _commuting_logical_basis
+
+    logical_ops = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.uint8)
+    L = np.array([1, 0, 0], dtype=np.uint8)  # anticommutes only with row 0
+    basis = _commuting_logical_basis(logical_ops, L)
+    assert basis.shape == (1, 3)
+    assert ((basis @ L) % 2 == 0).all()  # all commute with L
+    assert np.array_equal(basis[0], np.array([0, 1, 0], dtype=np.uint8))
+
+
+def test_commuting_basis_general_L_combines_multiple_anticommuters():
+    from qldpc.circuits.surgery.circuit import _commuting_logical_basis
+
+    # L overlaps rows 0 AND 1 (both anticommute); result must be k-1 = 1, commuting.
+    logical_ops = np.array([[1, 0, 0], [1, 1, 0]], dtype=np.uint8)
+    L = np.array([1, 0, 0], dtype=np.uint8)  # dot row0=1, row1=1 -> both anticommute
+    basis = _commuting_logical_basis(logical_ops, L)
+    assert basis.shape == (1, 3)
+    assert ((basis @ L) % 2 == 0).all()

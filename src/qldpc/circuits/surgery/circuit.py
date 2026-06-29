@@ -47,6 +47,31 @@ def _gf2_solve(A: np.ndarray, b: np.ndarray) -> np.ndarray | None:
     return x
 
 
+def _commuting_logical_basis(logical_ops: np.ndarray, L_support: np.ndarray) -> np.ndarray:
+    """Basis of the bare-code logicals (rows of ``logical_ops``) commuting with L.
+
+    The symplectic functional a_i = (L_support . logical_ops[i]) mod 2 is a linear
+    functional on the k-dim logical space; its kernel (dim k or k-1) is the
+    commuting subspace. When some a_i == 1, pick a pivot p with a_p == 1 and return
+    {ops[i] : a_i == 0} ∪ {ops[i] ⊕ ops[p] : a_i == 1, i != p}. When all a_i == 0
+    (same Pauli type / match-basis) return all k rows unchanged.
+
+    Construction mirrors the gauge-fix logic of Webster, Smith, Cohen
+    arXiv:2511.15989 §II.A used by build_gadget; here it selects the k-t readout
+    observables of Cain et al. arXiv:2603.28627 Appendix D (t=1).
+    """
+    logical_ops = np.asarray(logical_ops).astype(np.uint8)
+    L_support = np.asarray(L_support).astype(np.uint8).reshape(-1)
+    a = (logical_ops @ L_support) % 2
+    ones = np.nonzero(a)[0]
+    if ones.size == 0:
+        return logical_ops.copy()
+    p = int(ones[0])
+    rows = [logical_ops[i] for i in range(logical_ops.shape[0]) if a[i] == 0]
+    rows += [(logical_ops[i] ^ logical_ops[p]) for i in ones[1:]]
+    return np.array(rows, dtype=np.uint8).reshape(-1, logical_ops.shape[1])
+
+
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
     return CSSCode(
         g.HX_merged.astype(np.int_),
