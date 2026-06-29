@@ -61,6 +61,62 @@ def test_single_y_circuit_rejects_unsupported_init() -> None:
         build_single_y_ppm_circuit(yg, rounds=3, data_init=di).detector_error_model()
 
 
+@pytest.mark.parametrize("data_init", [None, "Y+", "Y-"])
+def test_single_y_every_used_qubit_has_coords(data_init: str | None) -> None:
+    """Every qubit touched by an op carries a QUBIT_COORDS (clean timeline diagram).
+
+    Regression: the ``Y+``/``Y-`` state-injection ancillas allocated inside
+    ``_steane_logical_y_eigenstate_prep`` (the m_z Z-syndrome measurement ancillas)
+    were reset/measured but never given a QUBIT_COORDS, so they showed up as
+    coordinate-less wires in the stim timeline diagram.
+    """
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    circuit = build_single_y_ppm_circuit(yg, rounds=2, data_init=data_init)
+
+    coords = circuit.get_final_qubit_coordinates()
+    used = {
+        t.qubit_value
+        for inst in circuit.flattened()
+        for t in inst.targets_copy()
+        if t.is_qubit_target
+    }
+    missing = sorted(used - set(coords))
+    assert not missing, f"qubits used in ops but missing QUBIT_COORDS: {missing}"
+
+
+def test_single_y_coords_split_checks_like_css_layout() -> None:
+    """The Steane Y-layout splits each check family into original vs new rows.
+
+    Mirrors ``_surgery_qubit_coordinates``: y=0 data, y=1 κ ancillas, original
+    H_X/H_Z checks on y=2/y=4, new S_X'/S_Z' merge rows on y=3/y=5, the mixed
+    y_v rows on y=6, and the Y-prep injection ancillas on y=7. For Steane the
+    code has m_x=m_z=3 original checks; the gadget adds 2 S_X' and 3 S_Z' rows.
+    """
+    from collections import defaultdict
+
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    circuit = build_single_y_ppm_circuit(yg, rounds=1, data_init="Y+")
+
+    by_lane: dict[int, int] = defaultdict(int)
+    for _q, (_x, y) in circuit.get_final_qubit_coordinates().items():
+        by_lane[int(y)] += 1
+
+    assert by_lane[0] == code.num_qudits  # 7 real data
+    assert by_lane[1] == len(yg.g_x.Q_prime) + len(yg.g_z.Q_prime)  # κ ancillas
+    assert by_lane[2] == code.matrix_x.shape[0]  # 3 original X-checks
+    assert by_lane[3] == 2  # new S_X' merge rows
+    assert by_lane[4] == code.matrix_z.shape[0]  # 3 original Z-checks
+    assert by_lane[5] == 3  # new S_Z' merge rows
+    assert by_lane[6] == len(yg.W)  # 1 mixed y_v ancilla (|W|=1, no cycles)
+    assert by_lane[7] == code.matrix_z.shape[0]  # m_z Y-prep injection ancillas
+
+
 def test_single_y_steane_obs0_deterministic_on_eigenstate() -> None:
     """Steane bare obs0 = ∏(χ_X·χ_Z·y_v) is the deterministic Ȳ readout on |Ȳ±⟩.
 
@@ -125,6 +181,76 @@ def test_single_y_outcome_nondeterministic_on_0_and_plus() -> None:
         # Non-deterministic Ȳ outcome ⇒ stim refuses the observable in the DEM.
         with pytest.raises(ValueError, match="non-deterministic observable"):
             circuit.detector_error_model()
+
+
+def _data_measured_qubits(circuit: stim.Circuit, n_data: int) -> list[int]:
+    """Real-data qubit IDs (< n_data) that appear under any measurement op."""
+    return sorted(
+        t.qubit_value
+        for inst in circuit.flattened()
+        if inst.name in ("M", "MX", "MY", "MZ")
+        for t in inst.targets_copy()
+        if t.is_qubit_target and t.qubit_value < n_data
+    )
+
+
+def test_single_y_non_destructive_skips_data_measurement() -> None:
+    """``destructive_measure_data=False`` leaves the data qubits unmeasured.
+
+    The non-destructive (detach-only) mode runs the merge rounds and detaches the
+    κ ancillas but does NOT measure the real data qubits, so the logical state
+    stays encoded. obs0 (the Ȳ readout) is still emitted from the in-circuit
+    last-round ancilla records, and the circuit still compiles to a DEM.
+    """
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    circuit = build_single_y_ppm_circuit(
+        yg, rounds=2, data_init="Y+", destructive_measure_data=False
+    )
+    assert _data_measured_qubits(circuit, code.num_qudits) == []
+    dem = circuit.detector_error_model()
+    assert dem.num_observables == 1  # obs0 still present
+
+
+def test_single_y_non_destructive_same_obs0_and_fewer_detectors() -> None:
+    """Non-destructive obs0 matches the destructive build; detector count drops."""
+    import numpy as np
+
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+
+    code, x, z = _steane_y_pair()
+    yg = build_y_gadget(code, x=x, z=z)
+    expected = {"Y+": 0.0, "Y-": 1.0}
+    for data_init, want in expected.items():
+        full = build_single_y_ppm_circuit(yg, rounds=2, data_init=data_init)
+        lean = build_single_y_ppm_circuit(
+            yg, rounds=2, data_init=data_init, destructive_measure_data=False
+        )
+        assert lean.num_detectors < full.num_detectors
+        obs_lines = [
+            ln for ln in str(lean).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
+        ]
+        assert len(obs_lines) == 1
+        raw = lean.compile_sampler().sample(shots=8).astype(np.uint8)
+        n_meas = raw.shape[1]
+        offs = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
+        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1)
+        assert float(obs0.mean()) == want
+
+
+def test_single_y_non_destructive_rejects_memory_logical() -> None:
+    """Survivor-memory needs the destructive readout; combining is an error."""
+    from qldpc.circuits.surgery import build_single_y_ppm_circuit
+    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+
+    code, x, z = _bb_y_pair(overlap=1)
+    yg = build_y_gadget(code, x=x, z=z)
+    with pytest.raises(ValueError, match="destructive_measure_data"):
+        build_single_y_ppm_circuit(
+            yg, rounds=3, data_init=None, memory_logical=0, destructive_measure_data=False
+        )
 
 
 def test_single_y_force_obs0_conflicts_with_memory_logical() -> None:

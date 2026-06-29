@@ -128,26 +128,26 @@ def _surgery_qubit_coordinates(
 ) -> stim.Circuit:
     """Emit QUBIT_COORDS in surgery's per-role semantic lane layout.
 
-    Symbols: V₀ → support; ancillas Q' → Q_prime; S'_meas rows (= S_X'); S'_comp rows (= ∂_0).
+    Symbols: V₀ → support; ancillas Q' → Q_prime. Each check family splits into
+    the original code checks vs the new merge checks added by the gadget (we do
+    NOT distinguish measured S' rows from gauge ∂_0 — both are "new checks").
 
-    Lanes:
+    Lanes are Pauli-type-keyed and basis-independent (the SAME rule the Y mixed
+    layout ``_mixed_basis_qubit_coords`` uses)::
+
       y=0  data qubits         (originally data + κ + bridge in qubit_ids.data
                                 slot; we split them across y=0/1/6 here).
       y=1  ancilla qubits (Q')
-      y=2  data H_X ancillas   (checks_x[:m_X])
-      y=3  S'_meas ancillas (= S_X' rows)
-                               (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
-      y=4  data H_Z ancillas   (checks_z[:m_Z])
-      y=5  S'_comp ancillas (= G rows)
-                               (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
+      y=2  original X-checks    (H_X = checks_x[:m_X])
+      y=3  new X-checks         (checks_x[m_X:], any X-type merge ancillas)
+      y=4  original Z-checks    (H_Z = checks_z[:m_Z])
+      y=5  new Z-checks         (checks_z[m_Z:], any Z-type merge ancillas)
       y=6  bridge data (adapter qubits; joint PPM only)
       y=7  bridge cycle ancillas (joint PPM only)
 
-    For basis=X, y is monotonic in qubit ID order (ids 0..6→y=0, 7..9→y=1,
-    10..12→y=2, 13..15→y=3, 16..18→y=4, 19→y=5), so QUBIT_COORDS lines in
-    the stringified circuit dump appear in increasing y order. basis=Z
-    breaks monotonicity because S_X' and G swap matrix slots, but the lane
-    numbers remain stable: S'_meas always y=3, S'_comp always y=5.
+    The lane is fixed by Pauli TYPE only. This keeps X, Z, ZZ-joint, and Y
+    measurements on one convention — lanes 2/3 are always the X-check family
+    (original/new), lanes 4/5 the Z-check family.
 
     `joint=None` → single PPM. Otherwise pass (g_r, bridge, intercode).
     """
@@ -216,49 +216,31 @@ def _surgery_qubit_coordinates(
             (i, 6),
         )
 
-    # X-check ancillas: data H_X on y=2, then either S_X' on y=3 (basis=X) or G on y=5 (basis=Z).
+    # Check ancillas are Pauli-type-keyed (same rule for basis=X, basis=Z, and
+    # the Y mixed layout): each check family splits into the original code checks
+    # and the new merge checks. Original H_X on y=2 and all new X-type checks on
+    # y=3; original H_Z on y=4 and all new Z-type checks on y=5. The new checks
+    # are just the merge ancillas past the originals (the S'/∂_0 measured-vs-gauge
+    # split is irrelevant to the lane — only Pauli type matters); cycle ancillas,
+    # if any, are peeled off to y=7 below.
     is_basis_x = g_l.basis is Pauli.X
     m_X_total = m_X_l + m_X_r
+    m_Z_total = m_Z_l + m_Z_r
     n_meas_total = n_meas_l + n_meas_r
     n_gauge_total = n_gauge_l + n_gauge_r
+    # New (non-cycle) checks past the originals in each array.
+    n_new_x = n_meas_total if is_basis_x else n_gauge_total
+    n_new_z = n_gauge_total if is_basis_x else n_meas_total
 
     for i in range(m_X_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_x[i], (i, 2))
-    if is_basis_x:
-        # S_X' rows on y=3 (within checks_x)
-        for i in range(n_meas_total):
-            circuit.append(
-                "QUBIT_COORDS",
-                qubit_ids.checks_x[m_X_total + i],
-                (i, 3),
-            )
-    else:
-        # G rows on y=5 (within checks_x for basis=Z)
-        for i in range(n_gauge_total):
-            circuit.append(
-                "QUBIT_COORDS",
-                qubit_ids.checks_x[m_X_total + i],
-                (i, 5),
-            )
+    for i in range(n_new_x):
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_x[m_X_total + i], (i, 3))
 
-    # Z-check ancillas: data H_Z on y=4, then either G on y=5 (basis=X) or S_X' on y=3 (basis=Z).
-    m_Z_total = m_Z_l + m_Z_r
     for i in range(m_Z_total):
         circuit.append("QUBIT_COORDS", qubit_ids.checks_z[i], (i, 4))
-    if is_basis_x:
-        for i in range(n_gauge_total):
-            circuit.append(
-                "QUBIT_COORDS",
-                qubit_ids.checks_z[m_Z_total + i],
-                (i, 5),
-            )
-    else:
-        for i in range(n_meas_total):
-            circuit.append(
-                "QUBIT_COORDS",
-                qubit_ids.checks_z[m_Z_total + i],
-                (i, 3),
-            )
+    for i in range(n_new_z):
+        circuit.append("QUBIT_COORDS", qubit_ids.checks_z[m_Z_total + i], (i, 5))
 
     # Joint PPM: bridge cycle ancillas get their own lane y=7 (a check role,
     # kept off the bridge-data row y=6). Using x=i makes the qubit coord equal
@@ -287,11 +269,13 @@ def _check_lane_index_map(
 ) -> dict[int, tuple[int, int]]:
     """Build a {check_id: (lane, idx)} map matching the QUBIT_COORDS layout.
 
-    Lanes for checks (idx is x position within lane):
-      lane=2: data H_X check ancillas (checks_x[:m_X_total])
-      lane=3: S_X' check ancillas (basis=X: checks_x[m_X:]; basis=Z: checks_z[m_Z:])
-      lane=4: data H_Z check ancillas (checks_z[:m_Z_total])
-      lane=5: G check ancillas (basis=X: checks_z[m_Z:]; basis=Z: checks_x[m_X:])
+    Pauli-type-keyed, basis-independent (mirrors ``_surgery_qubit_coordinates``);
+    each check family splits into original code checks vs new merge checks
+    (measured-vs-gauge is not distinguished — both are new checks):
+      lane=2: original X-checks H_X (checks_x[:m_X_total])
+      lane=3: new X-checks (checks_x[m_X:], any X-type merge ancillas)
+      lane=4: original Z-checks H_Z (checks_z[:m_Z_total])
+      lane=5: new Z-checks (checks_z[m_Z:], any Z-type merge ancillas)
       lane=7: bridge cycle check ancillas (joint PPM only; lane=6 = bridge data).
     """
     is_basis_x = gadget.basis is Pauli.X
@@ -320,18 +304,15 @@ def _check_lane_index_map(
     for i in range(m_Z_total):
         result[qubit_ids.checks_z[i]] = (4, i)
 
-    if is_basis_x:
-        # S_X' on lane=3 in checks_x[m_X:]; G on lane=5 in checks_z[m_Z:]
-        for i in range(n_meas_total):
-            result[qubit_ids.checks_x[m_X_total + i]] = (3, i)
-        for i in range(n_gauge_total):
-            result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
-    else:
-        # G on lane=5 in checks_x[m_X:]; S_X' on lane=3 in checks_z[m_Z:]
-        for i in range(n_gauge_total):
-            result[qubit_ids.checks_x[m_X_total + i]] = (5, i)
-        for i in range(n_meas_total):
-            result[qubit_ids.checks_z[m_Z_total + i]] = (3, i)
+    # Pauli-type-keyed: all new X-checks (checks_x past H_X) on lane 3, all new
+    # Z-checks (checks_z past H_Z) on lane 5 — same as the QUBIT_COORDS layout.
+    # n_new_x/n_new_z exclude the cycle rows, routed to lane 7 below.
+    n_new_x = n_meas_total if is_basis_x else n_gauge_total
+    n_new_z = n_gauge_total if is_basis_x else n_meas_total
+    for i in range(n_new_x):
+        result[qubit_ids.checks_x[m_X_total + i]] = (3, i)
+    for i in range(n_new_z):
+        result[qubit_ids.checks_z[m_Z_total + i]] = (5, i)
 
     # Joint PPM bridge cycle ancillas on lane=7 (lane=6 holds the bridge data).
     if joint is not None:
@@ -351,6 +332,9 @@ def build_single_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | None = None,
+    destructive_measure_data: bool = True,
+    single_sector: bool = False,
+    block_observables: bool = False,
 ) -> stim.Circuit:
     """Cain §III.A single-PPM measurement circuit for `gadget`.
 
@@ -369,7 +353,38 @@ def build_single_ppm_circuit(
 
     ``data_init`` (optional): per-data-qubit init override; see
     ``_surgery_state_prep`` for the character-to-state mapping.
+
+    ``destructive_measure_data`` (default True): when True the data is read out
+    destructively at the end (emitting obs1 + the destructive final detectors).
+    When False, the circuit is **detach-only / non-destructive** — the κ ancillas
+    are still measured (the split that restores the bare code) but the data qubits
+    are left encoded. The logical result is still obs0 (the in-circuit last-round
+    meas-check product, fixed before detach), so obs1 and the destructive final
+    detectors are dropped and the detector count drops accordingly.
+
+    ``single_sector`` (default False): emit DETECTORs for the measured-basis sector
+    only (X-checks for X̄, Z-checks for Z̄), dropping the complementary sector. obs0
+    = X̄/Z̄ is flipped solely by the opposite single error type, which fires the
+    measured-basis sector, so this preserves obs0's fault distance exactly while
+    shrinking the DEM ~8× (the complementary detectors carried only correlated
+    soft-info + off-basis correction). It does NOT correct the complementary error
+    type on the data, so it is valid for an isolated obs0 readout/LER but not when
+    the merged register must be handed back intact. CSS-type PPM only (X̄ or Z̄);
+    inapplicable to Ȳ / mixed joints, which need both sectors.
+
+    ``block_observables`` (default False): emit one OBSERVABLE_INCLUDE per logical
+    operator of ``gadget.code`` (the full logical block, read from the destructive
+    data measurement), instead of the single measured-operator obs0/obs1. This is
+    the block-error convention used for the idling baseline (get_memory_experiment)
+    and by Cain et al. arXiv:2603.28627 Ext. Data Fig. 1 ("failure = any logical
+    Pauli error"), so a surgery-vs-idling block-error-per-cycle comparison is
+    apples-to-apples. Requires ``destructive_measure_data=True``.
     """
+    if block_observables and not destructive_measure_data:
+        raise ValueError(
+            "block_observables=True requires destructive_measure_data=True "
+            "(the data readout is needed to infer all logical operators)"
+        )
     merged_code = _gadget_merged_csscode(gadget)
     qubit_ids = QubitIDs.from_code(merged_code)
     n_data = gadget.code.num_qudits
@@ -390,6 +405,7 @@ def build_single_ppm_circuit(
         merged_code,
         num_rounds=rounds,
         qubit_ids=qubit_ids,
+        single_sector=single_sector,
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
@@ -398,13 +414,16 @@ def build_single_ppm_circuit(
         ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
+        destructive_measure_data=destructive_measure_data,
     )
-    circuit += _surgery_final_detectors(
-        gadget,
-        merged_code,
-        qubit_ids,
-        measurement_record=measurement_record,
-    )
+    if destructive_measure_data:
+        circuit += _surgery_final_detectors(
+            gadget,
+            merged_code,
+            qubit_ids,
+            measurement_record=measurement_record,
+            single_sector=single_sector,
+        )
 
     m_X, m_Z, n_V = (
         gadget.code.matrix_x.shape[0],
@@ -422,6 +441,8 @@ def build_single_ppm_circuit(
         data_ids=data_ids,
         support_indices=gadget.support,
         measurement_record=measurement_record,
+        destructive_measure_data=destructive_measure_data,
+        block_observables=block_observables,
     )
 
     if noise_model is not None:
@@ -712,6 +733,7 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | tuple[str, ...] | list[str] | None = None,
+    destructive_measure_data: bool = True,
 ) -> tuple[stim.Circuit, QuditCode]:
     """Joint-PPM circuit for same-basis logical measurement (X̄_l⊗X̄_r / Z̄_l⊗Z̄_r).
 
@@ -742,6 +764,11 @@ def build_joint_ppm_circuit(
     code exists — joint PPMs are same-type only (Cross, He, Rall, Yoder
     arXiv:2407.18393). Use single-qubit Ȳ surgery
     (``build_single_y_ppm_circuit``) for mixed / non-CSS logical measurements.
+
+    ``destructive_measure_data`` (default True): when False, detach-only /
+    non-destructive — the κ + bridge ancillas are measured (the split) but the
+    data is left encoded. obs0 (the in-circuit Z̄⊗Z̄ / X̄⊗X̄ readout) is still
+    emitted; obs1 and the destructive final detectors are dropped.
     """
     if bridge.basis_l is not bridge.basis_r:
         raise NotImplementedError(
@@ -755,6 +782,7 @@ def build_joint_ppm_circuit(
     return _build_joint_ppm_circuit_same_basis(
         g_l, g_r, bridge, joint_code,
         rounds=rounds, noise_model=noise_model, data_init=data_init,
+        destructive_measure_data=destructive_measure_data,
     )
 
 
@@ -767,6 +795,7 @@ def _build_joint_ppm_circuit_same_basis(
     rounds: int,
     noise_model: NoiseModel | None,
     data_init: str | tuple[str, ...] | list[str] | None,
+    destructive_measure_data: bool = True,
 ) -> tuple[stim.Circuit, QuditCode]:
     """Original same-basis joint PPM pipeline (CSS merged code)."""
     qubit_ids = QubitIDs.from_code(joint_code)
@@ -816,14 +845,16 @@ def _build_joint_ppm_circuit_same_basis(
         ancilla_ids=Q_prime_ids,
         bridge_ids=bridge_ids,
         measurement_record=measurement_record,
+        destructive_measure_data=destructive_measure_data,
     )
-    circuit += _surgery_final_detectors(
-        g_l,
-        joint_code,
-        qubit_ids,
-        measurement_record=measurement_record,
-        joint=(g_r, bridge, intercode),
-    )
+    if destructive_measure_data:
+        circuit += _surgery_final_detectors(
+            g_l,
+            joint_code,
+            qubit_ids,
+            measurement_record=measurement_record,
+            joint=(g_r, bridge, intercode),
+        )
 
     # S_X'^s check IDs: data H_X^(l) rows occupy first mX_l indices in
     # qubit_ids.checks_x, then m_X_r (inter-code), then S_X'^l, then S_X'^r.
@@ -849,6 +880,7 @@ def _build_joint_ppm_circuit_same_basis(
         data_ids=data_ids,
         support_indices=support_combined,
         measurement_record=measurement_record,
+        destructive_measure_data=destructive_measure_data,
     )
 
     if noise_model is not None:
@@ -969,12 +1001,21 @@ def _surgery_qec_cycle(
     qubit_ids: QubitIDs,
     *,
     joint: tuple[GadgetLayout, Bridge, bool] | None = None,
+    single_sector: bool = False,
 ) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
     """num_rounds of merged-code SE; round-1 detectors only for reliable checks.
 
     Single-PPM (``joint=None``) and joint-PPM (``joint=(g_r, bridge,
     intercode)``) share one round loop; only the reliable-check classifier and
     the check→lane map differ by whether the right gadget + bridge participate.
+
+    ``single_sector`` (CSS-type PPM only): emit DETECTORs for the measured-basis
+    checks alone (``checks_x`` for X̄, ``checks_z`` for Z̄), dropping the
+    complementary sector. All checks are still *measured* (the merge needs them);
+    only their detectors are skipped. Valid because obs0 = X̄/Z̄ is flipped solely
+    by the opposite single error type, which fires the measured-basis sector — so
+    the complementary detectors carry no obs0 fault distance, only correlated
+    soft-info / off-basis error correction (arXiv:2410.02753 §3).
     """
     strategy = EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
@@ -990,6 +1031,13 @@ def _surgery_qec_cycle(
         )
         lane_idx = _check_lane_index_map(gadget, qubit_ids, joint=joint)
     all_check_ids = qubit_ids.check
+    # Checks whose syndrome becomes a DETECTOR. single_sector keeps only the
+    # measured-basis sector; all checks are still measured by ``one_round``.
+    if single_sector:
+        measured = set(qubit_ids.checks_x if gadget.basis is Pauli.X else qubit_ids.checks_z)
+        detector_check_ids = tuple(cid for cid in all_check_ids if cid in measured)
+    else:
+        detector_check_ids = tuple(all_check_ids)
 
     circuit = stim.Circuit()
     measurement_record = MeasurementRecord()
@@ -998,20 +1046,20 @@ def _surgery_qec_cycle(
     # Round 1: emit DETECTORs only for reliable checks.
     circuit += one_round
     measurement_record.append(round_measurement_record)
-    for check_id in all_check_ids:
+    for check_id in detector_check_ids:
         if check_id in reliable:
             lane, idx = lane_idx[check_id]
             circuit.append(
                 "DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0)
             )
-    reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
+    reliable_in_order = [cid for cid in detector_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
 
     if num_rounds > 1:
         repeat_circuit = one_round.copy()
         measurement_record.append(round_measurement_record)
         repeat_circuit.append("SHIFT_COORDS", [], (0, 0, 1))
-        for check_id in all_check_ids:
+        for check_id in detector_check_ids:
             lane, idx = lane_idx[check_id]
             repeat_circuit.append(
                 "DETECTOR",
@@ -1024,7 +1072,7 @@ def _surgery_qec_cycle(
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
         measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
         detector_record.append(
-            {cid: dd for dd, cid in enumerate(all_check_ids)},
+            {cid: dd for dd, cid in enumerate(detector_check_ids)},
             repeat=num_rounds - 1,
         )
 
@@ -1038,8 +1086,15 @@ def _surgery_observable(
     data_ids: tuple[int, ...],
     support_indices: tuple[int, ...],
     measurement_record: MeasurementRecord,
+    destructive_measure_data: bool = True,
+    block_observables: bool = False,
 ) -> stim.Circuit:
-    """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
+    """Emit OBSERVABLE_INCLUDE entries for the surgery PPM.
+
+    ``block_observables=True`` overrides obs0/obs1 and instead emits one observable
+    per logical operator of ``gadget.code`` (the full logical block), read from the
+    destructive data measurement via ``get_observables`` — the block-error
+    convention (Cain et al. arXiv:2603.28627 Ext. Data Fig. 1). Otherwise emits:
 
     obs0 — physical readout of the logical Pauli. The merged stabilizer group
         satisfies the single-round identity Z̄ = ∏_{v ∈ support} A_v (Webster,
@@ -1057,6 +1112,19 @@ def _surgery_observable(
     For LER sweeps and any noisy run, keep ONLY obs0 via
     ``keep_only_observable(circuit, keep_idx=0)``.
     """
+    if block_observables:
+        # Full logical block from the destructive data readout: one observable per
+        # logical operator of the bare code, ordered data qubit 0..n-1 (data_ids[i]
+        # is code qubit i). Same machinery as get_memory_experiment's block readout.
+        from qldpc.circuits.memory.memory import get_observables
+
+        data_targets = [measurement_record.get_target_rec(d) for d in data_ids]
+        return get_observables(
+            gadget.code,
+            data_qubits=list(range(len(data_ids))),
+            basis=gadget.basis,
+            on_measurements=data_targets,
+        )
     # Precondition: every meas-check ancilla must have been measured during
     # the QEC cycle. Detach/readout only touches data + κ + bridge, never the
     # meas-check ancillas, so ``get_target_rec(cid)`` (default -1) is
@@ -1070,6 +1138,8 @@ def _surgery_observable(
     circuit = stim.Circuit()
     meas_targets = [measurement_record.get_target_rec(cid) for cid in meas_check_ids]
     circuit.append("OBSERVABLE_INCLUDE", meas_targets, 0)
+    if not destructive_measure_data:
+        return circuit  # detach-only: no destructive data to cross-check (obs1)
     data_targets = [measurement_record.get_target_rec(data_ids[i]) for i in support_indices]
     circuit.append("OBSERVABLE_INCLUDE", data_targets, 1)
     return circuit
@@ -1082,6 +1152,7 @@ def _surgery_final_detectors(
     *,
     measurement_record: MeasurementRecord,
     joint: tuple[GadgetLayout, Bridge, bool] | None = None,
+    single_sector: bool = False,
 ) -> stim.Circuit:
     """Emit DETECTORs for reliable stabs inferable from final readouts.
 
@@ -1089,6 +1160,9 @@ def _surgery_final_detectors(
     For basis=Z: data H_Z (from Mz data) + G (from Mx κ).
     Each DETECTOR XORs ⊕(final M-record on stab support) ⊕ last-round syndrome.
     Joint-PPM (``joint=(g_r, bridge, intercode)``) spans both gadgets' data rows.
+
+    ``single_sector`` drops the complementary-basis gauge (G) detectors, matching
+    the QEC-cycle filter — only the measured-basis data stabs are inferred.
     """
     m_X = gadget.code.matrix_x.shape[0]
     m_Z = gadget.code.matrix_z.shape[0]
@@ -1113,13 +1187,15 @@ def _surgery_final_detectors(
     if gadget.basis is Pauli.X:
         for kk in range(m_X):
             _emit_detector(HX[kk], qubit_ids.checks_x[kk])
-        for kk in range(m_Z, HZ.shape[0]):
-            _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
+        if not single_sector:  # complementary-basis gauge G (Mz κ)
+            for kk in range(m_Z, HZ.shape[0]):
+                _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
     else:  # Pauli.Z (symmetric: S_X' in HZ, G in HX)
         for kk in range(m_Z):
             _emit_detector(HZ[kk], qubit_ids.checks_z[kk])
-        for kk in range(m_X, HX.shape[0]):
-            _emit_detector(HX[kk], qubit_ids.checks_x[kk])
+        if not single_sector:  # complementary-basis gauge G (Mx κ)
+            for kk in range(m_X, HX.shape[0]):
+                _emit_detector(HX[kk], qubit_ids.checks_x[kk])
 
     return circuit
 
@@ -1131,14 +1207,22 @@ def _surgery_detach_and_readout(
     ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...],
     measurement_record: MeasurementRecord,
+    destructive_measure_data: bool = True,
 ) -> stim.Circuit:
-    """Detach + final data measure (surgery step 3). Mκ then SHIFT_COORDS then Mdata."""
+    """Detach the κ/bridge ancillas; optionally destructively measure the data.
+
+    Mκ (the split that returns the bare code) always runs. When
+    ``destructive_measure_data`` is True the data is then measured destructively
+    (SHIFT_COORDS then Mdata); when False the data is left encoded (detach-only).
+    """
     circuit = stim.Circuit()
     detach_qubits = list(ancilla_ids) + list(bridge_ids)
     ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
     data_op = "MX" if gadget.basis is Pauli.X else "M"
     circuit.append(ancilla_op, detach_qubits)
     measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
+    if not destructive_measure_data:
+        return circuit  # detach-only: leave the data encoded
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append(data_op, list(data_ids))
     measurement_record.append({q: i for i, q in enumerate(data_ids)})

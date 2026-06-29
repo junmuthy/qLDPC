@@ -348,6 +348,110 @@ def test_build_single_ppm_circuit_noiseless_no_detector_fires(basis: PauliXZ) ->
     )
 
 
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+@pytest.mark.parametrize("destructive", [False, True])
+def test_single_sector_keeps_only_measured_basis(basis: PauliXZ, destructive: bool) -> None:
+    """single_sector=True keeps only the measured-basis detectors (lanes 2,3 for X̄;
+    4,5 for Z̄), preserving the observable while shrinking the DEM. The complementary
+    sector is still physically measured (the merge needs it) — only its DETECTORs drop.
+
+    Valid only for CSS-type PPM; obs0 = X̄/Z̄ is flipped solely by the opposite single
+    error type, which fires the measured-basis sector (Bombin/Cohen homological
+    measurement, arXiv:2410.02753 §3).
+    """
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    op = code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X else code.get_logical_ops(Pauli.Z)[0]
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    noise = DepolarizingNoiseModel(0.01)
+    kw = dict(rounds=3, noise_model=noise, destructive_measure_data=destructive)
+    full = build_single_ppm_circuit(g, **kw)
+    single = build_single_ppm_circuit(g, single_sector=True, **kw)
+
+    assert single.num_observables == full.num_observables  # observable preserved
+    full_dem, single_dem = full.detector_error_model(), single.detector_error_model()
+    assert single_dem.num_detectors < full_dem.num_detectors
+    assert single_dem.num_errors < full_dem.num_errors
+    kept = {2, 3} if basis is Pauli.X else {4, 5}  # measured-basis lanes only
+    lanes = {int(c[1]) for c in single.get_detector_coordinates().values()}
+    assert lanes <= kept, f"single_sector kept complementary-basis lanes {lanes - kept}"
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_single_sector_preserves_observable_detectability(basis: PauliXZ) -> None:
+    """Dropping the complementary sector leaves every obs0-flipping error detectable:
+    no error flips the observable with an empty detector set (fault distance intact)."""
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    op = code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X else code.get_logical_ops(Pauli.Z)[0]
+    op_arr = np.asarray(op).astype(np.uint8)
+    g = build_gadget(code, op_arr, basis=basis)
+    noise = DepolarizingNoiseModel(0.01)
+    single = build_single_ppm_circuit(
+        g, rounds=3, noise_model=noise, destructive_measure_data=False, single_sector=True
+    )
+    dem = single.detector_error_model()
+    undetectable = sum(
+        1
+        for e in dem.flattened()
+        if e.type == "error"
+        and any(t.is_logical_observable_id() for t in e.targets_copy())
+        and not any(t.is_relative_detector_id() for t in e.targets_copy())
+    )
+    assert undetectable == 0, f"{undetectable} observable-flipping errors became undetectable"
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_single_ppm_circuit_block_observables(basis: PauliXZ) -> None:
+    """block_observables=True emits the full logical block — one observable per logical
+    operator (k = code.dimension), read from the destructive data measurement — instead
+    of just the measured operator obs0. This is the Cain et al. arXiv:2603.28627
+    Ext. Data Fig. 1 'block error' convention (failure = ANY logical Pauli error), the
+    same metric get_memory_experiment uses for the idling baseline.
+    """
+    import sympy
+
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)  # [[36, 8]]
+    op = code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X else code.get_logical_ops(Pauli.Z)[0]
+    g = build_gadget(code, np.asarray(op).astype(np.uint8), basis=basis)
+    circuit = build_single_ppm_circuit(
+        g,
+        rounds=3,
+        noise_model=None,
+        destructive_measure_data=True,
+        single_sector=True,
+        block_observables=True,
+    )
+    # full block: one observable per logical operator, not obs0/obs1
+    assert circuit.num_observables == code.dimension
+    # noiseless: every block observable is deterministic (= 0)
+    _, obs = circuit.compile_detector_sampler().sample(shots=32, separate_observables=True)
+    assert not obs.any(), f"basis={basis}: block observable fired noiselessly ({obs.sum()})"
+
+
+def test_block_observables_requires_destructive_readout() -> None:
+    """block_observables needs the destructive data measurement to infer all logicals."""
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    op = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, op, basis=Pauli.X)
+    with pytest.raises(ValueError, match="block_observables"):
+        build_single_ppm_circuit(g, rounds=2, destructive_measure_data=False, block_observables=True)
+
+
 def test_stitch_intercode_basis_x_joint_logical_in_stabilizer() -> None:
     """(x_1, x_2, 0, 0, 0) lies in rowspan(H_X^merged) — joint X̄_l X̄_r is a stabilizer."""
     from qldpc.circuits.surgery.bridge import build_bridge
@@ -871,6 +975,83 @@ def test_qubit_coords_layout_steane() -> None:
     assert coord_map == expected, f"\nexpected: {expected}\ngot:      {coord_map}"
 
 
+def _data_measured(circuit: stim.Circuit, n_data: int) -> set[int]:
+    """Real-data qubit IDs (< n_data) appearing under any measurement op."""
+    return {
+        t.qubit_value
+        for inst in circuit.flattened()
+        if inst.name in ("M", "MX", "MY", "MZ")
+        for t in inst.targets_copy()
+        if t.is_qubit_target and t.qubit_value < n_data
+    }
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_single_ppm_non_destructive_detach_only(basis: PauliXZ) -> None:
+    """``destructive_measure_data=False`` detaches κ but leaves the data encoded.
+
+    Non-destructive (detach-only) mode: the κ ancillas are still measured (the
+    split), but the real data qubits are not. obs0 (the logical readout) is still
+    emitted from the in-circuit meas-checks; obs1 (the destructive cross-check)
+    and the destructive final detectors are dropped, so the detector count drops.
+    """
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    log = np.asarray(code.get_logical_ops(basis)[0]).astype(np.uint8)
+    g = build_gadget(code, log, basis=basis)
+
+    full = build_single_ppm_circuit(g, rounds=2, noise_model=None)
+    lean = build_single_ppm_circuit(
+        g, rounds=2, noise_model=None, destructive_measure_data=False
+    )
+
+    assert _data_measured(lean, code.num_qudits) == set()  # data left encoded
+    assert lean.num_observables == 1  # obs0 only (obs1 dropped)
+    assert lean.num_detectors < full.num_detectors  # destructive detectors gone
+    lean.detector_error_model()  # still compiles
+
+
+def test_single_ppm_destructive_default_unchanged() -> None:
+    """``destructive_measure_data=True`` (default) is byte-identical to omitting it."""
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    a = build_single_ppm_circuit(g, rounds=2, noise_model=None)
+    b = build_single_ppm_circuit(
+        g, rounds=2, noise_model=None, destructive_measure_data=True
+    )
+    assert str(a) == str(b)
+
+
+def test_joint_ppm_non_destructive_detach_only() -> None:
+    """ZZ joint: ``destructive_measure_data=False`` detaches but keeps data encoded."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    z2 = np.asarray(c2.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g1 = build_gadget(c1, z1, basis=Pauli.Z)
+    g2 = build_gadget(c2, z2, basis=Pauli.Z)
+    bridge = build_bridge(g1, g2)
+
+    full, _ = build_joint_ppm_circuit(g1, g2, bridge, rounds=2, noise_model=None)
+    lean, _ = build_joint_ppm_circuit(
+        g1, g2, bridge, rounds=2, noise_model=None, destructive_measure_data=False
+    )
+    n_data = c1.num_qudits + c2.num_qudits  # left+right data qubits
+    assert _data_measured(lean, n_data) == set()  # data left encoded
+    assert lean.num_observables == 1  # obs0 only (obs1 dropped)
+    assert lean.num_detectors < full.num_detectors
+    lean.detector_error_model()  # still compiles
+
+
 def test_detector_coords_steane_round_1_reliable() -> None:
     """Steane single-PPM round-1 reliable detectors have lane ∈ {2, 5}.
 
@@ -906,28 +1087,22 @@ def test_detector_coords_steane_round_1_reliable() -> None:
     assert detector_coords == expected, f"\nexpected: {expected}\ngot:      {detector_coords}"
 
 
-def test_detector_coords_basis_z_preserves_lane_semantics() -> None:
-    """basis=Z gadget: round-1 reliable detector lanes ⊆ {4, 5}; no lane 2 or 3 leakage.
+def test_detector_coords_basis_z_pauli_type_keyed_lanes() -> None:
+    """basis=Z gadget: lanes are Pauli-type-keyed, NOT measured-vs-gauge keyed.
 
-    For Steane logical-Z under basis=Pauli.Z, G happens to be empty
-    (F = H_X[C_0, V_0] is invertible for this specific fixture), so
-    lane 5 does not actually appear. What this test pins down is the
-    **negative-direction basis symmetry**: the lane map must NOT route
-    G ancillas to lane 2 (data H_X) nor χ ancillas to lane 3 in the
-    basis=Z basis-swap. If `_check_lane_index_map` mis-classified G as
-    data H_X when basis=Z, lane 2 would appear in the reliable detectors
-    (since G ancillas live in checks_x[m_X:] for basis=Z and ARE
-    deterministically +1 on the |0⟩^n protocol-default init — but G is
-    empty in this fixture, so the leak would also be empty; we use this
-    test as a guard against any future regression where G becomes
-    non-empty AND the basis-swap is broken).
+    Under the unified convention (matching basis=X, the ZZ joint, and the Y
+    layout), each check family splits by Pauli type into original vs new rows:
+    lane 2 = H_X, lane 3 = X-type extras (the X-gauge G for basis=Z), lane 4 =
+    H_Z, lane 5 = Z-type extras (the measured S_Z'). So S_Z' lands on lane 5 —
+    NOT lane 3 — even though it is the measured surgery stabilizer.
 
-    For Steane Z̄ (3-qubit support, 3 X-checks, F full-rank):
-      - reliable_x = G rows (empty)
-      - reliable_z = data H_Z rows (3 of them, lane=4)
+    For Steane logical-Z (3-qubit support, 3 X/Z-checks): G = H_X[C_0, V_0] is
+    full-rank ⇒ the X-gauge is empty (lane 3 absent), and the 3 S_Z' rows sit on
+    lane 5. Round-1 reliable detectors are the data H_Z rows (lane 4); S_Z' and
+    the empty G are not deterministic on the |0⟩^n protocol-default init.
 
-    DETECTOR coord order is ``(idx, lane, t)`` per stim convention; lane
-    is at index 1 of the tuple, unchanged from the previous ordering.
+    DETECTOR coord order is ``(idx, lane, t)`` per stim convention; the QUBIT_COORDS
+    coord is ``(idx, lane)`` — both carry the lane at the same slot.
     """
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -936,6 +1111,24 @@ def test_detector_coords_basis_z_preserves_lane_semantics() -> None:
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
     g = build_gadget(code, z, basis=Pauli.Z)
     circuit = build_single_ppm_circuit(g, rounds=1, noise_model=None)
+
+    # The measured S_Z' rows (checks_z past the m_Z original H_Z rows) are
+    # Z-type, so they MUST be on lane 5 (Pauli-type-keyed), not lane 3.
+    m_Z = code.matrix_z.shape[0]
+    n_meas = len(g.support)
+    from qldpc.circuits.surgery.circuit import QubitIDs, _gadget_merged_csscode
+
+    qubit_ids = QubitIDs.from_code(_gadget_merged_csscode(g))
+    coords = circuit.get_final_qubit_coordinates()
+    sz_prime_ids = qubit_ids.checks_z[m_Z : m_Z + n_meas]
+    assert n_meas == 3, f"Steane Z̄ has 3 S_Z' rows; got {n_meas}"
+    sz_lanes = {int(coords[cid][1]) for cid in sz_prime_ids}
+    assert sz_lanes == {5}, (
+        f"S_Z' (measured, Z-type) must be lane 5 under Pauli-type keying; got {sz_lanes}"
+    )
+    # X-gauge G is empty for this fixture ⇒ lane 3 carries no qubit.
+    lane3_ids = [q for q, (_x, y) in coords.items() if int(y) == 3]
+    assert lane3_ids == [], f"basis=Z Steane has empty X-gauge ⇒ lane 3 empty; got {lane3_ids}"
 
     detector_lanes: set[int] = set()
     for line in str(circuit).splitlines():
@@ -947,18 +1140,10 @@ def test_detector_coords_basis_z_preserves_lane_semantics() -> None:
         parts = [int(p.strip()) for p in tup.split(",")]
         detector_lanes.add(parts[1])
 
-    # Real assertions:
-    assert detector_lanes.issubset({4, 5}), (
-        f"basis=Z round-1 reliable lanes leaked outside {{4, 5}}: got {detector_lanes}"
-    )
-    assert 4 in detector_lanes, (
-        f"basis=Z must have data H_Z reliable detectors (lane=4); got {detector_lanes}"
-    )
-    assert 2 not in detector_lanes, (
-        f"basis=Z must NOT route any check to lane=2 (data H_X); got {detector_lanes}"
-    )
-    assert 3 not in detector_lanes, (
-        f"basis=Z must NOT route any check to lane=3 (χ); got {detector_lanes}"
+    # Round-1 reliable detectors are the data H_Z rows (lane 4) only.
+    assert detector_lanes == {4}, (
+        f"basis=Z round-1 reliable detectors should be data H_Z (lane 4) only; "
+        f"got {detector_lanes}"
     )
 
 
