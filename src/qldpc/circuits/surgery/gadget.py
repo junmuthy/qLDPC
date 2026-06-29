@@ -102,6 +102,8 @@ def _x_merged(
         f1T[np.arange(n_V0), np.array(support, dtype=np.int_)] = 1
     f0 = np.zeros((H_Z.shape[0], n_cols), dtype=np.uint8)
     if n_C0:
+        # Only the first |C₀| columns map to a backing check; the boost-added κ
+        # (data_checks[n_C0:] == -1 sentinels) keep all-zero f_0 columns.
         f0[np.array(data_checks[:n_C0], dtype=np.int_), np.arange(n_C0)] = 1
     HX = np.block(
         [[H_X, np.zeros((H_X.shape[0], n_cols), dtype=np.uint8)], [f1T, d1]]
