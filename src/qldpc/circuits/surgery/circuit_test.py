@@ -2006,3 +2006,100 @@ def test_block_observable_targets_adds_qprime_records_for_deformation():
     targets = _block_observable_targets(merged, Pauli.Z, w, n_data=1, col_record=col_record)
     # deformed rep must add the Q' column (col 1) so it commutes with the X-check
     assert set(targets) == {stim.target_rec(-2), stim.target_rec(-1)}
+
+
+# --- Task 6: single-PPM experiment_basis observables (k+1 / k-1) ---
+
+
+def _bb_36_8_code() -> object:
+    """In-repo BBCode [[36, 8]] (dimension 8) — the k>=2 fixture used elsewhere in
+    this file (see test_build_single_ppm_circuit_block_observables)."""
+    import sympy
+
+    xs, ys = sympy.symbols("x y")
+    return codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+
+
+def test_single_ppm_match_basis_emits_k_plus_1_observables() -> None:
+    """Match-basis single PPM: k block observables + 1 time-like L = k+1."""
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()  # k=1
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, x, basis=Pauli.X)
+    circ = build_single_ppm_circuit(g, rounds=3, experiment_basis=Pauli.X)
+    assert circ.num_observables == code.dimension + 1  # k + t, t=1
+
+
+def test_single_ppm_opposite_basis_emits_k_minus_1_observables() -> None:
+    """Opposite-basis single PPM: only the (k-1) block logicals commuting with L."""
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    bb = _bb_36_8_code()  # dimension 8 -> k-1 = 7
+    xop = np.asarray(bb.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    gbb = build_gadget(bb, xop, basis=Pauli.X)
+    circ = build_single_ppm_circuit(gbb, rounds=3, experiment_basis=Pauli.Z)
+    assert circ.num_observables == bb.dimension - 1
+
+
+def test_single_ppm_observables_deterministic_noiseless() -> None:
+    """Every observable (block + time-like L) is deterministic with no noise."""
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    xop = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g = build_gadget(code, xop, basis=Pauli.X)
+    circ = build_single_ppm_circuit(g, rounds=3, experiment_basis=Pauli.X)
+    sampler = circ.compile_detector_sampler()
+    _, obs = sampler.sample(shots=64, separate_observables=True)
+    assert not obs.any()  # every observable deterministic (=0) with no noise
+
+
+# --- Task 7: joint-PPM experiment_basis observables (k_l+k_r+1 / k_l+k_r-1) ---
+
+
+@pytest.fixture
+def _steane_joint_fixture():
+    """Two [[7,1,3]] Steane patches joined by a bridge (basis=X). Returns
+    (g_l, g_r, bridge) via the repo's real joint construction path."""
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    c1, c2 = codes.SteaneCode(), codes.SteaneCode()
+    x1 = np.asarray(c1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    x2 = np.asarray(c2.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(c1, x1, basis=Pauli.X)
+    g_r = build_gadget(c2, x2, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    return g_l, g_r, bridge
+
+
+def test_joint_ppm_match_basis_emits_kl_plus_kr_plus_1(_steane_joint_fixture) -> None:
+    """Match-basis joint PPM: (k_l + k_r) block + 1 time-like L."""
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+
+    g_l, g_r, bridge = _steane_joint_fixture
+    circ, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, experiment_basis=Pauli.X)
+    assert circ.num_observables == g_l.code.dimension + g_r.code.dimension + 1
+
+
+def test_joint_ppm_opposite_basis_emits_kl_plus_kr_minus_1(_steane_joint_fixture) -> None:
+    """Opposite-basis joint PPM: (k_l + k_r - 1) block logicals commuting with L."""
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+
+    g_l, g_r, bridge = _steane_joint_fixture
+    circ, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, experiment_basis=Pauli.Z)
+    assert circ.num_observables == g_l.code.dimension + g_r.code.dimension - 1
+
+
+def test_joint_ppm_observables_deterministic_noiseless(_steane_joint_fixture) -> None:
+    """Every joint observable is deterministic with no noise."""
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+
+    g_l, g_r, bridge = _steane_joint_fixture
+    circ, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, experiment_basis=Pauli.X)
+    _, obs = circ.compile_detector_sampler().sample(shots=64, separate_observables=True)
+    assert not obs.any()
