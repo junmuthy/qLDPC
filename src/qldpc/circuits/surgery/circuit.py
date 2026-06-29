@@ -121,14 +121,20 @@ def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
     except the one whose first argument equals ``keep_idx``. Recurses into
     REPEAT blocks so observables inside loops are filtered the same way.
 
-    For surgery PPM circuits, pass ``keep_idx=0`` to retain only obs0
-    (Webster Eq. 1, the physical syndrome-based readout). obs1 is an
-    implementation cross-check that directly measures the data on V_0 and
-    is NOT part of any physical protocol — keeping it for an LER run would
-    sample the wrong distribution.
+    The CSS PPM builders (``build_single_ppm_circuit`` /
+    ``build_joint_ppm_circuit``) no longer emit the old obs0/obs1 pair; their
+    observable layout is now the Cain et al. arXiv:2603.28627 Appendix D
+    experiment set — ``k + 1`` entries in match-basis (``k`` frame-corrected
+    block logicals at indices ``0..k-1`` plus the time-like ``L`` at index ``k``)
+    or ``k - 1`` in opposite-basis (block logicals commuting with ``L``, no
+    time-like ``L``). See ``_surgery_observable`` for the exact layout.
 
-    Useful for sinter LER sweeps that compare one observable against a
-    memory-experiment baseline — sinter expects exactly one observable per task.
+    This helper survives because the **Ȳ / mixed surgery path** (``y_circuit.py``)
+    still emits a single forced Ȳ readout observable for which sinter LER sweeps
+    want exactly one observable per task. For a CSS PPM circuit, ``keep_idx=0``
+    retains block logical 0 of ``experiment_basis``; choose the index that
+    matches the baseline you are comparing against (sinter expects exactly one
+    observable per task).
     """
     out = stim.Circuit()
     for op in circuit:

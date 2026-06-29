@@ -324,41 +324,56 @@ def test_detach_readout_z_experiment_on_x_gadget_measures_data_in_z() -> None:
     assert "M " in text or "\nM" in text
 
 
-def test_surgery_observable_emits_two_observable_include() -> None:
-    """Direct unit test on _surgery_observable: emits two OBSERVABLE_INCLUDE entries.
+def test_surgery_observable_match_basis_emits_k_block_plus_time_like_L() -> None:
+    """Direct unit test on _surgery_observable (new k+1 match-basis layout).
 
-    Observable 0 = XOR of the last QEC round's meas-check records (Webster,
-    Smith, Cohen single-round identity Z̄ = ∏_v A_v, arXiv:2511.15989 §II.A).
-    Observable 1 = XOR of data records on support (destructive cross-check).
-    Asserts exactly two OBSERVABLE_INCLUDE lines are emitted with distinct
-    observable indices."""
-    from qldpc.circuits.bookkeeping import MeasurementRecord
-    from qldpc.circuits.surgery.circuit import _surgery_observable
+    Match-basis (experiment_basis == gadget.basis) emits the k block logicals of
+    experiment_basis at indices 0..k-1 (frame-corrected from the final data
+    readout) plus the time-like L (XOR of the FIRST-cycle S'_meas outcomes) at
+    index k — total k+1, per Cain et al. arXiv:2603.28627 Appendix D. For Steane
+    (k=1) that is index 0 = block X̄, index 1 = time-like L.
+    """
+    from qldpc.circuits.bookkeeping import MeasurementRecord, QubitIDs
+    from qldpc.circuits.surgery.circuit import _gadget_merged_csscode, _surgery_observable
     from qldpc.circuits.surgery.gadget import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
+    merged = _gadget_merged_csscode(g)
+    qids = QubitIDs.from_code(merged)
     n_data = code.num_qudits
-    meas_check_ids = tuple(range(100, 100 + len(g.support)))  # placeholder ids
-    data_ids = tuple(range(n_data))
-    meas_rec = MeasurementRecord()
-    # Simulate 2 rounds of meas-check measurements
-    for _ in range(2):
-        meas_rec.append({cid: i for i, cid in enumerate(meas_check_ids)})
-    # Simulate final data measurement
-    meas_rec.append({d: i for i, d in enumerate(data_ids)})
+    data_ids = qids.data[:n_data]
+    qprime_ids = qids.data[n_data:]
+    m_X = code.matrix_x.shape[0]
+    n_V = len(g.support)
+    meas_check_ids = tuple(qids.checks_x[m_X : m_X + n_V])
 
+    meas_rec = MeasurementRecord()
+    # 2 QEC rounds measure the meas-checks; then the detach measures Q' and data.
+    for _ in range(2):
+        meas_rec.append(dict.fromkeys(meas_check_ids, 0))
+    meas_rec.append(dict.fromkeys(qprime_ids, 0))
+    meas_rec.append(dict.fromkeys(data_ids, 0))
+
+    logical_ops = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
     circuit = _surgery_observable(
         g,
+        experiment_basis=Pauli.X,
+        merged_code=merged,
         meas_check_ids=meas_check_ids,
+        logical_ops=logical_ops,
+        L_support=np.asarray(g.x).astype(np.uint8),
+        n_data=n_data,
         data_ids=data_ids,
-        support_indices=g.support,
+        qprime_ids=qprime_ids,
+        bridge_ids=(),
         measurement_record=meas_rec,
     )
     text = str(circuit)
-    assert text.count("OBSERVABLE_INCLUDE") == 2  # PPM + cross-check
-    assert "(0)" in text and "(1)" in text  # two distinct observable indices
+    # k=1 block logical at index 0 + time-like L at index 1 = k+1 = 2 entries.
+    assert text.count("OBSERVABLE_INCLUDE") == code.dimension + 1
+    assert "(0)" in text and "(1)" in text  # block X̄ + time-like L
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
@@ -487,8 +502,16 @@ def test_single_sector_keeps_only_measured_basis(basis: PauliXZ, destructive: bo
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_single_sector_preserves_observable_detectability(basis: PauliXZ) -> None:
-    """Dropping the complementary sector leaves every obs0-flipping error detectable:
-    no error flips the observable with an empty detector set (fault distance intact)."""
+    """Dropping the complementary sector leaves every observable-flipping error
+    detectable: no error flips an observable with an empty detector set (fault
+    distance intact).
+
+    Re-anchored to the DESTRUCTIVE single-sector circuit. The prior
+    ``destructive_measure_data=False`` build now emits 0 observables (the Cain et
+    al. Appendix D experiment set is read from the final destructive data
+    measurement), which made the assertion vacuous. The destructive single-sector
+    build emits the k+1 match-basis set and is the meaningful fault-distance case.
+    """
     from qldpc.circuits import DepolarizingNoiseModel
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -499,8 +522,9 @@ def test_single_sector_preserves_observable_detectability(basis: PauliXZ) -> Non
     g = build_gadget(code, op_arr, basis=basis)
     noise = DepolarizingNoiseModel(0.01)
     single = build_single_ppm_circuit(
-        g, rounds=3, noise_model=noise, destructive_measure_data=False, single_sector=True
+        g, rounds=3, noise_model=noise, destructive_measure_data=True, single_sector=True
     )
+    assert single.num_observables == code.dimension + 1  # real observables to protect
     dem = single.detector_error_model()
     undetectable = sum(
         1
@@ -513,12 +537,15 @@ def test_single_sector_preserves_observable_detectability(basis: PauliXZ) -> Non
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_build_single_ppm_circuit_block_observables(basis: PauliXZ) -> None:
-    """block_observables=True emits the full logical block — one observable per logical
-    operator (k = code.dimension), read from the destructive data measurement — instead
-    of just the measured operator obs0. This is the Cain et al. arXiv:2603.28627
-    Ext. Data Fig. 1 'block error' convention (failure = ANY logical Pauli error), the
-    same metric get_memory_experiment uses for the idling baseline.
+def test_build_single_ppm_circuit_block_observables_full_k_block(basis: PauliXZ) -> None:
+    """Match-basis single PPM emits the full k-logical block + time-like L = k+1
+    observables on the k=8 BBCode [[36, 8]], all deterministic noiselessly.
+
+    The k block logicals (indices 0..k-1) are the Cain et al. arXiv:2603.28627
+    Appendix D 'block error' set (failure = ANY logical Pauli error), the same
+    metric get_memory_experiment uses for the idling baseline; the time-like L at
+    index k catches the merge's time-like errors. Replaces the removed
+    block_observables=True flag (the experiment set is now always emitted).
     """
     import sympy
 
@@ -535,25 +562,39 @@ def test_build_single_ppm_circuit_block_observables(basis: PauliXZ) -> None:
         noise_model=None,
         destructive_measure_data=True,
         single_sector=True,
-        block_observables=True,
+        experiment_basis=basis,  # match-basis -> k+1
     )
-    # full block: one observable per logical operator, not obs0/obs1
-    assert circuit.num_observables == code.dimension
-    # noiseless: every block observable is deterministic (= 0)
+    # match-basis: k block logicals (0..k-1) + time-like L (index k) = k+1
+    assert circuit.num_observables == code.dimension + 1
+    # noiseless: every emitted observable (block + L) is deterministic (= 0)
     _, obs = circuit.compile_detector_sampler().sample(shots=32, separate_observables=True)
-    assert not obs.any(), f"basis={basis}: block observable fired noiselessly ({obs.sum()})"
+    assert not obs.any(), f"basis={basis}: observable fired noiselessly ({obs.sum()})"
 
 
-def test_block_observables_requires_destructive_readout() -> None:
-    """block_observables needs the destructive data measurement to infer all logicals."""
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_single_ppm_circuit_opposite_basis_k_minus_1(basis: PauliXZ) -> None:
+    """Opposite-basis single PPM emits the k-1 block logicals commuting with L (no
+    time-like L) on the k=8 BBCode [[36, 8]], all deterministic noiselessly.
+
+    Replaces the removed block_observables flag: the opposite-basis experiment is
+    the k-t = k-1 set of Cain et al. arXiv:2603.28627 Appendix D.
+    """
+    import sympy
+
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
 
-    code = codes.SteaneCode()
-    op = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    g = build_gadget(code, op, basis=Pauli.X)
-    with pytest.raises(ValueError, match="block_observables"):
-        build_single_ppm_circuit(g, rounds=2, destructive_measure_data=False, block_observables=True)
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)  # [[36, 8]]
+    op = code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X else code.get_logical_ops(Pauli.Z)[0]
+    g = build_gadget(code, np.asarray(op).astype(np.uint8), basis=basis)
+    opp = Pauli.Z if basis is Pauli.X else Pauli.X
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=None, destructive_measure_data=True, experiment_basis=opp
+    )
+    assert circuit.num_observables == code.dimension - 1
+    _, obs = circuit.compile_detector_sampler().sample(shots=32, separate_observables=True)
+    assert not obs.any(), f"basis={basis}: opposite-basis observable fired noiselessly ({obs.sum()})"
 
 
 def test_stitch_intercode_basis_x_joint_logical_in_stabilizer() -> None:
@@ -672,15 +713,15 @@ def test_build_joint_ppm_circuit_meas_check_ids_no_UB() -> None:
     assert dets.sum() == 0
 
 
-def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
-    """Cross-check obs0 == obs1 per shot across all 4 parity inits.
+def test_build_joint_ppm_circuit_intercode_folded_cross_check() -> None:
+    """Folded cross-check (design §3.4): in a noiseless match-basis joint run the
+    time-like L (index k=k_l+k_r) equals the GF(2) sum of the block observables
+    (here X̄_l ⊕ X̄_r), across all 4 parity inits.
 
-    Previously asserted only ``obs.sum() == 0`` (via compile_detector_sampler)
-    for a single |+⟩^n init, which was vacuous: noiseless flips are 0
-    regardless of obs0's correctness, and parity=+1 trivially gave the
-    expected 0. Now uses compile_sampler + raw XOR so noiseless obs0 and
-    obs1 are the actual eigenvalue bits, and sweeps non-trivial parity inits
-    so a regression in obs0 is caught.
+    Replaces the removed obs0==obs1 mechanism. The match-basis joint emits
+    k_l+k_r+1 = 3 observables: block X̄_l (index 0), block X̄_r (index 1), and the
+    time-like joint L = X̄_l⊗X̄_r (index 2). Sweeping non-trivial parity inits
+    catches a regression in either the block readout or the time-like L.
     """
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
@@ -691,24 +732,26 @@ def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
     g_l = build_gadget(code, x, basis=Pauli.X)
     g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    for data_init in [("+", "+"), ("-", "+"), ("+", "-"), ("-", "-")]:
-        circuit, _ = build_joint_ppm_circuit(
-            g_l,
-            g_r,
-            bridge,
-            rounds=2,
-            data_init=data_init,
-        )
+    k = g_l.code.dimension + g_r.code.dimension  # = 2; L lives at index k
+    # ("-" flips X̄ to -1.) Expected: block_l = a, block_r = b, L = a XOR b.
+    cases = [(("+", "+"), 0, 0), (("-", "+"), 1, 0), (("+", "-"), 0, 1), (("-", "-"), 1, 1)]
+    for data_init, exp_l, exp_r in cases:
+        circuit, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=2, data_init=data_init)
+        assert circuit.num_observables == k + 1
         raw = circuit.compile_sampler().sample(shots=8).astype(np.uint8)
         n_meas = raw.shape[1]
         obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
-        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
-        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
-        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
-        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
-        assert (obs0 == obs1).all(), (
-            f"data_init={data_init!r}: obs0 disagrees with obs1 on "
-            f"{(obs0 != obs1).sum()}/8 noiseless shots"
+        vals = []
+        for ln in obs_lines:
+            offs = [int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")]
+            vals.append(np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1))
+        block_l, block_r, time_L = vals[0], vals[1], vals[k]
+        assert (block_l == exp_l).all(), f"{data_init!r}: block X̄_l != {exp_l}"
+        assert (block_r == exp_r).all(), f"{data_init!r}: block X̄_r != {exp_r}"
+        # §3.4 folded cross-check: time-like L == X̄_l ⊕ X̄_r every shot.
+        assert (time_L == (block_l ^ block_r)).all(), (
+            f"{data_init!r}: time-like L != block_l XOR block_r on "
+            f"{(time_L != (block_l ^ block_r)).sum()}/8 noiseless shots"
         )
 
 
@@ -784,24 +827,50 @@ def test_single_ppm_data_init_default_matches_pre_kwarg() -> None:
     assert str(c_no_kwarg) == str(c_plus), "data_init='+' broadcast must match default for basis=X"
 
 
-def test_single_ppm_data_init_zero_obs0_obs1_agree() -> None:
-    """data_init='0' on basis=X gadget → logical |0⟩: obs0 ≡ obs1 every shot."""
-    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+@pytest.mark.parametrize("state,eigenvalue", [("+", 0), ("-", 1)])
+def test_single_ppm_match_basis_block_and_L_equal_prepared_eigenvalue(
+    state: str, eigenvalue: int
+) -> None:
+    """Match-basis single PPM with an experiment_basis eigenstate prep: both the
+    block logical (index 0) and the time-like L (index 1 = k) read the prepared
+    eigenvalue deterministically — the §3.4 folded cross-check.
+
+    Steane basis=X gadget, experiment_basis=X (match): data |+⟩→X̄=+1 (bit 0),
+    |-⟩→X̄=-1 (bit 1). The block X̄ readout and the time-like L (XOR of the
+    first-cycle merge X-checks) both equal that bit, replacing the old obs0==obs1
+    cross-check (which read flips-vs-baseline and was always 0 for any init).
+    """
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit, logical_state_init
     from qldpc.circuits.surgery.gadget import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
-    circuit = build_single_ppm_circuit(g, rounds=3, noise_model=None, data_init="0")
-    sampler = circuit.compile_detector_sampler()
-    _, observables = sampler.sample(shots=8, separate_observables=True)
-    obs0, obs1 = observables[:, 0], observables[:, 1]
-    agree = float((obs0 == obs1).mean())
-    assert agree == 1.0, f"obs0 vs obs1 disagree on {int((1 - agree) * 8)} of 8 shots"
+    circuit = build_single_ppm_circuit(
+        g, rounds=3, noise_model=None, data_init=logical_state_init(code, state, log_idx=0)
+    )
+    assert circuit.num_observables == code.dimension + 1  # k+1, k=1
+    raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
+    n_meas = raw.shape[1]
+    obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
+    vals = []
+    for ln in obs_lines:
+        offs = [int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")]
+        vals.append(np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1))
+    block_x, time_L = vals[0], vals[code.dimension]
+    assert (block_x == eigenvalue).all(), f"state={state!r}: block X̄ != {eigenvalue}"
+    assert (time_L == eigenvalue).all(), f"state={state!r}: time-like L != {eigenvalue}"
 
 
 def test_joint_ppm_data_init_truth_table() -> None:
-    """Joint Z̄⊗Z̄ on two Steane copies: 4 |a⟩|b⟩ inits give expected parity."""
+    """Joint Z̄⊗Z̄ on two Steane copies: the time-like L (index k=k_l+k_r) encodes
+    the joint parity across the 4 |a⟩|b⟩ inits.
+
+    Match-basis joint emits k_l+k_r+1 = 3 observables: block Z̄_l (index 0),
+    block Z̄_r (index 1), and the time-like joint L = Z̄_l⊗Z̄_r (index 2). The
+    joint parity truth table now lives on the time-like L, not the old obs0
+    (which is now a single block logical).
+    """
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -813,6 +882,7 @@ def test_joint_ppm_data_init_truth_table() -> None:
     g2 = build_gadget(c2, z2, basis=Pauli.Z)
     bridge = build_bridge(g1, g2)
     n1 = c1.num_qudits
+    k = c1.dimension + c2.dimension  # time-like L lives at index k
     cases = [
         ("0" * n1 + "0" * n1, 0),
         ("0" * n1 + "1" * n1, 1),
@@ -821,28 +891,29 @@ def test_joint_ppm_data_init_truth_table() -> None:
     ]
     for data_init, expected in cases:
         circuit, _ = build_joint_ppm_circuit(
-            g1,
-            g2,
-            bridge,
-            rounds=3,
-            noise_model=None,
-            data_init=data_init,
+            g1, g2, bridge, rounds=3, noise_model=None, data_init=data_init
         )
-        sampler = circuit.compile_sampler()
-        raw = sampler.sample(shots=16).astype(np.uint8)
+        assert circuit.num_observables == k + 1
+        raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
         n_meas = raw.shape[1]
         obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
-        offsets = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
-        meas_idx = [n_meas + off for off in offsets]
-        obs0 = np.bitwise_xor.reduce(raw[:, meas_idx], axis=1)
-        rate = float(obs0.mean())
+        offsets = [int(t.strip("rec[]")) for t in obs_lines[k].split() if t.startswith("rec[")]
+        time_L = np.bitwise_xor.reduce(raw[:, [n_meas + off for off in offsets]], axis=1)
+        rate = float(time_L.mean())
         assert rate == float(expected), (
-            f"data_init={data_init!r} gave obs0 rate {rate:.3f}, expected {expected}"
+            f"data_init={data_init!r} gave time-like L rate {rate:.3f}, expected {expected}"
         )
 
 
 def test_joint_ppm_data_init_superposition() -> None:
-    """c1 |0⟩ × c2 |+⟩: Z̄_2 random → obs0 ≡ obs1 every shot."""
+    """c1 |0⟩ × c2 |+⟩: block Z̄_r is random (c2 in a Z-superposition), yet the
+    time-like L still equals block Z̄_l ⊕ block Z̄_r every shot (§3.4).
+
+    Match-basis joint emits 3 observables: block Z̄_l (index 0, deterministic
+    here), block Z̄_r (index 1, random), time-like L = Z̄_l⊗Z̄_r (index 2). The
+    folded cross-check L == Z̄_l ⊕ Z̄_r is load-bearing even when a block logical
+    is itself random — replacing the old obs0==obs1 cross-check.
+    """
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -854,26 +925,23 @@ def test_joint_ppm_data_init_superposition() -> None:
     g2 = build_gadget(c2, z2, basis=Pauli.Z)
     bridge = build_bridge(g1, g2)
     n = c1.num_qudits
+    k = c1.dimension + c2.dimension  # = 2; time-like L at index k
     circuit, _ = build_joint_ppm_circuit(
-        g1,
-        g2,
-        bridge,
-        rounds=3,
-        noise_model=None,
-        data_init="0" * n + "+" * n,
+        g1, g2, bridge, rounds=3, noise_model=None, data_init="0" * n + "+" * n
     )
-    sampler = circuit.compile_sampler()
-    raw = sampler.sample(shots=8).astype(np.uint8)
+    assert circuit.num_observables == k + 1
+    raw = circuit.compile_sampler().sample(shots=64).astype(np.uint8)
     n_meas = raw.shape[1]
     obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
     cols = []
     for line in obs_lines:
         offsets = [int(t.strip("rec[]")) for t in line.split() if t.startswith("rec[")]
-        meas_idx = [n_meas + off for off in offsets]
-        cols.append(np.bitwise_xor.reduce(raw[:, meas_idx], axis=1))
-    obs = np.stack(cols, axis=1)
-    agree = float((obs[:, 0] == obs[:, 1]).mean())
-    assert agree == 1.0, f"obs0 vs obs1 disagree on {int((1 - agree) * 8)} of 8 shots"
+        cols.append(np.bitwise_xor.reduce(raw[:, [n_meas + off for off in offsets]], axis=1))
+    block_l, block_r, time_L = cols[0], cols[1], cols[k]
+    assert block_r.min() != block_r.max(), "premise: c2 |+⟩ should make block Z̄_r random"
+    assert (time_L == (block_l ^ block_r)).all(), (
+        f"time-like L != block_l XOR block_r on {(time_L != (block_l ^ block_r)).sum()}/64 shots"
+    )
 
 
 def test_joint_ppm_data_init_tuple_matches_per_qubit_string() -> None:
@@ -1095,9 +1163,13 @@ def test_single_ppm_non_destructive_detach_only(basis: PauliXZ) -> None:
     """``destructive_measure_data=False`` detaches κ but leaves the data encoded.
 
     Non-destructive (detach-only) mode: the κ ancillas are still measured (the
-    split), but the real data qubits are not. obs0 (the logical readout) is still
-    emitted from the in-circuit meas-checks; obs1 (the destructive cross-check)
-    and the destructive final detectors are dropped, so the detector count drops.
+    split that restores the bare code), but the real data qubits are not. The
+    Cain et al. arXiv:2603.28627 Appendix D experiment set is built from the
+    FINAL destructive data readout, so with the data left encoded there is no
+    end-of-circuit data measurement to form any block / time-like observable —
+    the whole observable set and the destructive final detectors are dropped, so
+    the detector count drops too. The full (destructive) build emits the k+1
+    match-basis set, whereas the lean build emits 0.
     """
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -1111,8 +1183,9 @@ def test_single_ppm_non_destructive_detach_only(basis: PauliXZ) -> None:
         g, rounds=2, noise_model=None, destructive_measure_data=False
     )
 
+    assert full.num_observables == code.dimension + 1  # destructive: k+1 match-basis set
     assert _data_measured(lean, code.num_qudits) == set()  # data left encoded
-    assert lean.num_observables == 1  # obs0 only (obs1 dropped)
+    assert lean.num_observables == 0  # no destructive readout => no observable set
     assert lean.num_detectors < full.num_detectors  # destructive detectors gone
     lean.detector_error_model()  # still compiles
 
@@ -1150,8 +1223,11 @@ def test_joint_ppm_non_destructive_detach_only() -> None:
         g1, g2, bridge, rounds=2, noise_model=None, destructive_measure_data=False
     )
     n_data = c1.num_qudits + c2.num_qudits  # left+right data qubits
+    # destructive joint emits the match-basis (k_l+k_r)+1 set; non-destructive has
+    # no final data readout to build it from, so 0 observables.
+    assert full.num_observables == c1.dimension + c2.dimension + 1
     assert _data_measured(lean, n_data) == set()  # data left encoded
-    assert lean.num_observables == 1  # obs0 only (obs1 dropped)
+    assert lean.num_observables == 0  # no destructive readout => no observable set
     assert lean.num_detectors < full.num_detectors
     lean.detector_error_model()  # still compiles
 
@@ -1494,23 +1570,21 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state: str, expected_obs0:
 @pytest.mark.parametrize("rounds", [1, 2, 3, 5, 10])
 @pytest.mark.parametrize("state", ["0", "1"])
 def test_multi_round_invariance_steane_basis_z(rounds: int, state: str) -> None:
-    """obs0 reads the merged Z̄ eigenvalue independently of R.
+    """The block Z̄ logical (observable index 0) reads the prepared eigenvalue
+    independently of R.
 
-    Webster, Smith, Cohen arXiv:2511.15989 §II.A gives the single-round
-    identity Z̄ = ∏_{v ∈ support} A_v on the merged stabilizer group: the XOR
-    of one round's meas-check outcomes equals the eigenvalue bit of Z̄. Cain
-    et al. arXiv:2603.28627 §B.1 selects the final QEC round as the readout
-    point; detectors carry the FT load round-to-round.
+    In match-basis (experiment_basis == gadget.basis == Z) the index-0 observable
+    is the block Z̄ logical read from the FINAL destructive data measurement (Cain
+    et al. arXiv:2603.28627 Appendix D), so it equals the prepared eigenvalue for
+    every R ≥ 1:
+      * state="0" (|0⟩^n → Z̄=+1): index 0 = 0
+      * state="1" (|1⟩^n → Z̄=−1, wt(Z̄_Steane)=3 odd): index 0 = 1
 
-    Therefore obs0 = int(state) for every R ≥ 1:
-      * state="0" (|0⟩^n → Z̄=+1): obs0 = 0
-      * state="1" (|1⟩^n → Z̄=−1, wt(Z̄_Steane)=3 odd): obs0 = 1
-
-    This R-invariance is exactly what the single-round identity guarantees;
-    any round-index drift in _surgery_qec_cycle, _surgery_observable, or
-    MeasurementRecord.get_target_rec would break it for some R. The previous
-    XOR-across-R-rounds formula collapsed to R·m_v mod 2, which was silently
-    0 for every even R — the bug this test now guards against.
+    R-invariance guards _surgery_qec_cycle / _surgery_observable /
+    MeasurementRecord.get_target_rec against round-index drift. (The companion
+    time-like L at index k uses the FIRST-cycle merge-check product, per Webster,
+    Smith, Cohen arXiv:2511.15989 §II.A Z̄ = ∏_v A_v; the earlier
+    XOR-across-R-rounds bug silently zeroed that L for every even R.)
     """
     from qldpc.circuits.surgery.circuit import (
         build_single_ppm_circuit,
@@ -1536,12 +1610,12 @@ def test_multi_round_invariance_steane_basis_z(rounds: int, state: str) -> None:
             break
     obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + off for off in obs0_recs]], axis=1)
     rate = float(obs0.mean())
-    # Webster single-round identity: obs0 = last-round XOR of meas-checks
-    # = eigenvalue bit of Z̄ on the merged group, independent of R.
+    # index-0 block Z̄ (final destructive data readout) = eigenvalue bit of Z̄,
+    # independent of R.
     expected_obs0 = int(state)
     assert rate == float(expected_obs0), (
-        f"rounds={rounds}, state={state!r}: obs0 rate {rate:.3f} != "
-        f"expected {expected_obs0} (Webster Z̄=∏A_v should hold for any R)"
+        f"rounds={rounds}, state={state!r}: index-0 block Z̄ rate {rate:.3f} != "
+        f"expected {expected_obs0} (block logical = prepared eigenvalue for any R)"
     )
 
 
@@ -1738,14 +1812,14 @@ def test_joint_code_dimension_webster_x_steane_equals_ten() -> None:
 
 
 def test_joint_ppm_even_rounds_truth_table() -> None:
-    """obs0 must encode logical X̄_l X̄_r parity correctly at EVEN rounds.
+    """The time-like L must encode logical X̄_l X̄_r parity correctly at EVEN rounds.
 
     Regression test for the bug where _surgery_observable XOR'd meas-check
-    syndromes across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of
-    using a single round's product (Webster, Smith, Cohen arXiv:2511.15989
-    §II.A: Z̄ = ∏_v A_v). Uses
-    ``compile_sampler`` + manual XOR so we read the raw observable bit,
-    not stim's noiseless-flip from its (possibly wrong) prediction.
+    syndromes across all rounds (R · m_v ≡ 0 mod 2 for even R) instead of using a
+    single round's product (Webster, Smith, Cohen arXiv:2511.15989 §II.A: Z̄ = ∏_v
+    A_v). The fix reads the FIRST-cycle merge checks; the time-like L lives at
+    index k=k_l+k_r. Uses ``compile_sampler`` + manual XOR to read the raw
+    observable bit. Also checks §3.4: L == block X̄_l ⊕ block X̄_r every shot.
     """
     from qldpc.circuits.surgery.bridge import build_bridge
     from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
@@ -1756,6 +1830,7 @@ def test_joint_ppm_even_rounds_truth_table() -> None:
     g_l = build_gadget(code, x, basis=Pauli.X)
     g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
+    k = g_l.code.dimension + g_r.code.dimension  # time-like L at index k
     # basis=X, so we sweep ("+", "+"), ("-", "+"), ("+", "-"), ("-", "-").
     # "-" on data flips X̄ to -1; X̄_l X̄_r = product → parity bit.
     cases = [
@@ -1776,24 +1851,30 @@ def test_joint_ppm_even_rounds_truth_table() -> None:
         raw = circuit.compile_sampler().sample(shots=16).astype(np.uint8)
         n_meas = raw.shape[1]
         obs_lines = [ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")]
-        offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
-        offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
-        obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
-        obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
-        assert (obs0 == expected).all(), (
-            f"data_init={data_init!r}: obs0 has {(obs0 != expected).sum()}/"
+        vals = []
+        for ln in obs_lines:
+            offs = [int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")]
+            vals.append(np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1))
+        block_l, block_r, time_L = vals[0], vals[1], vals[k]
+        assert (time_L == expected).all(), (
+            f"data_init={data_init!r}: time-like L has {(time_L != expected).sum()}/"
             f"16 shots disagreeing with expected parity bit {expected}"
         )
-        assert (obs0 == obs1).all(), f"data_init={data_init!r}: obs0 != obs1 in noiseless run"
+        # §3.4 folded cross-check: time-like L == block X̄_l ⊕ block X̄_r.
+        assert (time_L == (block_l ^ block_r)).all(), (
+            f"data_init={data_init!r}: time-like L != block_l XOR block_r"
+        )
 
 
 def test_single_ppm_even_rounds_truth_table() -> None:
-    """obs0 must encode single-patch X̄ (or Z̄) parity at EVEN rounds.
+    """The time-like L must encode single-patch X̄ (or Z̄) parity at EVEN rounds.
 
     Same regression as test_joint_ppm_even_rounds_truth_table but for the
-    single-patch PPM construction. Sweeps "+" and "-" data inits in basis=X
-    and "0", "1" in basis=Z to expose the cumulative-XOR bug at even rounds.
-    Uses compile_sampler + manual XOR for the same reason as Task 1.
+    single-patch PPM construction. Sweeps "+" and "-" data inits in basis=X (and
+    "0"/"1" in basis=Z) — each is an experiment_basis eigenstate, so in match
+    basis the block logical (index 0) and the time-like L (index k=1) both read
+    the prepared parity bit. The XOR-across-rounds bug would silence the
+    time-like L at even R. Uses compile_sampler + manual XOR.
     """
     from qldpc.circuits.surgery.circuit import build_single_ppm_circuit, logical_state_init
     from qldpc.circuits.surgery.gadget import build_gadget
@@ -1803,6 +1884,7 @@ def test_single_ppm_even_rounds_truth_table() -> None:
         (Pauli.X, [("+", 0), ("-", 1)]),
         (Pauli.Z, [("0", 0), ("1", 1)]),
     ]
+    k = code.dimension  # time-like L at index k=1
     for basis, cases in basis_cases:
         op = (
             code.get_logical_ops(Pauli.X)[0]
@@ -1824,17 +1906,19 @@ def test_single_ppm_even_rounds_truth_table() -> None:
             obs_lines = [
                 ln for ln in str(circuit).splitlines() if ln.startswith("OBSERVABLE_INCLUDE")
             ]
-            offs0 = [int(t.strip("rec[]")) for t in obs_lines[0].split() if t.startswith("rec[")]
-            offs1 = [int(t.strip("rec[]")) for t in obs_lines[1].split() if t.startswith("rec[")]
-            obs0 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs0]], axis=1)
-            obs1 = np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs1]], axis=1)
-            assert (obs0 == expected).all(), (
-                f"basis={basis!r} state={state!r}: obs0 has "
-                f"{(obs0 != expected).sum()}/16 shots disagreeing with "
+            vals = []
+            for ln in obs_lines:
+                offs = [int(t.strip("rec[]")) for t in ln.split() if t.startswith("rec[")]
+                vals.append(np.bitwise_xor.reduce(raw[:, [n_meas + o for o in offs]], axis=1))
+            block, time_L = vals[0], vals[k]
+            assert (time_L == expected).all(), (
+                f"basis={basis!r} state={state!r}: time-like L has "
+                f"{(time_L != expected).sum()}/16 shots disagreeing with "
                 f"expected parity bit {expected}"
             )
-            assert (obs0 == obs1).all(), (
-                f"basis={basis!r} state={state!r}: obs0 != obs1 in noiseless run"
+            # §3.4: block logical and time-like L agree on the eigenstate prep.
+            assert (block == time_L).all(), (
+                f"basis={basis!r} state={state!r}: block != time-like L in noiseless run"
             )
 
 
