@@ -35,6 +35,93 @@ def _projection(indices, N: int) -> np.ndarray:
     return pi
 
 
+def _restrict(
+    H_complement: np.ndarray,
+    x: np.ndarray,
+) -> tuple[tuple[int, ...], tuple[int, ...], np.ndarray, np.ndarray]:
+    """Unified single-gadget kernel — the useful quantities in one place
+    (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1).
+
+    V₀ = support = supp(x); C₀ = data_checks = complementary-basis checks touching V₀;
+    incidence = ∂_1^T = H_complement[C₀, V₀]  (|C₀|×|V₀|, edge×vertex);
+    partial_0 = ∂_0 = ker(∂_1) = GF2(incidence).left_null_space() (row-reduced, deterministic).
+
+    ``H_complement`` is the complementary check matrix to the measured logical type
+    (H_Z when measuring X̄, H_X when measuring Z̄). This is the single primitive the
+    joint-PPM and Y/mixed-PPM constructions also consume.
+    """
+    H_complement = np.asarray(H_complement).astype(np.uint8)
+    x = np.asarray(x).astype(np.uint8)
+    if x.shape != (H_complement.shape[1],):
+        raise ValueError(f"x has shape {x.shape}, expected ({H_complement.shape[1]},)")
+    support = tuple(int(i) for i in np.nonzero(x)[0])
+    if support:
+        V0 = np.array(support, dtype=np.int_)
+        C0 = np.nonzero(H_complement[:, V0].any(axis=1))[0]
+        incidence = H_complement[np.ix_(C0, V0)].astype(np.uint8)
+    else:
+        C0 = np.zeros(0, dtype=np.int_)
+        incidence = np.zeros((0, 0), dtype=np.uint8)
+    data_checks = tuple(int(j) for j in C0)
+    if incidence.size:
+        partial_0 = np.asarray(GF2(incidence).left_null_space()).astype(np.uint8)
+    else:
+        partial_0 = np.zeros((0, incidence.shape[0]), dtype=np.uint8)
+    return support, data_checks, incidence, partial_0
+
+
+def _x_merged(
+    H_X: np.ndarray,
+    H_Z: np.ndarray,
+    x: np.ndarray,
+    incidence_extra: np.ndarray | None = None,
+) -> tuple[tuple[int, ...], tuple[int, ...], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Closed-form merged matrices for measuring X̄ (Webster, Smith, Cohen
+    arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1; Ide, Gowda, Nadkarni,
+    Dauphinais arXiv:2410.02753 Eq.(62)):
+
+        H̃_X = [[H_X,   0 ],     H̃_Z = [[H_Z,   f_0 ],
+               [f_1^T, ∂_1]]            [ 0,   ∂_0 ]]
+
+    f_1^T = π_{V₀} (indicator on support data qubits); ∂_1 = incidence.T (vertex×edge,
+    entered untransposed); f_0 = π_{C₀}^T (extends complementary checks onto Q'),
+    with all-zero columns for boost-added κ that back no original check; ∂_0 = ker(∂_1).
+
+    ``incidence_extra`` (weight-2 rows, |·|×|V₀|) stacks new κ onto ∂_1^T for the
+    boost / joint path; ∂_0 is re-derived on the stacked incidence.
+    """
+    H_X = np.asarray(H_X).astype(np.uint8)
+    H_Z = np.asarray(H_Z).astype(np.uint8)
+    support, data_checks, incidence, partial_0 = _restrict(H_Z, x)
+    n = H_X.shape[1]
+    n_C0 = len(data_checks)
+    if incidence_extra is not None:
+        incidence_extra = np.asarray(incidence_extra).astype(np.uint8)
+        n_extra = incidence_extra.shape[0]
+        incidence = np.vstack([incidence, incidence_extra]).astype(np.uint8)
+        if incidence.size:
+            partial_0 = np.asarray(GF2(incidence).left_null_space()).astype(np.uint8)
+        else:
+            partial_0 = np.zeros((0, incidence.shape[0]), dtype=np.uint8)
+        data_checks = tuple(data_checks) + tuple([-1] * n_extra)
+    n_V0 = len(support)
+    n_cols = incidence.shape[0]  # |C₀| + n_extra
+    d1 = incidence.T.astype(np.uint8)  # ∂_1, |V₀|×n_cols
+    f1T = np.zeros((n_V0, n), dtype=np.uint8)
+    if n_V0:
+        f1T[np.arange(n_V0), np.array(support, dtype=np.int_)] = 1
+    f0 = np.zeros((H_Z.shape[0], n_cols), dtype=np.uint8)
+    if n_C0:
+        f0[np.array(data_checks[:n_C0], dtype=np.int_), np.arange(n_C0)] = 1
+    HX = np.block(
+        [[H_X, np.zeros((H_X.shape[0], n_cols), dtype=np.uint8)], [f1T, d1]]
+    ).astype(np.uint8)
+    HZ = np.block(
+        [[H_Z, f0], [np.zeros((partial_0.shape[0], n), dtype=np.uint8), partial_0]]
+    ).astype(np.uint8)
+    return support, data_checks, incidence, partial_0, HX, HZ
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class GadgetLayout:
     """Frozen result of a single L=1 gadget construction.

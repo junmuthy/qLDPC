@@ -615,3 +615,34 @@ def test_projection_negative_sentinel_is_zero_row() -> None:
 
     pi = _projection((0, -1, 2), 3)
     assert np.array_equal(pi, np.array([[1, 0, 0], [0, 0, 0], [0, 0, 1]], dtype=np.uint8))
+
+
+def test_restrict_matches_legacy_step1_and_gauge() -> None:
+    from qldpc.circuits.surgery.gadget import (
+        _restrict,
+        _step1_restriction,
+        _step2_gauge_fix,
+    )
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    support, data_checks, incidence, partial_0 = _restrict(code.matrix_z, x)
+    leg_support, leg_dc, leg_inc = _step1_restriction(code, x, basis=Pauli.X)
+    assert support == leg_support
+    assert data_checks == leg_dc
+    assert np.array_equal(incidence, leg_inc)
+    assert np.array_equal(partial_0, _step2_gauge_fix(leg_inc))
+
+
+def test_x_merged_matches_legacy_build_gadget_x_frame() -> None:
+    from qldpc.circuits.surgery.gadget import _x_merged, build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    sup, dc, inc, p0, HX, HZ = _x_merged(code.matrix_x, code.matrix_z, x)
+    g = build_gadget(code, x, basis=Pauli.X)
+    assert sup == g.support and dc == g.data_checks
+    assert np.array_equal(inc, g.incidence)
+    assert np.array_equal(p0, g.partial_0)
+    assert np.array_equal(HX, g.HX_merged)
+    assert np.array_equal(HZ, g.HZ_merged)
