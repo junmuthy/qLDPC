@@ -2187,3 +2187,52 @@ def test_joint_ppm_observables_deterministic_noiseless(_steane_joint_fixture) ->
     circ, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, experiment_basis=Pauli.X)
     _, obs = circ.compile_detector_sampler().sample(shots=64, separate_observables=True)
     assert not obs.any()
+
+
+# --- Task 8: memory-experiment observable count + opposite-basis frame determinism ---
+
+
+@pytest.mark.parametrize("make_code", [lambda: codes.SteaneCode(), _bb_36_8_code])
+def test_memory_experiment_emits_k_logical_x_observables(make_code) -> None:
+    """The memory experiment emits exactly k logical-X block observables.
+
+    Reuses the existing public ``get_memory_experiment`` (NO new production code,
+    NO ``keep_only_observable``). Per the design §3.3 the memory experiment is the
+    apples-to-apples baseline for the surgery k+1/k-1 sets: it initializes |+>^k,
+    runs QEC and a transversal X readout, emitting the k logical-X̄ block
+    observables (Cain et al. arXiv:2603.28627 Appendix D, Memory experiment).
+    Covers k=1 (Steane [[7,1,3]]) and k=8 (BBCode [[36,8]]).
+    """
+    from qldpc.circuits import get_memory_experiment
+
+    code = make_code()
+    circ = get_memory_experiment(code, basis=Pauli.X, num_rounds=2)
+    assert circ.num_observables == code.dimension
+
+
+def test_frame_correction_is_load_bearing_opposite_basis() -> None:
+    """Opposite-basis (k-1) frame-corrected observables are noiselessly deterministic.
+
+    The existing tests cover the opposite-basis observable COUNT
+    (test_single_ppm_opposite_basis_emits_k_minus_1_observables); this asserts the
+    Pauli-frame correction is load-bearing and correct end-to-end. Each of the k-1
+    block observables is ``(final data parity) ⊕ (Q'-split parity)`` (design §3.2/§4);
+    without folding in the Q'-split records the data-only readout would be random, so
+    a noiseless ``not obs.any()`` confirms the frame correction folds the Q'-split
+    records correctly. Uses the k=8 BBCode [[36,8]] with an X-gadget and
+    experiment_basis=Z (the opposite basis), the same construction as the count test.
+    """
+    from qldpc.circuits.surgery.circuit import build_single_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    bb = _bb_36_8_code()  # dimension 8 -> k-1 = 7 frame-corrected observables
+    xop = np.asarray(bb.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    gbb = build_gadget(bb, xop, basis=Pauli.X)
+    circ = build_single_ppm_circuit(gbb, rounds=3, experiment_basis=Pauli.Z)
+
+    # Non-vacuous: there must actually be k-1 = 7 frame-corrected observables to check.
+    assert circ.num_observables == bb.dimension - 1 > 0
+
+    _, obs = circ.compile_detector_sampler().sample(shots=128, separate_observables=True)
+    assert obs.shape == (128, bb.dimension - 1)
+    assert not obs.any()  # every frame-corrected opposite-basis observable is deterministic
