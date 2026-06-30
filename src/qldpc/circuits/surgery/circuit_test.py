@@ -596,10 +596,12 @@ def test_build_single_ppm_circuit_opposite_basis_k_minus_1(basis: PauliXZ) -> No
     assert not obs.any(), f"basis={basis}: opposite-basis observable fired noiselessly ({obs.sum()})"
 
 
-def test_stitch_intercode_basis_x_joint_logical_in_stabilizer() -> None:
+def test_joint_merged_intercode_basis_x_joint_logical_in_stabilizer() -> None:
     """(x_1, x_2, 0, 0, 0) lies in rowspan(H_X^merged) — joint X̄_l X̄_r is a stabilizer."""
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import (
+        _joint_merged_dispatch,
+        build_bridge,
+    )
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 
     code1 = codes.SteaneCode()
@@ -609,7 +611,7 @@ def test_stitch_intercode_basis_x_joint_logical_in_stabilizer() -> None:
     g_l = build_gadget(code1, x1, basis=Pauli.X)
     g_r = build_gadget(code2, x2, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     import galois
 
     GF2 = galois.GF(2)
@@ -624,11 +626,13 @@ def test_stitch_intercode_basis_x_joint_logical_in_stabilizer() -> None:
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis: PauliXZ) -> None:
+def test_joint_merged_intercode_both_bases_commute_and_singletons_excluded(basis: PauliXZ) -> None:
     import galois
 
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import (
+        _joint_merged_dispatch,
+        build_bridge,
+    )
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 
     GF2 = galois.GF(2)
@@ -640,7 +644,7 @@ def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis: Paul
     g_l = build_gadget(code, x, basis=basis)
     g_r = build_gadget(codes.SteaneCode(), x, basis=basis)
     bridge = build_bridge(g_l, g_r)
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     HX = np.asarray(merged.matrix_x).astype(np.int_)
     HZ = np.asarray(merged.matrix_z).astype(np.int_)
     product = (HX @ HZ.T) % 2
@@ -662,13 +666,15 @@ def test_stitch_intercode_both_bases_commute_and_singletons_excluded(basis: Paul
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_stitch_intracode_both_bases_commute(basis: PauliXZ) -> None:
+def test_joint_merged_intracode_both_bases_commute(basis: PauliXZ) -> None:
     """Intra-code commutation for both bases. Use a Webster code with 2 distinct logicals.
 
     Steane intra-code (k=1) yields the degenerate joint X̄·X̄ = I case.
     """
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import (
+        _joint_merged_dispatch,
+        build_bridge,
+    )
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
         build_gadget,
     )
@@ -686,7 +692,7 @@ def test_stitch_intracode_both_bases_commute(basis: PauliXZ) -> None:
     g_l = build_gadget(code, x1, basis=basis)
     g_r = build_gadget(code, x2, basis=basis)
     bridge = build_bridge(g_l, g_r)
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     HX = np.asarray(merged.matrix_x).astype(np.int_)
     HZ = np.asarray(merged.matrix_z).astype(np.int_)
     product = (HX @ HZ.T) % 2
@@ -763,8 +769,10 @@ def test_joint_xx_in_stabilizer_on_webster_intracode(code_index: int) -> None:
     """
     import galois
 
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import (
+        _joint_merged_dispatch,
+        build_bridge,
+    )
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
         build_gadget,
     )
@@ -777,7 +785,7 @@ def test_joint_xx_in_stabilizer_on_webster_intracode(code_index: int) -> None:
     g_l = build_gadget(code, x1, basis=Pauli.X)
     g_r = build_gadget(code, x2, basis=Pauli.X)
     bridge = build_bridge(g_l, g_r)
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     HX = np.asarray(merged.matrix_x).astype(np.int_)
     joint = np.zeros(HX.shape[1], dtype=np.int_)
     n = code.num_qudits
@@ -1746,7 +1754,7 @@ def test_joint_code_dimension_steane_x_steane_equals_one() -> None:
     Formula: k_l + k_r − 1 because Z̄_l ⊗ Z̄_r becomes a stabilizer of
     the joint code after surgery. For k_l = k_r = 1, that's 1.
 
-    Catches a stitching bug in _stitch_intercode that drops or
+    Catches a stitching bug in _joint_merged_intercode that drops or
     duplicates a stabilizer row — CSS commutation would still hold
     but the joint code's logical dimension would shift.
     """

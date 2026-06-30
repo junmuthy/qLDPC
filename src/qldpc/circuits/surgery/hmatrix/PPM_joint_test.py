@@ -191,7 +191,7 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle() -> None:
     import sympy
 
     from qldpc.circuits.surgery import build_bridge, build_gadget
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import _joint_merged_dispatch
 
     x, y = sympy.symbols("x y")
     code = codes.BBCode(
@@ -210,7 +210,7 @@ def test_build_bridge_bb18_hyperedge_and_long_cycle() -> None:
     # Build bridge (this used to raise NotImplementedError or RuntimeError)
     bridge = build_bridge(g_l, g_r)
     # Merged code construction must succeed
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     # Intra-code joint Z̄_1 ⊗ Z̄_2: k_merged == k_orig − 1
     assert merged.dimension == code.dimension - 1
     # CSS commutation on merged code
@@ -229,8 +229,10 @@ def test_adapter_cycle_check_weight_bounded() -> None:
       - T_r row: at most 3 entries on cr_ancilla (SkipTree (3,2)-sparsity)
     Total: weight <= 3 + 2 + 3 = 8.
     """
-    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
+    from qldpc.circuits.surgery.hmatrix.PPM_joint import (
+        _joint_merged_dispatch,
+        build_bridge,
+    )
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
         build_gadget,
     )
@@ -243,7 +245,7 @@ def test_adapter_cycle_check_weight_bounded() -> None:
     g_l = build_gadget(code, x, basis=Pauli.Z)
     g_r = build_gadget(code, x, basis=Pauli.Z)
     bridge = build_bridge(g_l, g_r)
-    merged = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    merged = _joint_merged_dispatch(g_l, g_r, bridge)
     HX = np.asarray(merged.matrix_x).astype(np.int_)
     # basis=Z: new cycle-X-checks are the last (w-1) rows of HX
     new_x_rows = HX[-(bridge.width - 1) :, :]

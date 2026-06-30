@@ -10,7 +10,8 @@ import dataclasses
 
 import numpy as np
 
-from qldpc.objects import PauliXZ
+from qldpc.codes.common import CSSCode
+from qldpc.objects import Pauli, PauliXZ
 
 from .PPM_joint_cellulation import (
     _build_aux_graph_strict,
@@ -245,3 +246,172 @@ def build_bridge(
         # Mixed-basis fields: populated by _stitch_to_joint_code when basis_l != basis_r.
         # Left as defaults (None / ()) here for both same-basis and mixed-basis bridges.
     )
+
+
+def _select_meas_comp(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int, int, int]:
+    """Basis-dispatched (M_meas, M_comp) sources + data-row counts.
+
+    M_meas holds the measured-basis merged check rows, M_comp the complementary;
+    for basis=X these are (HX_merged, HZ_merged), swapped for basis=Z. Mirrors the
+    abstraction of the prior ``_stitch_*`` helpers (Swaroop et al. arXiv:2410.03628 §III).
+    """
+    g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
+    if bridge.basis is Pauli.X:
+        M_meas_l_src, M_comp_l_src = g_l_aug.HX_merged, g_l_aug.HZ_merged
+        M_meas_r_src, M_comp_r_src = g_r_aug.HX_merged, g_r_aug.HZ_merged
+        m_meas_l_data = g_l.code.matrix_x.shape[0]
+        m_meas_r_data = g_r.code.matrix_x.shape[0]
+        m_comp_l_data = g_l.code.matrix_z.shape[0]
+        m_comp_r_data = g_r.code.matrix_z.shape[0]
+    else:
+        M_meas_l_src, M_comp_l_src = g_l_aug.HZ_merged, g_l_aug.HX_merged
+        M_meas_r_src, M_comp_r_src = g_r_aug.HZ_merged, g_r_aug.HX_merged
+        m_meas_l_data = g_l.code.matrix_z.shape[0]
+        m_meas_r_data = g_r.code.matrix_z.shape[0]
+        m_comp_l_data = g_l.code.matrix_x.shape[0]
+        m_comp_r_data = g_r.code.matrix_x.shape[0]
+    return (
+        np.asarray(M_meas_l_src).astype(np.int_),
+        np.asarray(M_meas_r_src).astype(np.int_),
+        np.asarray(M_comp_l_src).astype(np.int_),
+        np.asarray(M_comp_r_src).astype(np.int_),
+        m_meas_l_data,
+        m_meas_r_data,
+        m_comp_l_data,
+        m_comp_r_data,
+    )
+
+
+def _port_label_block(label: tuple[int, ...], width: int) -> np.ndarray:
+    """Π_s = π_{𝒫_s}^T P_{σ_s} ∈ F_2^{|label|×w}: row i has a 1 at column
+    ``label[i]`` when ``label[i] >= 0`` (port vertex), else all-zero."""
+    blk = np.zeros((len(label), width), dtype=np.int_)
+    for v_idx, lab in enumerate(label):
+        if lab >= 0:
+            blk[v_idx, lab] = 1
+    return blk
+
+
+def _joint_merged_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
+    """Inter-code joint merge (g_l.code is not g_r.code), closed form of
+    Swaroop et al. arXiv:2410.03628 §III Eq. (H̃_X/H̃_Z^joint). Columns
+    (Q_l | Q_r | Q'_l | Q'_r | 𝒜) with separate data blocks Q_l, Q_r."""
+    assert g_l.code is not g_r.code
+    field = g_l.code.field
+    (M_meas_l, M_meas_r, M_comp_l, M_comp_r,
+     m_meas_l, m_meas_r, m_comp_l, m_comp_r) = _select_meas_comp(g_l, g_r, bridge)
+
+    n_l, n_r = g_l.code.num_qudits, g_r.code.num_qudits
+    k_l = bridge.g_l_aug.incidence.shape[0]
+    k_r = bridge.g_r_aug.incidence.shape[0]
+    w = bridge.width
+
+    HX_l = M_meas_l[:m_meas_l, :n_l]
+    HX_r = M_meas_r[:m_meas_r, :n_r]
+    f1T_l = M_meas_l[m_meas_l:, :n_l]
+    d1_l = M_meas_l[m_meas_l:, n_l:]
+    f1T_r = M_meas_r[m_meas_r:, :n_r]
+    d1_r = M_meas_r[m_meas_r:, n_r:]
+
+    HZ_l = M_comp_l[:m_comp_l, :n_l]
+    f0_l = M_comp_l[:m_comp_l, n_l:]
+    d0_l = M_comp_l[m_comp_l:, n_l:]
+    HZ_r = M_comp_r[:m_comp_r, :n_r]
+    f0_r = M_comp_r[:m_comp_r, n_r:]
+    d0_r = M_comp_r[m_comp_r:, n_r:]
+
+    Pi_l = _port_label_block(bridge.label_l, w)
+    Pi_r = _port_label_block(bridge.label_r, w)
+    T_l = np.asarray(bridge.T_l).astype(np.int_)
+    T_r = np.asarray(bridge.T_r).astype(np.int_)
+    H_R = np.asarray(bridge.H_R).astype(np.int_)
+    sup_l, sup_r = len(bridge.label_l), len(bridge.label_r)
+    r_l, r_r = d0_l.shape[0], d0_r.shape[0]
+
+    def Z(rows: int, cols: int) -> np.ndarray:
+        return np.zeros((rows, cols), dtype=np.int_)
+
+    M_meas = np.block([
+        [HX_l,         Z(m_meas_l, n_r), Z(m_meas_l, k_l), Z(m_meas_l, k_r), Z(m_meas_l, w)],
+        [Z(m_meas_r, n_l), HX_r,         Z(m_meas_r, k_l), Z(m_meas_r, k_r), Z(m_meas_r, w)],
+        [f1T_l,        Z(sup_l, n_r),    d1_l,             Z(sup_l, k_r),    Pi_l],
+        [Z(sup_r, n_l), f1T_r,           Z(sup_r, k_l),    d1_r,             Pi_r],
+    ]).astype(np.int_)
+
+    M_comp = np.block([
+        [HZ_l,         Z(m_comp_l, n_r), f0_l,             Z(m_comp_l, k_r), Z(m_comp_l, w)],
+        [Z(m_comp_r, n_l), HZ_r,         Z(m_comp_r, k_l), f0_r,             Z(m_comp_r, w)],
+        [Z(r_l, n_l),  Z(r_l, n_r),      d0_l,             Z(r_l, k_r),      Z(r_l, w)],
+        [Z(r_r, n_l),  Z(r_r, n_r),      Z(r_r, k_l),      d0_r,             Z(r_r, w)],
+        [Z(w - 1, n_l), Z(w - 1, n_r),   T_l,              T_r,              H_R],
+    ]).astype(np.int_)
+
+    if bridge.basis is Pauli.X:
+        return CSSCode(field(M_meas), field(M_comp), is_subsystem_code=False)
+    return CSSCode(field(M_comp), field(M_meas), is_subsystem_code=False)
+
+
+def _joint_merged_intracode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
+    """Intra-code joint merge (g_l.code is g_r.code), closed form of Swaroop et al.
+    arXiv:2410.03628 §III. Columns (Q | Q'_l | Q'_r | 𝒜): the two sides SHARE the
+    single data column block Q and the single H_X/H_Z data-row block (written once)."""
+    assert g_l.code is g_r.code
+    field = g_l.code.field
+    (M_meas_l, M_meas_r, M_comp_l, M_comp_r,
+     m_meas_data, _mr, m_comp_data, _cr) = _select_meas_comp(g_l, g_r, bridge)
+
+    n = g_l.code.num_qudits
+    k_l = bridge.g_l_aug.incidence.shape[0]
+    k_r = bridge.g_r_aug.incidence.shape[0]
+    w = bridge.width
+
+    HX = M_meas_l[:m_meas_data, :n]
+    f1T_l = M_meas_l[m_meas_data:, :n]
+    d1_l = M_meas_l[m_meas_data:, n:]
+    f1T_r = M_meas_r[m_meas_data:, :n]
+    d1_r = M_meas_r[m_meas_data:, n:]
+
+    HZ = M_comp_l[:m_comp_data, :n]
+    f0_l = M_comp_l[:m_comp_data, n:]
+    f0_r = M_comp_r[:m_comp_data, n:]
+    d0_l = M_comp_l[m_comp_data:, n:]
+    d0_r = M_comp_r[m_comp_data:, n:]
+
+    Pi_l = _port_label_block(bridge.label_l, w)
+    Pi_r = _port_label_block(bridge.label_r, w)
+    T_l = np.asarray(bridge.T_l).astype(np.int_)
+    T_r = np.asarray(bridge.T_r).astype(np.int_)
+    H_R = np.asarray(bridge.H_R).astype(np.int_)
+    sup_l, sup_r = len(bridge.label_l), len(bridge.label_r)
+    r_l, r_r = d0_l.shape[0], d0_r.shape[0]
+
+    def Z(rows: int, cols: int) -> np.ndarray:
+        return np.zeros((rows, cols), dtype=np.int_)
+
+    M_meas = np.block([
+        [HX,           Z(m_meas_data, k_l), Z(m_meas_data, k_r), Z(m_meas_data, w)],
+        [f1T_l,        d1_l,                Z(sup_l, k_r),       Pi_l],
+        [f1T_r,        Z(sup_r, k_l),       d1_r,                Pi_r],
+    ]).astype(np.int_)
+
+    M_comp = np.block([
+        [HZ,           f0_l,                f0_r,                Z(m_comp_data, w)],
+        [Z(r_l, n),    d0_l,                Z(r_l, k_r),         Z(r_l, w)],
+        [Z(r_r, n),    Z(r_r, k_l),         d0_r,                Z(r_r, w)],
+        [Z(w - 1, n),  T_l,                 T_r,                 H_R],
+    ]).astype(np.int_)
+
+    if bridge.basis is Pauli.X:
+        return CSSCode(field(M_meas), field(M_comp), is_subsystem_code=False)
+    return CSSCode(field(M_comp), field(M_meas), is_subsystem_code=False)
+
+
+def _joint_merged_dispatch(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
+    """Assemble the merged joint CSSCode; intra (shared data) vs inter dispatch."""
+    if g_l.code is g_r.code:
+        return _joint_merged_intracode(g_l, g_r, bridge)
+    return _joint_merged_intercode(g_l, g_r, bridge)
