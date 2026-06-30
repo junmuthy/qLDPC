@@ -30,7 +30,7 @@ def test_joint_ppm_data_init_truth_table() -> None:
     """
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -73,7 +73,7 @@ def test_joint_ppm_data_init_superposition() -> None:
     """
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -105,7 +105,7 @@ def test_joint_ppm_data_init_tuple_matches_per_qubit_string() -> None:
     """data_init=("0", "+") produces the same circuit as "0"*n + "+"*n."""
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -137,7 +137,7 @@ def test_joint_ppm_data_init_tuple_per_qubit_entry() -> None:
     """Each tuple entry may be per-qubit (length n_code), not only len-1 broadcast."""
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -180,7 +180,7 @@ def test_joint_ppm_data_init_tuple_per_qubit_entry() -> None:
 def test_joint_ppm_data_init_tuple_validation(bad_init: object, error_substr: str) -> None:
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     z1 = np.asarray(c1.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -204,7 +204,7 @@ def test_joint_ppm_data_init_tuple_rejects_intracode() -> None:
     """Tuple form is invalid for intracode joint PPM (single data set)."""
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
@@ -237,7 +237,7 @@ def test_joint_ppm_even_rounds_truth_table() -> None:
     """
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)

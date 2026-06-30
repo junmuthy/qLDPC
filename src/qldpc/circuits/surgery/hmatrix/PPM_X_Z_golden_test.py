@@ -20,7 +20,11 @@ from qldpc.circuits.surgery.conftest import (
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
-from qldpc.circuits.surgery.hmatrix.PPM_XZ import GadgetLayout, build_gadget, build_gadget_augmented
+from qldpc.circuits.surgery.hmatrix.PPM_X_Z import (
+    GadgetLayout,
+    build_gadget,
+    build_gadget_augmented,
+)
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli, PauliXZ
 

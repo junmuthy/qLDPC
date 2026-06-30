@@ -19,7 +19,7 @@ from .circuit import (
 )
 from .hmatrix.cheeger import boost_gadget, cheeger_constant
 from .hmatrix.PPM_joint import Bridge, build_bridge
-from .hmatrix.PPM_XZ import GadgetLayout, build_gadget
+from .hmatrix.PPM_X_Z import GadgetLayout, build_gadget
 from .hmatrix.PPM_Y import YGadgetLayout, build_y_gadget
 
 __all__ = [

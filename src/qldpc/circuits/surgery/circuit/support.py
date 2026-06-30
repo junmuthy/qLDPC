@@ -21,7 +21,7 @@ from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 
 from ..hmatrix.PPM_joint import Bridge
-from ..hmatrix.PPM_XZ import GadgetLayout
+from ..hmatrix.PPM_X_Z import GadgetLayout
 
 GF2 = galois.GF(2)
 

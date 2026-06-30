@@ -23,7 +23,7 @@ from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
 from .merge import apply_mixed_basis_merge
-from .PPM_XZ import GadgetLayout, build_gadget
+from .PPM_X_Z import GadgetLayout, build_gadget
 from .PPM_Y_obs0 import Obs0ReadoutPlan, Obs0Row, _ybar_obs0_rows
 
 GF2 = galois.GF(2)

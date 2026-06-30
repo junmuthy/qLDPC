@@ -34,7 +34,7 @@ def test_cheeger_constant_matches_boost_target() -> None:
 
 def test_boost_gadget_seed_reproducible() -> None:
     from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -63,7 +63,7 @@ def test_boost_gadget_preserves_css_commutation(method: str, basis: PauliXZ) -> 
     """
     from qldpc.circuits.surgery.conftest import _webster_z_bar_operator
     from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import (
         build_gadget,
     )
 
@@ -93,7 +93,7 @@ def test_boost_gadget_combinatorial_basis_z_preserves_chi_carrier() -> None:
     covered by test_boost_gadget_preserves_css_commutation[distance].
     """
     from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z_op = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)

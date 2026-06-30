@@ -44,7 +44,7 @@ def _steane_joint_fixture():
     """Two [[7,1,3]] Steane patches joined by a bridge (basis=X). Returns
     (g_l, g_r, bridge) via the repo's real joint construction path."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     c1, c2 = codes.SteaneCode(), codes.SteaneCode()
     x1 = np.asarray(c1.get_logical_ops(Pauli.X)[0]).astype(np.uint8)

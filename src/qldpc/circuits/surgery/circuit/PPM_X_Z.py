@@ -13,7 +13,7 @@ from qldpc.circuits.bookkeeping import QubitIDs
 from qldpc.circuits.noise_model import NoiseModel
 from qldpc.objects import Pauli, PauliXZ
 
-from ..hmatrix.PPM_XZ import GadgetLayout
+from ..hmatrix.PPM_X_Z import GadgetLayout
 from .engine import (
     _surgery_detach_and_readout,
     _surgery_final_detectors,

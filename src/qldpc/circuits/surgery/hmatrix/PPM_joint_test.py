@@ -125,7 +125,7 @@ def test_bridge_mixed_basis_fields_default_to_none_or_empty() -> None:
 def test_build_bridge_smoke_steane_intracode() -> None:
     """Steane × Steane intra-code joint X̄ X̄: build_bridge returns valid Bridge."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x1 = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -169,7 +169,7 @@ def _assert_skiptree_invariant(bridge, msg=None) -> None:
 def test_build_bridge_skiptree_invariant_holds() -> None:
     """T_s · G_s_aug · P_s = H_R for both sides on Steane × Steane."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -233,7 +233,7 @@ def test_adapter_cycle_check_weight_bounded() -> None:
         _joint_merged_dispatch,
         build_bridge,
     )
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import (
         build_gadget,
     )
 
@@ -259,7 +259,7 @@ def test_cellulation_caps_aug_aux_cycle_length_on_webster() -> None:
 
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
     from qldpc.circuits.surgery.hmatrix.PPM_joint_cellulation import _build_aux_graph_strict
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import (
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import (
         build_gadget,
     )
 
@@ -291,7 +291,7 @@ def test_cellulate_max_len_defaults_to_max_basis_stabilizer_weight() -> None:
 
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
     from qldpc.circuits.surgery.hmatrix.PPM_joint_cellulation import _build_aux_graph_strict
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     sc = codes.SurfaceCode(5)
     x = np.asarray(sc.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -319,7 +319,7 @@ def test_cellulate_max_len_defaults_to_max_basis_stabilizer_weight() -> None:
 def test_build_bridge_rejects_width_below_2() -> None:
     """build_bridge rejects port subsets that intersect to width < 2."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -331,7 +331,7 @@ def test_build_bridge_rejects_width_below_2() -> None:
 def test_build_bridge_rejects_spanning_tree_root_out_of_range_left() -> None:
     """build_bridge rejects spanning_tree_root_l outside [0, width)."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -343,7 +343,7 @@ def test_build_bridge_rejects_spanning_tree_root_out_of_range_left() -> None:
 def test_build_bridge_rejects_spanning_tree_root_out_of_range_right() -> None:
     """build_bridge rejects spanning_tree_root_r outside [0, width)."""
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -372,7 +372,7 @@ def test_build_bridge_skiptree_invariant_holds_after_boost() -> None:
     """
     from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     z = np.asarray(_bb_72_12().get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
     g_l_raw = build_gadget(_bb_72_12(), z, basis=Pauli.Z)
@@ -416,7 +416,7 @@ def test_build_bridge_skiptree_invariant_holds_with_duplicate_incidence_rows() -
     anti-commutes with the gauge → non-deterministic detector.
     """
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code_l = _bb_36_8()
     code_r = _bb_36_8()
@@ -450,7 +450,7 @@ def test_build_joint_ppm_circuit_dem_deterministic_bb_36_8() -> None:
     from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import keep_only_observable
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code_l, code_r = _bb_36_8(), _bb_36_8()
     z = np.asarray(code_l.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)

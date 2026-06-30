@@ -19,7 +19,7 @@ from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli, PauliXZ
 
 from ..hmatrix.PPM_joint import Bridge
-from ..hmatrix.PPM_XZ import GadgetLayout
+from ..hmatrix.PPM_X_Z import GadgetLayout
 from .support import (
     _block_observable_targets,
     _check_lane_index_map,

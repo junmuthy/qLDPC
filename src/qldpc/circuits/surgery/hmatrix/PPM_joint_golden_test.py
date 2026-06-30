@@ -22,7 +22,7 @@ from qldpc.circuits.surgery import build_bridge
 # Task 3 rewires this import to the closed form:
 #   from qldpc.circuits.surgery.hmatrix.PPM_joint import _joint_merged_dispatch as _joint_csscode
 from qldpc.circuits.surgery.hmatrix.PPM_joint import _joint_merged_dispatch as _joint_csscode
-from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 from qldpc.objects import Pauli
 
 

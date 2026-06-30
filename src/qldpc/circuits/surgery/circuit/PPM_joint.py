@@ -20,7 +20,7 @@ from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli, PauliXZ
 
 from ..hmatrix.PPM_joint import Bridge, _joint_merged_dispatch
-from ..hmatrix.PPM_XZ import GadgetLayout
+from ..hmatrix.PPM_X_Z import GadgetLayout
 from .engine import (
     _surgery_detach_and_readout,
     _surgery_final_detectors,

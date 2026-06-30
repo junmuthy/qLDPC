@@ -21,7 +21,7 @@ from .PPM_joint_cellulation import (
     _edges_to_incidence_extra,
     _run_skiptree_on_port_subgraph,
 )
-from .PPM_XZ import GadgetLayout
+from .PPM_X_Z import GadgetLayout
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -194,7 +194,7 @@ def build_bridge(
 
     from qldpc.objects import Pauli
 
-    from .PPM_XZ import _restrict, build_gadget_augmented
+    from .PPM_X_Z import _restrict, build_gadget_augmented
 
     # boost_gadget appends weight-2 κ' rows to g_l.incidence beyond the original
     # _restrict incidence (∂_1^T). These rows must be preserved when assembling

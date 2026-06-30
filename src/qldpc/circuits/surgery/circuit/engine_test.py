@@ -17,7 +17,7 @@ def test_reliable_checks_match_basis_x_reproduces_hx_and_gauge_slice() -> None:
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _reliable_checks
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -45,7 +45,7 @@ def test_reliable_checks_match_basis_z_reproduces_hz_and_gauge_slice() -> None:
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _reliable_checks
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -72,7 +72,7 @@ def test_reliable_checks_match_basis_x_gadget_reproduces_hx_and_gauge() -> None:
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _reliable_checks
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()  # [[7,1,3]] Steane; repo fixture for the brief's _x_gadget
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -94,7 +94,7 @@ def test_reliable_checks_opposite_basis_z_experiment_makes_all_z_checks_reliable
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _reliable_checks
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -114,7 +114,7 @@ def test_surgery_state_prep_basis_x_resets() -> None:
 
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _surgery_state_prep
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
     from qldpc.codes.common import CSSCode
 
     code = codes.SteaneCode()
@@ -144,7 +144,7 @@ def test_surgery_state_prep_basis_z_resets() -> None:
 
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _surgery_state_prep
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
     from qldpc.codes.common import CSSCode
 
     code = codes.SteaneCode()
@@ -174,7 +174,7 @@ def test_surgery_qec_cycle_round_1_detectors_classified() -> None:
 
     from qldpc.circuits.bookkeeping import QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _reliable_checks, _surgery_qec_cycle
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
     from qldpc.codes.common import CSSCode
 
     code = codes.SteaneCode()
@@ -215,7 +215,7 @@ def test_surgery_detach_and_readout_basis_x_measures_ancilla_then_data() -> None
     """basis=X: detach with M (Z-basis) on ancilla, then MX on data."""
     from qldpc.circuits.bookkeeping import MeasurementRecord
     from qldpc.circuits.surgery.circuit.engine import _surgery_detach_and_readout
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -245,7 +245,7 @@ def test_surgery_detach_and_readout_basis_z_measures_ancilla_in_x_then_data_in_z
     """basis=Z: detach with MX on ancilla, then M on data."""
     from qldpc.circuits.bookkeeping import MeasurementRecord
     from qldpc.circuits.surgery.circuit.engine import _surgery_detach_and_readout
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -278,7 +278,7 @@ def test_state_prep_z_experiment_on_x_gadget_inits_data_in_z() -> None:
     the circuit contains no RX at all.
     """
     from qldpc.circuits.surgery.circuit.engine import _surgery_state_prep
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()  # [[7,1,3]] Steane; repo fixture for the brief's _x_gadget
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -301,7 +301,7 @@ def test_detach_readout_z_experiment_on_x_gadget_measures_data_in_z() -> None:
     """
     from qldpc.circuits.bookkeeping import MeasurementRecord
     from qldpc.circuits.surgery.circuit.engine import _surgery_detach_and_readout
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -334,7 +334,7 @@ def test_surgery_observable_match_basis_emits_k_block_plus_time_like_L() -> None
     from qldpc.circuits.bookkeeping import MeasurementRecord, QubitIDs
     from qldpc.circuits.surgery.circuit.engine import _surgery_observable
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -390,7 +390,7 @@ def test_surgery_final_detectors_count_matches_reliable_round1(basis: PauliXZ) -
         _surgery_qec_cycle,
     )
     from qldpc.circuits.surgery.circuit.support import _gadget_merged_csscode
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     op = code.get_logical_ops(Pauli.X)[0] if basis is Pauli.X else code.get_logical_ops(Pauli.Z)[0]

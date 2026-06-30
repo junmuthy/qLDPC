@@ -1,11 +1,11 @@
 """End-to-end / truth-table / x-error-locality tests for
-qldpc.circuits.surgery.circuit.PPM_XZ (build_single_ppm_circuit).
+qldpc.circuits.surgery.circuit.PPM_X_Z (build_single_ppm_circuit).
 
 These are the heavy sampling tests: logical_state_init end-to-end truth tables,
 multi-round invariance, the single-qubit X-error locality regression, the
 even-rounds time-like-L truth table, the frame-correction determinism check, and
 the BB [[36, 8]] boost DEM contract. The unit/structural tests live in
-PPM_XZ_test.py.
+PPM_X_Z_test.py.
 """
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ def test_single_ppm_match_basis_block_and_L_equal_prepared_eigenvalue(
     first-cycle merge X-checks) both equal that bit, replacing the old obs0==obs1
     cross-check (which read flips-vs-baseline and was always 0 for any init).
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import logical_state_init
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
@@ -64,9 +64,9 @@ def test_logical_state_init_end_to_end_steane_basis_z(state: str, expected_obs0:
     historically-working code, catching any regression where the helper
     accidentally diverges from naive on this code.
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import logical_state_init
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -106,9 +106,9 @@ def test_logical_state_init_end_to_end_bbcode_basis_z(state: str, expected_obs0:
     """
     import sympy
 
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import logical_state_init
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     xs, ys = sympy.symbols("x y")
     code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
@@ -156,9 +156,9 @@ def test_multi_round_invariance_steane_basis_z(rounds: int, state: str) -> None:
     Smith, Cohen arXiv:2511.15989 §II.A Z̄ = ∏_v A_v; the earlier
     XOR-across-R-rounds bug silently zeroed that L for every even R.)
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import logical_state_init
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -216,8 +216,8 @@ def test_single_qubit_x_error_triggers_only_neighboring_z_checks_steane(
       Z-stab row indices (not just the count) — a bug that swaps rows
       while preserving cardinality is caught.
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     z_bar = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
@@ -319,9 +319,9 @@ def test_single_ppm_even_rounds_truth_table() -> None:
     the prepared parity bit. The XOR-across-rounds bug would silence the
     time-like L at even R. Uses compile_sampler + manual XOR.
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import logical_state_init
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     code = codes.SteaneCode()
     basis_cases: list[tuple[PauliXZ, list[tuple[str, int]]]] = [
@@ -380,10 +380,10 @@ def test_single_ppm_dem_ok_bb_36_8_with_boost() -> None:
     import sympy
 
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
     from qldpc.circuits.surgery.circuit.support import keep_only_observable
     from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget, cheeger_constant
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     xs, ys = sympy.symbols("x y")
     code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
@@ -415,8 +415,8 @@ def test_frame_correction_is_load_bearing_opposite_basis() -> None:
     records correctly. Uses the k=8 BBCode [[36,8]] with an X-gadget and
     experiment_basis=Z (the opposite basis), the same construction as the count test.
     """
-    from qldpc.circuits.surgery.circuit.PPM_XZ import build_single_ppm_circuit
-    from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
     bb = _bb_36_8_code()  # dimension 8 -> k-1 = 7 frame-corrected observables
     xop = np.asarray(bb.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
