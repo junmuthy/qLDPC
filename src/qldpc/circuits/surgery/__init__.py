@@ -18,7 +18,7 @@ from .circuit import (
     keep_only_observable,
     logical_state_init,
 )
-from .gadget import GadgetLayout, build_gadget
+from .hmatrix.PPM_XZ import GadgetLayout, build_gadget
 from .y_circuit import build_single_y_ppm_circuit
 from .y_gadget import YGadgetLayout, build_y_gadget
 

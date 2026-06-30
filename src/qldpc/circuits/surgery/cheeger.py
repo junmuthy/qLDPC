@@ -18,7 +18,7 @@ import numpy as np
 
 from qldpc.codes.common import CSSCode
 
-from .gadget import GadgetLayout
+from .hmatrix.PPM_XZ import GadgetLayout
 
 
 def _exact_boundary_cheeger(incidence: galois.FieldArray) -> tuple[float, np.ndarray]:
@@ -219,7 +219,7 @@ def boost_gadget_cheeger_combinatorial(
     Raises:
         ValueError: |V_0| > 26 (enumeration infeasible) or target_h <= 0.
     """
-    from .gadget import build_gadget_augmented
+    from .hmatrix.PPM_XZ import build_gadget_augmented
 
     if target_h <= 0:
         raise ValueError(f"target_h must be positive, got {target_h}.")
@@ -370,7 +370,7 @@ def boost_gadget_distance(
     """
     from qldpc.objects import Pauli as _Pauli
 
-    from .gadget import build_gadget_augmented
+    from .hmatrix.PPM_XZ import build_gadget_augmented
 
     if target_distance <= 0:
         raise ValueError(f"target_distance must be positive, got {target_distance}.")

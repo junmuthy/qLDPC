@@ -7,7 +7,7 @@ import pytest
 
 from qldpc.circuits.surgery.cheeger import cheeger_constant
 from qldpc.circuits.surgery.conftest import _steane_y_pair
-from qldpc.circuits.surgery.gadget import build_gadget
+from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 from qldpc.circuits.surgery.y_gadget import (
     YGadgetLayout,
     _locate_overlap,

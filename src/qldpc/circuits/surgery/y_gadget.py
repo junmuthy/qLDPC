@@ -22,7 +22,7 @@ import numpy as np
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
-from .gadget import GadgetLayout, build_gadget
+from .hmatrix.PPM_XZ import GadgetLayout, build_gadget
 from .merge import apply_mixed_basis_merge
 
 GF2 = galois.GF(2)

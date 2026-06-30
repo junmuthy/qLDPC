@@ -13,7 +13,7 @@ import numpy as np
 
 from qldpc.objects import PauliXZ
 
-from .gadget import GadgetLayout
+from .hmatrix.PPM_XZ import GadgetLayout
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -516,7 +516,7 @@ def build_bridge(
 
     from qldpc.objects import Pauli
 
-    from .gadget import _restrict, build_gadget_augmented
+    from .hmatrix.PPM_XZ import _restrict, build_gadget_augmented
 
     # boost_gadget appends weight-2 κ' rows to g_l.incidence beyond the original
     # _restrict incidence (∂_1^T). These rows must be preserved when assembling

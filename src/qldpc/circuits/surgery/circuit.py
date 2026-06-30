@@ -18,7 +18,7 @@ from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli, PauliXZ
 
 from .bridge import Bridge
-from .gadget import GadgetLayout
+from .hmatrix.PPM_XZ import GadgetLayout
 
 GF2 = galois.GF(2)
 
