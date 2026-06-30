@@ -824,6 +824,7 @@ def build_joint_ppm_circuit(
     noise_model: NoiseModel | None = None,
     data_init: str | tuple[str, ...] | list[str] | None = None,
     destructive_measure_data: bool = True,
+    single_sector: bool = False,
 ) -> tuple[stim.Circuit, QuditCode]:
     """Cain et al. arXiv:2603.28627 Appendix D joint-PPM surgery experiment.
 
@@ -854,6 +855,15 @@ def build_joint_ppm_circuit(
     non-destructive — the κ + bridge ancillas are measured (the split) but the
     data is left encoded, so no end-of-circuit observable set is emitted (the
     destructive final detectors are dropped too).
+
+    ``single_sector`` (default False): emit DETECTORs for the measured-basis
+    sector only (matching ``bridge.basis``), dropping the complementary sector.
+    Valid for the match-basis experiment: every observable (the block logicals
+    and the time-like L) is of the measured Pauli type, so it is flipped only by
+    the opposite single-qubit error type, which fires the measured-basis sector —
+    the complementary detectors carry no fault distance for this observable set.
+    Shrinks the DEM ~2× with no loss. See ``build_single_ppm_circuit`` for the
+    single-PPM analogue.
     """
     if bridge.basis_l is not bridge.basis_r:
         raise NotImplementedError(
@@ -869,6 +879,7 @@ def build_joint_ppm_circuit(
         rounds=rounds, experiment_basis=experiment_basis,
         noise_model=noise_model, data_init=data_init,
         destructive_measure_data=destructive_measure_data,
+        single_sector=single_sector,
     )
 
 
@@ -883,6 +894,7 @@ def _build_joint_ppm_circuit_same_basis(
     noise_model: NoiseModel | None,
     data_init: str | tuple[str, ...] | list[str] | None,
     destructive_measure_data: bool = True,
+    single_sector: bool = False,
 ) -> tuple[stim.Circuit, QuditCode]:
     """Original same-basis joint PPM pipeline (CSS merged code)."""
     if experiment_basis is None:
@@ -928,6 +940,7 @@ def _build_joint_ppm_circuit_same_basis(
         experiment_basis=experiment_basis,
         n_data=n_data,
         joint=(g_r, bridge, intercode),
+        single_sector=single_sector,
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
@@ -948,6 +961,7 @@ def _build_joint_ppm_circuit_same_basis(
             experiment_basis=experiment_basis,
             n_data=n_data,
             joint=(g_r, bridge, intercode),
+            single_sector=single_sector,
         )
 
     # S_X'^s check IDs: data H_X^(l) rows occupy first mX_l indices in
@@ -1184,7 +1198,13 @@ def _surgery_qec_cycle(
     # Checks whose syndrome becomes a DETECTOR. single_sector keeps only the
     # measured-basis sector; all checks are still measured by ``one_round``.
     if single_sector:
-        measured = set(qubit_ids.checks_x if gadget.basis is Pauli.X else qubit_ids.checks_z)
+        # Key off experiment_basis (the OBSERVABLE Pauli type), not gadget.basis:
+        # the observables (block + time-like L) are experiment_basis-typed, so they
+        # are flipped by the opposite single-qubit error type, caught by the
+        # experiment_basis-stabilizer sector. (Match-basis: experiment_basis ==
+        # gadget.basis, so this is unchanged; opposite-basis: keeps the correct
+        # sector — gadget.basis would drop the detectors that catch the flips.)
+        measured = set(qubit_ids.checks_x if experiment_basis is Pauli.X else qubit_ids.checks_z)
         detector_check_ids = tuple(cid for cid in all_check_ids if cid in measured)
     else:
         detector_check_ids = tuple(all_check_ids)

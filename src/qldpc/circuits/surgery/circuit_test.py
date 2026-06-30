@@ -2189,6 +2189,22 @@ def test_joint_ppm_observables_deterministic_noiseless(_steane_joint_fixture) ->
     assert not obs.any()
 
 
+def test_joint_ppm_single_sector_preserves_observables_shrinks_dem(_steane_joint_fixture) -> None:
+    """single_sector keeps the full (k_l + k_r + 1) match-basis observable set
+    (every observable is the measured Pauli type, decodable from the measured-basis
+    sector alone) while dropping the complementary-sector detectors."""
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+
+    g_l, g_r, bridge = _steane_joint_fixture
+    full, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3)
+    ss, _ = build_joint_ppm_circuit(g_l, g_r, bridge, rounds=3, single_sector=True)
+    n_obs = g_l.code.dimension + g_r.code.dimension + 1
+    assert ss.num_observables == full.num_observables == n_obs
+    assert ss.num_detectors < full.num_detectors  # complementary sector dropped
+    _, obs = ss.compile_detector_sampler().sample(shots=64, separate_observables=True)
+    assert not obs.any()  # all observables still deterministic from the kept sector
+
+
 # --- Task 8: memory-experiment observable count + opposite-basis frame determinism ---
 
 
