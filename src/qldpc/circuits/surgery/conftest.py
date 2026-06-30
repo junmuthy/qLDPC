@@ -241,11 +241,10 @@ def load_webster_seed_set(code_index: int) -> dict[str, Any]:
     """Load Webster (arXiv:2511.15989) Appendix A data for code index 0..3.
 
     Returns:
-        A dict matching the JSON schema.
+        The Webster Appendix A seed dict for ``code_index``.
 
     Raises:
         IndexError: if code_index is not in 0..3.
-        FileNotFoundError: if the JSON fixture is missing.
     """
     if not 0 <= code_index <= 3:
         raise IndexError(f"code_index must be in 0..3, got {code_index}")
