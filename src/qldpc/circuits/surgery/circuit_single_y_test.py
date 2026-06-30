@@ -13,7 +13,7 @@ import pytest
 import stim
 
 from qldpc.circuits.surgery.conftest import _steane_y_pair
-from qldpc.circuits.surgery.y_gadget import build_y_gadget
+from qldpc.circuits.surgery.hmatrix.PPM_Y import build_y_gadget
 
 
 @pytest.mark.parametrize("data_init", [None, "Y+", "Y-"])

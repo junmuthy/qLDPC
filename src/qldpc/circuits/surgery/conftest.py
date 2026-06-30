@@ -26,7 +26,7 @@ import galois
 import numpy as np
 
 from qldpc import codes
-from qldpc.circuits.surgery.y_gadget import _overlap_size
+from qldpc.circuits.surgery.hmatrix.PPM_Y import _overlap_size
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 

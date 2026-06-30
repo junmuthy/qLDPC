@@ -1,4 +1,4 @@
-# y_gadget_test.py
+# PPM_Y_test.py
 import dataclasses
 
 import galois
@@ -8,7 +8,7 @@ import pytest
 from qldpc.circuits.surgery.conftest import _steane_y_pair
 from qldpc.circuits.surgery.hmatrix.cheeger import cheeger_constant
 from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
-from qldpc.circuits.surgery.y_gadget import (
+from qldpc.circuits.surgery.hmatrix.PPM_Y import (
     YGadgetLayout,
     _locate_overlap,
     build_y_gadget,
@@ -38,7 +38,7 @@ def test_build_y_gadget_no_bridge_field_and_boosted():
 
 
 def test_steane_y_pair_has_single_overlap():
-    from qldpc.circuits.surgery.y_gadget import _locate_overlaps
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import _locate_overlaps
 
     code, x, z = _steane_y_pair()
     assert ((np.asarray(code.matrix_z) @ x) % 2 == 0).all()  # x is logical-X
@@ -61,7 +61,7 @@ def test_locate_overlap_rejects_multi_overlap():
 
 
 def test_build_y_gadget_merged_code_is_valid_subsystem_code():
-    from qldpc.circuits.surgery.y_gadget import build_y_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import build_y_gadget
     code, x, z = _steane_y_pair()
     yg = build_y_gadget(code, x=x, z=z)
     mc = yg.merged_code
@@ -99,7 +99,7 @@ def test_build_y_gadget_handles_multi_overlap():
 
 
 def test_ybar_is_in_merged_stabilizer():
-    from qldpc.circuits.surgery.y_gadget import build_y_gadget
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import build_y_gadget
     code, x, z = _steane_y_pair()
     yg = build_y_gadget(code, x=x, z=z)
     n0 = code.num_qudits
@@ -110,13 +110,13 @@ def test_ybar_is_in_merged_stabilizer():
     n = yg.merged_code.num_qudits
     data_cols = list(range(n0)) + list(range(n, n + n0))  # X-block + Z-block on data
     Hd = H[:, data_cols]
-    from qldpc.circuits.surgery.y_gadget import _in_rowspace_gf2
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import _in_rowspace_gf2
     assert _in_rowspace_gf2(Hd, ybar)
 
 
 def test_bb_y_pair_overlaps():
     from qldpc.circuits.surgery.conftest import _bb_y_pair
-    from qldpc.circuits.surgery.y_gadget import _locate_overlaps
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import _locate_overlaps
 
     for ov in (1, 3):
         code, x, z = _bb_y_pair(overlap=ov)
@@ -126,7 +126,7 @@ def test_bb_y_pair_overlaps():
 
 
 def test_partial0_steane_w1_is_pure_css_no_crossing():
-    from qldpc.circuits.surgery.y_gadget import (
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import (
         _merged_incidence,
         _partial0_symplectic_rows,
     )
@@ -169,7 +169,7 @@ def _kerdim(M):
 @pytest.mark.parametrize("overlap, crossing_dim_expected", [(1, 0), (3, 2)])
 def test_bb_merged_structure_and_crossing_dim(overlap, crossing_dim_expected):
     from qldpc.circuits.surgery.conftest import _bb_y_pair
-    from qldpc.circuits.surgery.y_gadget import _merged_incidence
+    from qldpc.circuits.surgery.hmatrix.PPM_Y import _merged_incidence
 
     code, x, z = _bb_y_pair(overlap=overlap)
     yg = build_y_gadget(code, x=x, z=z)

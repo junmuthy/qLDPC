@@ -16,7 +16,7 @@ from qldpc.circuits.noise_model import NoiseModel
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
-from .y_gadget import YGadgetLayout
+from .hmatrix.PPM_Y import YGadgetLayout
 
 
 @dataclasses.dataclass
