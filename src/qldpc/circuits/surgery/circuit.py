@@ -17,7 +17,7 @@ from qldpc.circuits.noise_model import NoiseModel
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli, PauliXZ
 
-from .bridge import Bridge
+from .hmatrix.PPM_joint import Bridge
 from .hmatrix.PPM_XZ import GadgetLayout
 
 GF2 = galois.GF(2)
