@@ -98,9 +98,6 @@ def _expand_joint_data_init(
     return spec_l + spec_r
 
 
-_H_DATA_INIT = {"+": "0", "-": "1", "0": "+", "1": "-"}
-
-
 def build_joint_ppm_circuit(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
