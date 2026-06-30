@@ -141,12 +141,16 @@ relocated and then rewritten. Concretely:
   `PPM_joint.py` / `PPM_joint_cellulation.py`. Only the H̃^joint *assembly*
   becomes closed form — a formula *in terms of* the bridge's algorithmic outputs.
 
-- **Y (`PPM_Y.py`).** `build_y_gadget` is rewritten in closed form per
-  arXiv:2410.02753 Eq. 68 (main.tex §4), mirroring the single-gadget approach.
-  The `Obs0` symplectic readout planner splits to `PPM_Y_obs0.py` (forced by the
-  707-line post-fixture total; the readout planner is the clean seam — a distinct
-  concern from merged-H-matrix construction, and it cannot move to `circuit/`
-  because `build_y_gadget` builds the `Obs0ReadoutPlan` into the layout).
+- **Y (`PPM_Y.py`).** `build_y_gadget` is **already** closed-form — its assembly
+  (`y_gadget.py` named blocks `Xcheck_rows`/`SXprime_rows`/`Ymix_rows`/… + `_sym_x`/
+  `_sym_z` + `np.vstack`) reads 1:1 with arXiv:2410.02753 Eq. 68 (main.tex §4), and
+  an `np.block` rewrite verified byte-identical is *longer*, not clearer (it must
+  spell out every zero sub-block). So Piece C is **pure-motion relocation only** —
+  no rewrite, no new golden. The `Obs0` symplectic readout planner splits to
+  `PPM_Y_obs0.py` (the clean seam — a distinct concern from the merged-H-matrix
+  construction; it is self-contained, so `PPM_Y → PPM_Y_obs0` is one-directional;
+  and it cannot move to `circuit/` because `build_y_gadget` builds the
+  `Obs0ReadoutPlan` into the layout).
 
 ## 6. Fixtures
 
@@ -192,7 +196,7 @@ into `circuit/` only once no H-matrix remains in them.
 |---|---|---|
 | **A. hmatrix relocation + fixtures** | Pure motion. Create `hmatrix/` package. Relocate `gadget.py` → `hmatrix/PPM_XZ.py`, `cheeger.py` → `hmatrix/cheeger.py`, `merge.py` → `hmatrix/merge.py`; mirror their tests. Create `surgery/conftest.py` absorbing the Webster builders (seed data as dict literal) + `_steane_y_pair`/`_bb_y_pair`; embed the gadget golden hashes as a dict literal. Delete `_webster_fixture.py`, `_webster_app_a.json`, `_gadget_golden.json`. Rewire every importer (source + ~110 deep test imports). `circuit.py`/`bridge.py`/`y_*.py` stay flat, rewired to new paths. | Existing 244 tests pass unchanged; golden hashes identical; public API identical |
 | **B. Joint, end-to-end** | `hmatrix/PPM_joint.py` = `Bridge` + `build_bridge` (relocated as-is) **+ closed-form `np.block` H̃_X/H̃_Z^joint replacing `_stitch_*`**; `hmatrix/PPM_joint_cellulation.py` = cellulation + SkipTree (relocated as-is); rewire `circuit.py`'s joint builder to import from `hmatrix/`. Delete `bridge.py`; mirror tests. | **New joint golden** (intra + inter, X & Z) proving byte-identity to today's `_stitch_*` output; existing tests pass |
-| **C. Y, end-to-end** | `hmatrix/PPM_Y.py` + `PPM_Y_obs0.py` = closed-form `build_y_gadget` per Eq. 68 (replaces `y_gadget.py`); rewire `y_circuit.py` to import from `hmatrix/`. Delete `y_gadget.py`; mirror tests. | **New Y golden** proving byte-identity to today's `build_y_gadget` output; existing tests pass |
+| **C. Y relocation (pure motion)** | `y_gadget.py` → `hmatrix/PPM_Y.py` (core helpers + `YGadgetLayout` + `build_y_gadget`, whose assembly is **already** closed-form/Eq. 68 — relocated verbatim) + `hmatrix/PPM_Y_obs0.py` (`Obs0Row`/`Obs0ReadoutPlan`/`_ybar_obs0_rows`, self-contained); delete `y_gadget.py`; rewire `__init__`/`y_circuit.py`/`conftest.py`; mirror `y_gadget_test.py`. | Existing tests pass unchanged (no new golden — pure motion); ruff clean; no file > ~500 |
 | **D. Circuit-package split** | Pure motion. Split `circuit.py` → `circuit/{engine,support,PPM_XZ,PPM_joint}` and `y_circuit.py` → `circuit/{PPM_Y,PPM_Y_prep,PPM_Y_qec}`; create `circuit/__init__.py`; rewire `surgery/__init__.py`; mirror the 2254-line `circuit_test.py` and `y_circuit` tests to match. | Existing tests pass unchanged; golden hashes identical; public API identical; no file > ~500 lines |
 
 Each piece becomes its own implementation plan under this spec. Pieces B and C
