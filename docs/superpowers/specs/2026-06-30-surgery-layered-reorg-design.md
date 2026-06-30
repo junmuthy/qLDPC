@@ -173,19 +173,27 @@ duplicating code.
 
 ## 7. Implementation Decomposition
 
-Three independently-verifiable pieces against the one target structure. **A is
-the type-independent pure-motion scaffold; B and C each own one measurement type
-end-to-end** (closed-form H-matrix + its circuit move + its golden), replacing
-legacy *in place* so nothing transits. A precedes B and C, which depend on its
-shared `circuit/engine.py` + `support.py` + `coords`. The joint and Y subsystems
-stay in their current files (imported by `__init__` from the old paths) until B
-and C migrate them.
+Four independently-verifiable pieces against the one target structure. **A
+relocates the H-matrix algebra that is already closed-form or algorithmic, plus
+the fixtures (pure motion); B and C each flatten one measurement type's H-matrix
+end-to-end (closed-form + golden), replacing legacy in place so nothing transits;
+D splits the circuit layer into the `circuit/` package (pure motion).**
+
+D is last by necessity: the `circuit/` package cannot be created until B and C
+remove the joint/Y H-matrix from `circuit.py` — Python forbids `circuit.py` and
+`circuit/` coexisting, so all of `circuit.py` must move out at once, and its
+joint half (`build_joint_ppm_circuit` + `_stitch_*`) both calls the shared infra
+and contains the joint H-matrix that B flattens. Doing the circuit split in A
+would force `_stitch_*` to transit as legacy. So through A–C the circuit/bridge/Y
+modules stay flat (rewired to new `hmatrix/` import paths); D distributes them
+into `circuit/` only once no H-matrix remains in them.
 
 | Piece | Scope | Verified by |
 |---|---|---|
-| **A. Scaffold + shared + X/Z + fixtures** | Pure motion only. Create `hmatrix/` + `circuit/` packages. Relocate `gadget.py` → `hmatrix/PPM_XZ.py`, `cheeger.py`, `merge.py`. Extract the shared circuit infra from `circuit.py` → `circuit/{engine,support}` (coords/lane/algebra) and the X/Z builder → `circuit/PPM_XZ.py`. Create `conftest.py` + inline fixtures; mirror the affected test files. **Joint + Y untouched** — `bridge.py`, the joint half of `circuit.py`, and `y_*.py` stay put, still imported by `__init__` from old paths. | Existing 244 tests pass unchanged; golden hashes identical; public API identical; no file > ~500 lines |
-| **B. Joint, end-to-end** | `hmatrix/PPM_joint.py` = `Bridge` + `build_bridge` (relocated as-is) **+ closed-form `np.block` H̃_X/H̃_Z^joint replacing `_stitch_*`**; `hmatrix/PPM_joint_cellulation.py` = cellulation + SkipTree (relocated as-is); `circuit/PPM_joint.py` = `build_joint_ppm_circuit` (relocated). Delete `bridge.py` + the joint half of `circuit.py`; rewire; mirror tests. | **New joint golden** (intra + inter, X & Z) proving byte-identity to today's `_stitch_*` output; existing tests pass |
-| **C. Y, end-to-end** | `hmatrix/PPM_Y.py` + `PPM_Y_obs0.py` = closed-form `build_y_gadget` per Eq. 68 (replaces `y_gadget.py`); `circuit/PPM_Y.py` + `PPM_Y_prep.py` + `PPM_Y_qec.py` = relocated Y circuit. Delete `y_gadget.py` + `y_circuit.py`; rewire; mirror tests. | **New Y golden** proving byte-identity to today's `build_y_gadget` output; existing tests pass |
+| **A. hmatrix relocation + fixtures** | Pure motion. Create `hmatrix/` package. Relocate `gadget.py` → `hmatrix/PPM_XZ.py`, `cheeger.py` → `hmatrix/cheeger.py`, `merge.py` → `hmatrix/merge.py`; mirror their tests. Create `surgery/conftest.py` absorbing the Webster builders (seed data as dict literal) + `_steane_y_pair`/`_bb_y_pair`; embed the gadget golden hashes as a dict literal. Delete `_webster_fixture.py`, `_webster_app_a.json`, `_gadget_golden.json`. Rewire every importer (source + ~110 deep test imports). `circuit.py`/`bridge.py`/`y_*.py` stay flat, rewired to new paths. | Existing 244 tests pass unchanged; golden hashes identical; public API identical |
+| **B. Joint, end-to-end** | `hmatrix/PPM_joint.py` = `Bridge` + `build_bridge` (relocated as-is) **+ closed-form `np.block` H̃_X/H̃_Z^joint replacing `_stitch_*`**; `hmatrix/PPM_joint_cellulation.py` = cellulation + SkipTree (relocated as-is); rewire `circuit.py`'s joint builder to import from `hmatrix/`. Delete `bridge.py`; mirror tests. | **New joint golden** (intra + inter, X & Z) proving byte-identity to today's `_stitch_*` output; existing tests pass |
+| **C. Y, end-to-end** | `hmatrix/PPM_Y.py` + `PPM_Y_obs0.py` = closed-form `build_y_gadget` per Eq. 68 (replaces `y_gadget.py`); rewire `y_circuit.py` to import from `hmatrix/`. Delete `y_gadget.py`; mirror tests. | **New Y golden** proving byte-identity to today's `build_y_gadget` output; existing tests pass |
+| **D. Circuit-package split** | Pure motion. Split `circuit.py` → `circuit/{engine,support,PPM_XZ,PPM_joint}` and `y_circuit.py` → `circuit/{PPM_Y,PPM_Y_prep,PPM_Y_qec}`; create `circuit/__init__.py`; rewire `surgery/__init__.py`; mirror the 2254-line `circuit_test.py` and `y_circuit` tests to match. | Existing tests pass unchanged; golden hashes identical; public API identical; no file > ~500 lines |
 
 Each piece becomes its own implementation plan under this spec. Pieces B and C
 mirror the structure of the already-completed single-gadget closed-form plan
