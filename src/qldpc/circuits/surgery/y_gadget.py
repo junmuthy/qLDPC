@@ -10,20 +10,15 @@ anticommute) and may be any size, so the merge handles general ``|W| ≥ 1``.
 This module provides:
     _locate_overlaps — validate an (x, z) representative pair and return the
                        tuple ``W = supp(x) ∩ supp(z)`` of physical Y qubits.
-    _steane_y_pair   — a concrete Steane-code fixture (code, x, z) whose
-                       logical-X / logical-Z supports overlap on exactly one
-                       qubit (the ``|W|=1`` case).
 """
 
 from __future__ import annotations
 
 import dataclasses
-import itertools
 
 import galois
 import numpy as np
 
-from qldpc import codes
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
@@ -124,101 +119,9 @@ def _locate_overlaps(code: CSSCode, x: np.ndarray, z: np.ndarray) -> tuple[int, 
     return tuple(int(i) for i in np.where(x.astype(bool) & z.astype(bool))[0])
 
 
-def _steane_y_pair() -> tuple[CSSCode, np.ndarray, np.ndarray]:
-    """Return a Steane code and a logical (x, z) pair overlapping on exactly one qubit.
-
-    This is the clean single-overlap (``|W|=1``) fixture for the Ȳ-overlap
-    ``W = supp(x) ∩ supp(z)`` of Ȳ = iX̄Z̄ (Ide, Gowda, Nadkarni, Dauphinais
-    arXiv:2410.02753 §III.D). The canonical
-    weight-3 logical-X and logical-Z
-    representatives of the [[7,1,3]] Steane code already cross on a single data
-    qubit; if a given representative pair does not, it is reduced over GF(2) by
-    adding stabilizer rows (a logical-X support stays logical-X after XOR-ing any
-    row of ``matrix_x``; a logical-Z support stays logical-Z after XOR-ing any row
-    of ``matrix_z``) until the supports overlap on exactly one qubit.
-    """
-    code = codes.SteaneCode()
-    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
-    z = np.asarray(code.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
-
-    if _overlap_size(x, z) == 1:
-        return code, x, z
-
-    # Fallback: search small GF(2) combinations of stabilizer rows added to x and/or
-    # z. Adding an X-stabilizer row to x leaves it a logical-X representative;
-    # adding a Z-stabilizer row to z leaves it a logical-Z representative.
-    rows_x = GF2(np.asarray(code.matrix_x).astype(np.uint8))
-    rows_z = GF2(np.asarray(code.matrix_z).astype(np.uint8))
-    x_gf = GF2(x)
-    z_gf = GF2(z)
-    n_rx = rows_x.shape[0]
-    n_rz = rows_z.shape[0]
-
-    for k_x in range(n_rx + 1):
-        for cols_x in itertools.combinations(range(n_rx), k_x):
-            x_cand = x_gf + (sum((rows_x[i] for i in cols_x), GF2.Zeros(x_gf.shape)))
-            for k_z in range(n_rz + 1):
-                for cols_z in itertools.combinations(range(n_rz), k_z):
-                    z_cand = z_gf + (sum((rows_z[j] for j in cols_z), GF2.Zeros(z_gf.shape)))
-                    x_arr = np.asarray(x_cand).astype(np.uint8)
-                    z_arr = np.asarray(z_cand).astype(np.uint8)
-                    if _overlap_size(x_arr, z_arr) == 1:
-                        return code, x_arr, z_arr
-
-    raise ValueError(
-        "BLOCKED: no overlap-1 logical (x, z) pair reachable on the Steane code by "
-        "stabilizer-row reduction; the multi-overlap (|W|≥2) merge would be required "
-        "(Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.D)"
-    )
-
-
 def _overlap_size(x: np.ndarray, z: np.ndarray) -> int:
     """Number of data qubits in ``supp(x) ∩ supp(z)``."""
     return int(np.count_nonzero(x.astype(bool) & z.astype(bool)))
-
-
-def _bb_y_pair(overlap: int = 1) -> tuple[CSSCode, np.ndarray, np.ndarray]:
-    """BB [[36,8,4]] fixture for Ȳ on logical qubit 0 with chosen |W|.
-
-    overlap=1: canonical reps (already single-overlap). overlap=3: add stabilizer
-    rows (deterministic seed) until supp(x)∩supp(z) has size 3 — the |W|≥2
-    crossing-cycle regime of arXiv:2410.02753 §III.D.
-    """
-    import sympy
-
-    xs, ys = sympy.symbols("x y")
-    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)
-    n = code.num_qudits
-    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
-    LZ = np.asarray(code.get_logical_ops(Pauli.Z)).astype(np.uint8)
-    wide = LX.shape[1] == 2 * n
-    x = (LX[0][:n] if wide else LX[0]).astype(np.uint8)
-    z = (LZ[0][n:] if wide else LZ[0]).astype(np.uint8)
-    if overlap == 1:
-        return code, x, z
-    if overlap == 3:
-        HX = np.asarray(code.matrix_x).astype(np.uint8)
-        HZ = np.asarray(code.matrix_z).astype(np.uint8)
-        rng = np.random.default_rng(0)
-        for _ in range(20000):
-            ax = (
-                rng.integers(0, 2, HX.shape[0])
-                if rng.random() < 0.5
-                else np.zeros(HX.shape[0], int)
-            )
-            az = rng.integers(0, 2, HZ.shape[0])
-            xc = (x ^ (ax @ HX % 2)).astype(np.uint8)
-            zc = (z ^ (az @ HZ % 2)).astype(np.uint8)
-            if not xc.any() or not zc.any():
-                continue
-            if (
-                int(np.count_nonzero(xc.astype(bool) & zc.astype(bool))) == 3
-                and int(xc.sum()) <= 12
-                and int(zc.sum()) <= 12
-            ):
-                return code, xc, zc
-        raise ValueError("BLOCKED: no |W|=3 BB representative found in budget")
-    raise ValueError(f"overlap must be 1 or 3, got {overlap}")
 
 
 def _merged_incidence(

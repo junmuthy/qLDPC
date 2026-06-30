@@ -12,7 +12,8 @@ from __future__ import annotations
 import pytest
 import stim
 
-from qldpc.circuits.surgery.y_gadget import _steane_y_pair, build_y_gadget
+from qldpc.circuits.surgery.conftest import _steane_y_pair
+from qldpc.circuits.surgery.y_gadget import build_y_gadget
 
 
 @pytest.mark.parametrize("data_init", [None, "Y+", "Y-"])
@@ -166,7 +167,7 @@ def test_single_y_outcome_nondeterministic_on_0_and_plus() -> None:
     Dauphinais arXiv:2410.02753 §III.C.
     """
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
@@ -243,7 +244,7 @@ def test_single_y_non_destructive_same_obs0_and_fewer_detectors() -> None:
 def test_single_y_non_destructive_rejects_memory_logical() -> None:
     """Survivor-memory needs the destructive readout; combining is an error."""
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
@@ -256,7 +257,7 @@ def test_single_y_non_destructive_rejects_memory_logical() -> None:
 def test_single_y_force_obs0_conflicts_with_memory_logical() -> None:
     """``force_obs0`` and ``memory_logical`` both claim observable index 0."""
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
@@ -274,7 +275,7 @@ def test_single_y_survivor_memory_observable_compiles() -> None:
     observable (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III.C).
     """
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)
@@ -290,7 +291,7 @@ def test_single_y_survivor_memory_observable_compiles() -> None:
 def test_single_y_memory_logical_none_suppresses_readout_observable() -> None:
     """memory_logical=None emits no Ȳ-readout observable."""
     from qldpc.circuits.surgery import build_single_y_ppm_circuit
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
 
     code, x, z = _bb_y_pair(overlap=1)
     yg = build_y_gadget(code, x=x, z=z)

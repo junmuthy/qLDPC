@@ -6,13 +6,12 @@ import numpy as np
 import pytest
 
 from qldpc import codes
-from qldpc.objects import Pauli, PauliXZ
-
-from ._webster_fixture import (
+from qldpc.circuits.surgery.conftest import (
     _webster_x_bar_operator,
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
+from qldpc.objects import Pauli, PauliXZ
 
 
 def test_cheeger_constant_matches_boost_target() -> None:
@@ -63,11 +62,10 @@ def test_boost_gadget_preserves_css_commutation(method: str, basis: PauliXZ) -> 
     hang on the k=0 merged code.
     """
     from qldpc.circuits.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.conftest import _webster_z_bar_operator
     from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-
-    from ._webster_fixture import _webster_z_bar_operator
 
     data = load_webster_seed_set(0)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])

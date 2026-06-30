@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from qldpc import codes
-from qldpc.circuits.surgery._webster_fixture import (
+from qldpc.circuits.surgery.conftest import (
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )

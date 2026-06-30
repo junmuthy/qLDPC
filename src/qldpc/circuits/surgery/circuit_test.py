@@ -7,13 +7,12 @@ import pytest
 import stim
 
 from qldpc import codes
-from qldpc.objects import Pauli, PauliXZ
-
-from ._webster_fixture import (
+from qldpc.circuits.surgery.conftest import (
     _webster_x_bar_operator,
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
+from qldpc.objects import Pauli, PauliXZ
 
 
 def test_reliable_checks_match_basis_x_reproduces_hx_and_gauge_slice() -> None:
@@ -680,7 +679,7 @@ def test_stitch_intracode_both_bases_commute(basis: PauliXZ) -> None:
         x1 = _webster_x_bar_operator(data, "X_bar_1")
         x2 = _webster_x_bar_operator(data, "X_bar_k2p1")
     else:
-        from ._webster_fixture import _webster_z_bar_operator
+        from qldpc.circuits.surgery.conftest import _webster_z_bar_operator
 
         x1 = _webster_z_bar_operator(data, "Z_bar_1")
         x2 = _webster_z_bar_operator(data, "Z_bar_k2p1")

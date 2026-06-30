@@ -6,13 +6,12 @@ import numpy as np
 import pytest
 
 from qldpc import codes
-from qldpc.objects import Pauli
-
-from ._webster_fixture import (
+from qldpc.circuits.surgery.conftest import (
     _webster_z_bar_operator,
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
+from qldpc.objects import Pauli
 
 
 def test_skip_tree_fullrank_on_K4_matches_H_R() -> None:

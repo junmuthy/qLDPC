@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 
 from qldpc.circuits.surgery.cheeger import cheeger_constant
+from qldpc.circuits.surgery.conftest import _steane_y_pair
 from qldpc.circuits.surgery.gadget import build_gadget
 from qldpc.circuits.surgery.y_gadget import (
     YGadgetLayout,
     _locate_overlap,
-    _steane_y_pair,
     build_y_gadget,
 )
 from qldpc.objects import Pauli
@@ -115,7 +115,8 @@ def test_ybar_is_in_merged_stabilizer():
 
 
 def test_bb_y_pair_overlaps():
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair, _locate_overlaps
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
+    from qldpc.circuits.surgery.y_gadget import _locate_overlaps
 
     for ov in (1, 3):
         code, x, z = _bb_y_pair(overlap=ov)
@@ -167,7 +168,8 @@ def _kerdim(M):
 # in any particular ∂_0 basis is NOT invariant — do not assert on it.)
 @pytest.mark.parametrize("overlap, crossing_dim_expected", [(1, 0), (3, 2)])
 def test_bb_merged_structure_and_crossing_dim(overlap, crossing_dim_expected):
-    from qldpc.circuits.surgery.y_gadget import _bb_y_pair, _merged_incidence
+    from qldpc.circuits.surgery.conftest import _bb_y_pair
+    from qldpc.circuits.surgery.y_gadget import _merged_incidence
 
     code, x, z = _bb_y_pair(overlap=overlap)
     yg = build_y_gadget(code, x=x, z=z)

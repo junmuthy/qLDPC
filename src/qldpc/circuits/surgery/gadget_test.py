@@ -8,13 +8,12 @@ import numpy as np
 import pytest
 
 from qldpc import codes
-from qldpc.objects import Pauli
-
-from ._webster_fixture import (
+from qldpc.circuits.surgery.conftest import (
     _webster_x_bar_operator,
     build_generalised_bicycle_code,
     load_webster_seed_set,
 )
+from qldpc.objects import Pauli
 
 WEBSTER_TABLE_I_ANCILLA_MEAS_COMP = [(0, 19), (1, 31), (2, 49), (3, 79)]
 
@@ -261,11 +260,10 @@ def test_build_gadget_z_basis_dual_matches_x_basis_on_dual_code() -> None:
 def test_webster_table_i_z_basis_ancilla_meas_comp_exact() -> None:
     """Webster Z̄_1 seed in Cain notation: |Q'| + |S'_meas| + |S'_comp| matches
     (basis-symmetric dual; reproduces Webster Table I)."""
+    from qldpc.circuits.surgery.conftest import _webster_z_bar_operator
     from qldpc.circuits.surgery.gadget import (
         build_gadget,
     )
-
-    from ._webster_fixture import _webster_z_bar_operator
 
     for code_index, expected in [(0, 19), (1, 31), (2, 49), (3, 79)]:
         d = load_webster_seed_set(code_index)
