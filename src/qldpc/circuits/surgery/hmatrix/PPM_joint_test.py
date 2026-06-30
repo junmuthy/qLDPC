@@ -447,10 +447,8 @@ def test_build_joint_ppm_circuit_dem_deterministic_bb_36_8() -> None:
     rows.
     """
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.circuit import (
-        build_joint_ppm_circuit,
-        keep_only_observable,
-    )
+    from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.circuit.support import keep_only_observable
     from qldpc.circuits.surgery.hmatrix.PPM_joint import build_bridge
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 
