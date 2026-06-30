@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from qldpc.circuits.surgery.merge import apply_mixed_basis_merge
+from qldpc.circuits.surgery.hmatrix.merge import apply_mixed_basis_merge
 
 
 def _symplectic_inner(row_a: np.ndarray, row_b: np.ndarray, n: int) -> int:

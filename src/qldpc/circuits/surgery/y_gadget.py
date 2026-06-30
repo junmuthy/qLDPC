@@ -22,8 +22,8 @@ import numpy as np
 from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
+from .hmatrix.merge import apply_mixed_basis_merge
 from .hmatrix.PPM_XZ import GadgetLayout, build_gadget
-from .merge import apply_mixed_basis_merge
 
 GF2 = galois.GF(2)
 
@@ -578,7 +578,7 @@ def build_y_gadget(code: CSSCode, *, x: np.ndarray, z: np.ndarray) -> YGadgetLay
 
     # Per-system L=1 gadgets, each Cheeger-boosted to ≥1
     # (arXiv:2410.02753 §III.D: per-system distance argument).
-    from .cheeger import boost_gadget, cheeger_constant
+    from .hmatrix.cheeger import boost_gadget, cheeger_constant
 
     g_x = build_gadget(code, x, basis=Pauli.X)
     g_z = build_gadget(code, z, basis=Pauli.Z)

@@ -1971,11 +1971,11 @@ def test_single_ppm_dem_ok_bb_36_8_with_boost() -> None:
     import sympy
 
     from qldpc.circuits.noise_model import DepolarizingNoiseModel
-    from qldpc.circuits.surgery.cheeger import boost_gadget, cheeger_constant
     from qldpc.circuits.surgery.circuit import (
         build_single_ppm_circuit,
         keep_only_observable,
     )
+    from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget, cheeger_constant
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 
     xs, ys = sympy.symbols("x y")

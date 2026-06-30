@@ -600,7 +600,7 @@ def test_build_bridge_skiptree_invariant_holds_after_boost() -> None:
     stabilizers are bogus → non-deterministic detector in joint PPM DEM.
     """
     from qldpc.circuits.surgery.bridge import build_bridge
-    from qldpc.circuits.surgery.cheeger import boost_gadget
+    from qldpc.circuits.surgery.hmatrix.cheeger import boost_gadget
     from qldpc.circuits.surgery.hmatrix.PPM_XZ import build_gadget
 
     z = np.asarray(_bb_72_12().get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
