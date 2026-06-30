@@ -327,8 +327,8 @@ def _run_skiptree_on_port_subgraph(
         # and on rows whose endpoints are outside the port subgraph. Paired with
         # _build_aux_graph_strict's matching skip; together they make hyperedge κ
         # qubits invisible to (T_s · F_aug), so S'_v · cycle_c commutation reduces
-        # to the weight-2 sub-incidence SkipTree identity. See bridge.py docstring
-        # for _build_aux_graph_strict for the proof sketch.
+        # to the weight-2 sub-incidence SkipTree identity. See the
+        # _build_aux_graph_strict docstring (this module) for the proof sketch.
         if len(cols) != 2:
             continue
         u_orig, v_orig = sorted(int(x) for x in cols)
