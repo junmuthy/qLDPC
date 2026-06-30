@@ -72,7 +72,7 @@ DELETED: _webster_fixture.py, _webster_app_a.json, _gadget_golden.json
 
 ---
 
-### Task A1: Consolidate fixtures into `surgery/conftest.py`
+### Task 1: Consolidate fixtures into `surgery/conftest.py`
 
 Create `conftest.py`, move the Webster fixtures (with the JSON inlined as a dict
 literal) and the `_steane_y_pair`/`_bb_y_pair` builders into it, delete the
@@ -201,11 +201,11 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task A2: Relocate `gadget.py` → `hmatrix/PPM_XZ.py`
+### Task 2: Relocate `gadget.py` → `hmatrix/PPM_XZ.py`
 
 Create the `hmatrix/` package, move the X/Z H-matrix module and its unit test,
 and rewire every importer. (The golden test's *import* is rewired here but the
-file move + JSON embed is deferred to Task A3, because its `Path(__file__)` JSON
+file move + JSON embed is deferred to Task 3, because its `Path(__file__)` JSON
 lookup must change in the same step it moves.)
 
 **Files:**
@@ -217,7 +217,7 @@ lookup must change in the same step it moves.)
   and the moved `hmatrix/PPM_XZ_test.py`
 
 **Interfaces:**
-- Consumes: fixtures from `qldpc.circuits.surgery.conftest` (Task A1).
+- Consumes: fixtures from `qldpc.circuits.surgery.conftest` (Task 1).
 - Produces: `qldpc.circuits.surgery.hmatrix.PPM_XZ` exporting `GadgetLayout`,
   `build_gadget`, `build_gadget_augmented`, `_restrict`, `_x_merged`.
 
@@ -285,7 +285,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task A3: Embed the gadget golden as a dict + move the golden test
+### Task 3: Embed the gadget golden as a dict + move the golden test
 
 Inline `_gadget_golden.json` as a Python dict literal in the golden test, give it
 a print-based regenerate mode, delete the JSON, and move the test into
@@ -368,7 +368,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task A4: Relocate `cheeger.py` and `merge.py` → `hmatrix/`
+### Task 4: Relocate `cheeger.py` and `merge.py` → `hmatrix/`
 
 Move the boost and mixed-basis-merge modules (and their tests) into `hmatrix/`,
 and fix imports: their now-sibling reference to `PPM_XZ`, and their consumers'
@@ -395,7 +395,7 @@ references to them.
   ```
 
 - [ ] **Step 2: Fix `cheeger.py`'s now-sibling import of `PPM_XZ`.**
-  In `hmatrix/cheeger.py`, the imports set to `.hmatrix.PPM_XZ` in Task A2 are now
+  In `hmatrix/cheeger.py`, the imports set to `.hmatrix.PPM_XZ` in Task 2 are now
   one level too deep (cheeger lives *inside* `hmatrix/`). Change all three:
   - `from .hmatrix.PPM_XZ import GadgetLayout` → `from .PPM_XZ import GadgetLayout`
   - `from .hmatrix.PPM_XZ import build_gadget_augmented` → `from .PPM_XZ import build_gadget_augmented` (both occurrences)
@@ -442,10 +442,10 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ## Plan Self-Review
 
 **Spec coverage (Piece A row of §7):**
-- `gadget.py` → `hmatrix/PPM_XZ.py` — Task A2 ✓
-- `cheeger.py`, `merge.py` → `hmatrix/` — Task A4 ✓
-- `conftest.py` absorbing Webster + `_steane_y_pair`/`_bb_y_pair`, seed as dict — Task A1 ✓
-- gadget golden hashes as dict literal — Task A3 ✓
+- `gadget.py` → `hmatrix/PPM_XZ.py` — Task 2 ✓
+- `cheeger.py`, `merge.py` → `hmatrix/` — Task 4 ✓
+- `conftest.py` absorbing Webster + `_steane_y_pair`/`_bb_y_pair`, seed as dict — Task 1 ✓
+- gadget golden hashes as dict literal — Task 3 ✓
 - delete `_webster_fixture.py`, `_webster_app_a.json`, `_gadget_golden.json` — A1, A3 ✓
 - rewire every importer (source + ~110 deep test imports) — A1–A4 ✓
 - `circuit.py`/`bridge.py`/`y_*.py` stay flat, rewired — ✓ (only import lines change)
@@ -461,8 +461,8 @@ edge cases`/unspecified-code steps remain.
 (`build_gadget`, `GadgetLayout`, `build_gadget_augmented`, `_restrict`,
 `_x_merged`, `boost_gadget`, `cheeger_constant`, `apply_mixed_basis_merge`,
 `load_webster_seed_set`, `build_generalised_bicycle_code`, `_steane_y_pair`,
-`_bb_y_pair`); only module paths change. Task A4's sibling-import fix correctly
-undoes Task A2's `.hmatrix.PPM_XZ` once `cheeger.py` moves inside `hmatrix/`.
+`_bb_y_pair`); only module paths change. Task 4's sibling-import fix correctly
+undoes Task 2's `.hmatrix.PPM_XZ` once `cheeger.py` moves inside `hmatrix/`.
 
 **Ordering:** A1 (conftest, absolute imports) precedes the module moves so moved
 test files carry stable absolute fixture imports; A2 (gadget) precedes A4
