@@ -3,6 +3,7 @@ import numpy as np
 from qldpc.circuits.surgery.hmatrix.edge_expanded import restrict_maps
 from qldpc.circuits.surgery.hmatrix.edge_expanded import (
     boundary, cheeger_constant, sparsest_cut)
+from qldpc.circuits.surgery.hmatrix.edge_expanded import algorithm_1
 
 STEANE_HZ = np.array([  # Steane [[7,1,3]] H_Z (arXiv:2410.02753 Eq.54), qubits 0..6
     [0,0,0,1,1,1,1],
@@ -56,3 +57,20 @@ def test_sparsest_cut_returns_min_ratio_set():
     S = sparsest_cut(inc)
     assert 1 <= int(S.sum()) <= 3
     assert int(boundary(inc, S).sum()) == 0        # sparsest cut isolates a component (ratio 0)
+
+
+def test_algorithm_1_reaches_cheeger_one():
+    inc = _incidence([(0,1),(1,2),(3,4),(4,5)], 6)   # h=0
+    out = algorithm_1(inc, seed=0)
+    assert out.shape[1] == 6                          # same vertices
+    assert out.shape[0] >= inc.shape[0]               # superset of edges
+    np.testing.assert_array_equal(out[:inc.shape[0]], inc)  # original edges preserved
+    assert cheeger_constant(out) >= 1.0
+    added = out[inc.shape[0]:]
+    if added.size:
+        assert np.all(added.sum(axis=1) == 2)         # each new edge is weight-2
+
+def test_algorithm_1_noop_when_already_one():
+    inc = _incidence([(0,1),(1,2),(2,3),(3,0)], 4)    # 4-cycle already h=1 (see Task 2)
+    out = algorithm_1(inc, seed=0)
+    np.testing.assert_array_equal(out, inc)

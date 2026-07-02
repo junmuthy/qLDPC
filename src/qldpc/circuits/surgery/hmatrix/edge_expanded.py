@@ -111,3 +111,46 @@ def sparsest_cut(incidence: np.ndarray) -> np.ndarray:
             best_ratio = cut / size
             best_mask = mask
     return _mask_to_indicator(best_mask, n_v)
+
+
+def algorithm_1(incidence: np.ndarray, *, max_extra: int = 200, seed: int = 0) -> np.ndarray:
+    """Greedy algorithm to add edges to reach Cheeger constant 1
+    (arXiv:2410.02753 Algorithm 1). ``incidence`` = ∂_1 as edge-vertex incidence
+    (rows=edges, cols=vertices). Returns a superset-of-edges incidence with h=1.
+    """
+    rng = np.random.default_rng(seed)
+    E_star = np.asarray(incidence).astype(np.uint8).copy()        # line 1: E* ← E
+    n_v = E_star.shape[1]
+    if n_v < 2:
+        return E_star
+    added = 0
+    while cheeger_constant(E_star) < 1.0:                         # line 2: while h(B)<1
+        if added >= max_extra:
+            raise RuntimeError(f"Algorithm 1 exceeded max_extra={max_extra}")
+        S = sparsest_cut(E_star)                                   # line 3: sparsest cut
+        deg = E_star.sum(axis=0)                                   # vertex degrees (over E*)
+        inside = np.flatnonzero(S == 1)
+        outside = np.flatnonzero(S == 0)
+        # line 5-6: v1 over min-degree vertices of S; v2 over min-degree vertices of V∖S
+        min_deg_in = inside[deg[inside] == deg[inside].min()]
+        min_deg_out = outside[deg[outside] == deg[outside].min()]
+        h_star = -np.inf                                           # line 4: h* ← -∞
+        best_edge = None
+        for v1 in min_deg_in:
+            for v2 in min_deg_out:                                 # line 7-10
+                trial_row = np.zeros((1, n_v), dtype=np.uint8)
+                trial_row[0, v1] = 1
+                trial_row[0, v2] = 1
+                trial = np.vstack([E_star, trial_row])
+                h = cheeger_constant(trial)
+                if h > h_star:                                     # line 8: if h(...) > h*
+                    h_star = h                                     # line 9
+                    best_edge = (int(v1), int(v2))                 # line 10: e ← (v1,v2)
+        if best_edge is None:                                      # pragma: no cover
+            raise RuntimeError("Algorithm 1: no admissible edge across the sparsest cut")
+        row = np.zeros((1, n_v), dtype=np.uint8)
+        row[0, best_edge[0]] = 1
+        row[0, best_edge[1]] = 1
+        E_star = np.vstack([E_star, row])                          # line 13: E* ← E* ∪ {e}
+        added += 1
+    return E_star                                                 # line 15: return B
