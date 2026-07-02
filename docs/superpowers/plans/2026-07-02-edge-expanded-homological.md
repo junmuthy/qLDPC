@@ -782,71 +782,76 @@ def cellulate(
     target_weight: int,
     seed: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Cellulate heavy ∂_0 cycles into smaller ones (arXiv:2410.02753 Algorithm 3,
-    "cellulate large cycles"). Reuses the EXISTING chord-breaking machinery from
-    ``PPM_joint_cellulation`` (``_build_aux_graph_strict`` + networkx
-    ``cycle_basis`` chord addition, per Williamson & Yoder arXiv:2410.02213 — the
-    same primitive the joint/bridge path uses) rather than re-implementing cycle
-    traversal. Adds the resulting chord edges to ∂_1 (with zero f_0 columns) and
-    re-derives a low-weight ∂_0 via Algorithm 2. ``target_weight`` caps cycle
-    length (= edge weight of a cycle).
+    """Cellulate large cycles (arXiv:2410.02753 Algorithm 3, "cellulate large
+    cycles"). FAITHFUL PORT of the paper authors' reference implementation
+    ``cellulate_long_cycles`` (Swaroop, Jochym-O'Connor, Yoder — repository
+    adapters-LDPC-surgery/cellulation.py, arXiv:2410.03628): build the graph from
+    ∂_1's weight-2 edges; while any cycle-basis cycle is longer than
+    ``target_weight`` (= ``max_len``), add the chord between the cycle's vertex 0
+    and its opposite vertex (index ``n//2``), then recompute the cycle basis and
+    take its first cycle. New chords become ∂_1 rows (with zero f_0 columns);
+    ∂_0 is then re-derived low-weight via Algorithm 2.
 
     Precondition: ∂_1 rows are all weight-2 here (the Alg 3 branch runs
-    ``expand_hyperedges`` first), so ``_build_aux_graph_strict`` skips nothing.
+    ``expand_hyperedges`` first), so every row maps to a graph edge.
     """
     import networkx as nx
-
-    from .PPM_joint_cellulation import _build_aux_graph_strict, _edges_to_incidence_extra
 
     inc = np.asarray(incidence).astype(np.uint8).copy()
     f0 = np.asarray(f0).astype(np.uint8).copy()
     n_v = inc.shape[1]
 
-    # Build the aux graph from ∂_1's weight-2 edges (reused helper).
-    G_aux, _ = _build_aux_graph_strict(inc)                       # line: cellulate large cycles
-    # Break every cycle-basis cycle longer than target by adding a chord (full
-    # graph — no port restriction; single-operator ∂_0 has no bridge ports).
-    added: list[tuple[int, int]] = []
-    max_chords = 4 * max(1, target_weight) + 4 * inc.shape[0]     # infinite-loop backstop
-    while len(added) < max_chords:
-        long_cycles = [c for c in nx.cycle_basis(G_aux) if len(c) > target_weight]
-        if not long_cycles:
-            break
-        cyc = long_cycles[0]
-        m = len(cyc)
-        chord = None
-        for i in range(m):
-            for j in range(i + 2, m):
-                u, v = sorted((cyc[i], cyc[j]))
-                if not G_aux.has_edge(u, v):
-                    chord = (u, v)
-                    break
-            if chord is not None:
-                break
-        if chord is None:                                         # pragma: no cover
-            break                                                 # no admissible chord; stop
-        G_aux.add_edge(*chord)
-        added.append(chord)
+    # Build G from ∂_1's weight-2 edges (mirrors the reference's G / G_mat).
+    G = nx.Graph()
+    G.add_nodes_from(range(n_v))
+    for row in inc:
+        vs = np.flatnonzero(row)
+        if len(vs) == 2:
+            G.add_edge(int(vs[0]), int(vs[1]))
 
-    if added:
-        extra = _edges_to_incidence_extra(added, n_v)             # chords -> ∂_1 rows
+    new_edges: list[tuple[int, int]] = []
+    guard = 0
+    max_iter = 8 * inc.shape[0] + 64                 # backstop (the reference has none)
+    for cycle in nx.cycle_basis(G):                  # reference: for cycle in cycles
+        while len(cycle) > target_weight:            # reference: while len(cycle) > max_len
+            guard += 1
+            if guard > max_iter:                     # pragma: no cover  -- spin backstop
+                break
+            n = len(cycle)
+            u, v = sorted((int(cycle[0]), int(cycle[n // 2])))   # opposite vertices i=0, j=n//2
+            if not G.has_edge(u, v):
+                G.add_edge(u, v)
+                new_edges.append((u, v))
+            basis = nx.cycle_basis(G)
+            if not basis:                            # pragma: no cover
+                break
+            cycle = basis[0]                         # reference: cycle = nx.cycle_basis(G)[0]
+        if guard > max_iter:                         # pragma: no cover
+            break
+
+    if new_edges:                                    # chords -> new ∂_1 rows + zero f_0 columns
+        extra = np.zeros((len(new_edges), n_v), dtype=np.uint8)
+        for r, (u, v) in enumerate(new_edges):
+            extra[r, u] = 1
+            extra[r, v] = 1
         inc = np.vstack([inc, extra]).astype(np.uint8)
-        f0 = np.hstack([f0, np.zeros((f0.shape[0], len(added)), np.uint8)])  # zero f_0 cols
+        f0 = np.hstack([f0, np.zeros((f0.shape[0], len(new_edges)), np.uint8)])
 
     # Re-derive the low-weight cycle basis on the cellulated graph (Algorithm 2).
     d0 = algorithm_2(inc, np.zeros((0, n_v), np.uint8), f0, n_samples=200, seed=seed)
     return d0, inc, f0
 ```
 
-> **Note (reuse):** `_build_aux_graph_strict` and `_edges_to_incidence_extra`
-> already exist in `PPM_joint_cellulation.py` and are exactly the incidence↔graph
-> converters needed here; import them rather than duplicating. The chord-breaking
-> loop mirrors that module's `_cellulate_port_subgraph` but drops the port filter
-> (single-operator ∂_0 has no bridge ports — the full-graph variant is correct
-> here, and the port-port-chord failure noted in that function does not apply).
-> Re-running Algorithm 2 after adding chords realizes the paper's "replace the
-> high-weight row with multiple lower-weight rows" as a fresh low-weight basis on
-> the finer graph.
+> **Note (faithful port):** this mirrors the reference `cellulate_long_cycles`
+> (adapters-LDPC-surgery/cellulation.py) line-for-line: same `nx.cycle_basis`,
+> same fixed opposite-vertex chord `(cycle[0], cycle[n//2])`, same
+> `cycle = nx.cycle_basis(G)[0]` recomputation. The only additions are a `guard`
+> against the reference's infinite-spin case (chord already present) and the
+> ∂_1/f_0 bookkeeping so the chords enter the cone code. The reference's
+> `max_len=6` corresponds to `target_weight` (the native code check weight). After
+> cellulation, re-running Algorithm 2 yields the low-weight ∂_0 whose rows are the
+> smaller cycles — the paper's "replace the high-weight row with multiple
+> lower-weight rows."
 
 - [ ] **Step 4: Run test to verify it passes**
 
