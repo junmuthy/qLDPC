@@ -1200,22 +1200,19 @@ def test_example6_steane_no_cycles():
     assert cheeger_constant(cm.incidence) >= 1.0
 
 def test_example7_hamming_algorithm1_is_load_bearing():
-    # arXiv:2410.02753 Example 7: [[15,7,3]] Hamming, X̄=X3X4X5X12X14.
-    # H_X=H_Z (Eq 57). Without Alg 1 the graph has Cheeger 0.5 and distance drops to 2;
-    # Alg 1 adds exactly 2 edges to restore it.
-    H = np.array([
-        [0,0,0,0,0,0,0,1,1,1,1,1,1,1,1],
-        [0,1,1,1,0,0,0,0,1,1,1,1,0,0,0],  # NOTE: transcribe Eq 57 exactly at implementation time
-        [1,0,1,1,0,1,1,0,0,1,1,0,0,1,1],
-        [1,1,0,1,1,0,1,0,1,0,1,0,1,0,1],
-    ], dtype=np.uint8)
-    x = np.zeros(15, dtype=np.uint8); x[[2,3,4,11,13]] = 1     # X3X4X5X12X14 (0-indexed 2,3,4,11,13)
+    # arXiv:2410.02753 Example 7: [[15,7,3]] quantum Hamming code, X̄=X3X4X5X12X14.
+    # H_X=H_Z = the [15,11,3] Hamming parity check (column j = binary rep of j,
+    # 1-indexed). Without Alg 1 the support graph has Cheeger 0.5 (distance would
+    # drop to 2); Alg 1 adds exactly 2 edges to restore Cheeger 1. (Pre-verified:
+    # support (2,3,4,11,13), incidence_star weights [2,2,4,2], 0.5 -> 1.0, +2 edges.)
+    H = np.array([[(j >> i) & 1 for j in range(1, 16)] for i in range(4)], dtype=np.uint8)
+    x = np.zeros(15, dtype=np.uint8); x[[2,3,4,11,13]] = 1     # X3X4X5X12X14 (0-indexed)
+    assert not ((H @ x) % 2).any()                             # X̄ commutes with H_Z
     r = restrict_maps(H, x)
-    h_before = cheeger_constant(r.incidence_star)
-    assert abs(h_before - 0.5) < 1e-9                          # paper: Cheeger 0.5
+    assert abs(cheeger_constant(r.incidence_star) - 0.5) < 1e-9   # paper: Cheeger 0.5
     inc_after = algorithm_1(r.incidence_star, seed=0)
     assert cheeger_constant(inc_after) >= 1.0
-    assert inc_after.shape[0] - r.incidence_star.shape[0] == 2  # paper: two additional edges
+    assert inc_after.shape[0] - r.incidence_star.shape[0] == 2    # paper: two additional edges
 
 def test_example5_weight8_cellulation_bound():
     # arXiv:2410.02753 Example 5: a weight-8 X̄ whose ∂1* graph is an 8-cycle
@@ -1229,21 +1226,24 @@ def test_example5_weight8_cellulation_bound():
     assert cheeger_constant(out) >= 1.0
 ```
 
-> **Implementation note:** transcribe the `[[15,7,3]]` `H` (Eq 57) and the Steane `H_Z` (Eq 54) from the PDF at `/Users/tgzhou/.claude/projects/-Users-tgzhou-Project-qLDPC/3110c02c-7a78-4eba-a225-8f54569d2197/tool-results/webfetch-1782989068608-txoukg.pdf` pages 10-11 exactly; the rows above are placeholders for the correct parity checks. The invariants asserted (Cheeger 0.5 → ≥1, exactly 2 edges added) are the paper's stated numbers and must hold once `H` is correct.
+> **All matrices are self-contained and pre-verified** (no PDF transcription
+> needed): Steane `H_Z` (Eq 54) is the hand-coded `STEANE_HZ`; the `[[15,7,3]]`
+> `H` is the standard `[15,11,3]` Hamming parity check (column j = binary rep of
+> j). I confirmed with the committed `algorithm_1`: Example 7 → Cheeger 0.5→1.0,
+> +2 edges; Example 5 (8-cycle) → 0.5→1.0, +2 edges; Example 6 (Steane w-3) →
+> ∂0 empty. All fast (|support| ≤ 8).
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_golden_test.py -v`
-Expected: FAIL (transcription placeholders / import).
+Expected: FAIL with `ImportError` (test file not created yet).
 
-- [ ] **Step 3: Fix the transcribed matrices**
-
-Read the PDF pages 10-11 and replace the placeholder `H` (Eq 57) with the exact `[[15,7,3]]` Hamming parity check, and confirm Steane `H_Z` (Eq 54). Adjust 0-indexing of `X̄ = X3X4X5X12X14` if the paper is 1-indexed (→ indices 2,3,4,11,13).
+- [ ] **Step 3: (none — matrices are final, no transcription)**
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_golden_test.py -v`
-Expected: PASS (3 tests). If `test_example7` shows a different edge count, re-read the note in Alg 1 (min-degree tie handling) — the paper's "two additional edges" is the target.
+Expected: PASS (3 tests), all instant. The invariants (Cheeger 0.5→≥1, +2 edges, ∂0 empty) are the paper's stated numbers and hold with the committed algorithms.
 
 - [ ] **Step 5: Commit**
 
