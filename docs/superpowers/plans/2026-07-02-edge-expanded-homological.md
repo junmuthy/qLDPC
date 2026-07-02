@@ -1051,17 +1051,18 @@ git commit -m "feat(surgery): Algorithm 3 orchestrator edge_expanded_maps (arXiv
 
 ---
 
-### Task 7: Wire into `build_gadget`; add `f1`/`f0` to `GadgetLayout`; delete dead code
+### Task 7: Wire single-operator `build_gadget` to edge-expanded; add optional `f1`/`f0`; drop dead `_all_cuts`
 
 **Files:**
-- Modify: `src/qldpc/circuits/surgery/hmatrix/PPM_X_Z.py` (GadgetLayout fields, `build_gadget` body, delete `minimize_z_checks` + `_restrict`/`_x_merged` arbitrary-basis internals no longer used)
-- Modify: `src/qldpc/circuits/surgery/__init__.py` (drop deleted exports)
-- Delete: `src/qldpc/circuits/surgery/hmatrix/cheeger.py`, `src/qldpc/circuits/surgery/hmatrix/cheeger_test.py`
+- Modify: `src/qldpc/circuits/surgery/hmatrix/PPM_X_Z.py` (add optional `f1`/`f0` GadgetLayout fields; rewrite the single-operator `build_gadget` body to use `edge_expanded_maps`). KEEP `_restrict`, `_x_merged`, `build_gadget_augmented`, `minimize_z_checks`, `_gf2_rank` — the joint/Ȳ path (`PPM_joint.py`, `PPM_Y.py`) still imports them.
+- Modify: `src/qldpc/circuits/surgery/hmatrix/edge_expanded.py` (remove the now-dead `_all_cuts`).
+- Modify: `src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_golden_test.py` (regenerate the single-operator sha256 hashes for the new construction).
 - Test: `src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py`
+- **Do NOT delete** `cheeger.py`/`cheeger_test.py` or touch `__init__.py` — `boost_gadget`/`cheeger_constant`/`minimize_z_checks` remain live via the joint/Ȳ path. Migrating joint/Ȳ to the edge-expanded construction is an explicit follow-up, out of scope here.
 
 **Interfaces:**
 - Consumes: `edge_expanded_maps`, `ConeMaps` (Task 6).
-- Produces: unchanged `build_gadget(code, x, *, basis, seed=0, n_samples=200, cellulate_to="native") -> GadgetLayout`; `GadgetLayout` gains `f1: np.ndarray`, `f0: np.ndarray`. `cellulate_to="native"` resolves to the max row weight of the complementary check matrix; an int overrides; `None` disables.
+- Produces: `build_gadget(code, x, *, basis, seed=0, n_samples=200, cellulate_to="native") -> GadgetLayout` (same name; new keyword-only params have defaults, so existing `build_gadget(code, x, basis=...)` calls are unchanged). `GadgetLayout` gains trailing optional `f1: np.ndarray | None = None`, `f0: np.ndarray | None = None`. `cellulate_to="native"` resolves to the max row weight of the complementary check matrix; an int overrides; `None` disables the branch.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1114,7 +1115,7 @@ Expected: FAIL — `GadgetLayout` has no `f1` field / `build_gadget` has no `see
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `PPM_X_Z.py`: add `f1: np.ndarray` and `f0: np.ndarray` to the `GadgetLayout` dataclass (after `partial_0`), then rewrite `build_gadget` to assemble the merged matrices from `edge_expanded_maps`:
+In `PPM_X_Z.py`: add `f1: np.ndarray | None = None` and `f0: np.ndarray | None = None` to the `GadgetLayout` dataclass **at the END (after `basis`), with defaults** — so existing keyword constructors that don't pass them (e.g. `build_gadget_augmented`, used by the joint path) keep working unchanged. Then rewrite the single-operator `build_gadget` to assemble the merged matrices from `edge_expanded_maps`:
 
 ```python
 from .edge_expanded import edge_expanded_maps
@@ -1149,28 +1150,27 @@ def build_gadget(code, x, *, basis, seed=0, n_samples=200, cellulate_to="native"
         HX_merged=HX, HZ_merged=HZ, Q_prime=Q_prime, basis=basis)
 ```
 
-Delete from `PPM_X_Z.py`: `minimize_z_checks`, `build_gadget_augmented`, `_x_merged`, `_restrict`, `_gf2_rank` (now unused — confirm with `grep -rn` first; keep any still referenced by `PPM_joint.py`/`PPM_Y.py` — see Step 3b).
+**Do NOT delete the joint/Y helpers.** `grep` confirms live callers: `PPM_joint.py` imports `_restrict` and `build_gadget_augmented`; `PPM_Y.py` imports `boost_gadget`, `cheeger_constant` from `cheeger.py` and calls `boost_gadget`. So `_restrict`, `_x_merged`, `build_gadget_augmented`, `minimize_z_checks`, `_gf2_rank`, and all of `cheeger.py` STAY (they are the joint/Ȳ construction path — a separate follow-up would migrate them). The ONLY dead code to remove is `_all_cuts` in `edge_expanded.py` (unused after the bit-packed `cheeger_constant`; confirm `grep -n "_all_cuts" src/qldpc/circuits/surgery/hmatrix/edge_expanded.py` shows only its definition).
 
-- [ ] **Step 3b: Check joint/Y consumers before deleting**
+- [ ] **Step 3b: Verify no live caller breaks**
 
-Run: `grep -rn "_restrict\|_x_merged\|build_gadget_augmented\|minimize_z_checks\|from .cheeger\|boost_gadget" src/qldpc/circuits/surgery`
-For each hit in `PPM_joint.py`/`PPM_Y.py`, either (a) it consumes `GadgetLayout` (unaffected — fields only added), or (b) it imports a deleted helper — in that case port it onto `edge_expanded_maps`/`restrict_maps` in this step, or keep the minimal helper it needs. Do NOT delete a symbol with a surviving caller.
+Run: `grep -rn "_restrict\|_x_merged\|build_gadget_augmented\|minimize_z_checks\|from .cheeger\|boost_gadget\|_all_cuts" src/qldpc/circuits/surgery`
+Confirm: (a) the joint/Y imports above are untouched; (b) `_all_cuts` has no caller (safe to delete); (c) nothing constructs `GadgetLayout` positionally (all keyword — so trailing optional `f1`/`f0` are safe). Do NOT delete a symbol with a surviving caller.
 
-- [ ] **Step 3c: Update `__init__.py`**
+- [ ] **Step 3c: `__init__.py` unchanged**
 
-Remove `from .hmatrix.cheeger import boost_gadget, cheeger_constant` and the `minimize_z_checks` export; add `from .hmatrix.edge_expanded import cheeger_constant` (Task 2's version) and drop `boost_gadget`, `minimize_z_checks` from `__all__`. Re-export `cheeger_constant` for the notebook's pre-flight check.
+Leave `__init__.py` as-is: `boost_gadget`/`cheeger_constant` (from `cheeger.py`) and `minimize_z_checks` are still live (joint/Y) and stay exported. `build_gadget`/`GadgetLayout` exports are unchanged (same names). No public-API change beyond `GadgetLayout` gaining two optional fields.
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 4: Run tests + regenerate single-operator golden hashes**
 
-Run: `pytest src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py -v && pytest src/qldpc/circuits/surgery/circuit -x -q`
-Expected: `four_maps` + `deterministic` PASS; circuit-layer tests still PASS (GadgetLayout backward-compatible). Fix any golden test that pinned the old arbitrary `partial_0` by regenerating its expected matrix from the new `build_gadget` output and re-asserting the real property (cone validity / distance), not the raw bytes.
+Run: `python -m pytest src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py -v` (new four-maps + determinism PASS), then the FULL surgery suite: `python -m pytest src/qldpc/circuits/surgery -q`.
+`PPM_X_Z_golden_test.py` pins sha256 of the OLD single-operator `HX_merged`/`HZ_merged` (Steane/Webster — small, fast) — these WILL change because `build_gadget` now produces the low-weight edge-expanded matrices. Regenerate those golden hashes from the new deterministic (`seed=0`) output: for each fixture, print the new `HX_merged`/`HZ_merged` hashes and update the `_GOLDEN` dict. This re-pins the NEW construction (still a determinism guard going forward). For any OTHER failing test, if it asserted the old arbitrary `partial_0`/weights, re-assert the real property (cone validity `H̃_X H̃_Zᵀ=0`, `num_observables`, distance) rather than old bytes; if a circuit-layer test breaks because a gadget field it reads changed meaning, report BLOCKED with the specific test rather than weakening it. Every fixture here is a small code — the suite must stay fast.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git rm src/qldpc/circuits/surgery/hmatrix/cheeger.py src/qldpc/circuits/surgery/hmatrix/cheeger_test.py
-git add src/qldpc/circuits/surgery/hmatrix/PPM_X_Z.py src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py src/qldpc/circuits/surgery/__init__.py
-git commit -m "feat(surgery): edge-expanded build_gadget as default; expose f1/f0; delete dead Cheeger/left_null_space path"
+git add src/qldpc/circuits/surgery/hmatrix/PPM_X_Z.py src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_golden_test.py src/qldpc/circuits/surgery/hmatrix/edge_expanded.py
+git commit -m "feat(surgery): edge-expanded single-operator build_gadget as default; expose optional f1/f0; drop dead _all_cuts"
 ```
 
 ---
