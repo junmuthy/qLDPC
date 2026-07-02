@@ -176,6 +176,30 @@ def test_cellulate_noop_when_within_target():
     assert incc.shape[0] == inc.shape[0]                         # nothing added
 
 
+def test_cellulate_reduces_large_cycle_below_target():
+    # Regression: cellulate must directly split heavy ∂0 rows to <= target — it must
+    # NOT re-run Algorithm 2 (whose heuristic search leaves large cycles heavy, the
+    # bb_18 weight-12 bug). A single weight-16 cycle must come out <= 4.
+    inc = _incidence([(i, (i + 1) % 16) for i in range(16)], 16)
+    f0 = np.zeros((0, 16), dtype=np.uint8)
+    d0 = np.array([[1] * 16], dtype=np.uint8)                    # the 16-cycle
+    d0c, incc, f0c = cellulate(d0, inc, f0, target_weight=4, seed=0)
+    d0c = np.asarray(d0c).astype(int)
+    assert np.all((d0c @ incc.astype(int)) % 2 == 0)            # still cycles
+    assert int(d0c.sum(axis=1).max()) <= 4                      # actually reduced
+
+
+def test_cellulate_decomposes_disjoint_cycle_union_without_chords():
+    # A ∂0 row that is a union of two triangles (non-simple) splits into two weight-3
+    # rows with NO new edges (Veblen decomposition), not a re-derivation.
+    inc = _incidence([(0,1),(1,2),(0,2),(3,4),(4,5),(3,5)], 6)
+    f0 = np.zeros((0, 6), dtype=np.uint8)
+    d0 = np.array([[1,1,1,1,1,1]], dtype=np.uint8)              # both triangles as one row
+    d0c, incc, f0c = cellulate(d0, inc, f0, target_weight=4, seed=0)
+    assert incc.shape[0] == inc.shape[0]                        # no chords needed
+    assert int(np.asarray(d0c).astype(int).sum(axis=1).max()) <= 3
+
+
 from qldpc.circuits.surgery.hmatrix.edge_expanded import edge_expanded_maps
 
 def test_edge_expanded_steane_weight3_no_cycles():

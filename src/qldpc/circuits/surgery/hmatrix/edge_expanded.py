@@ -317,6 +317,75 @@ def expand_hyperedges(
     return inc2, f02
 
 
+def _edge_ends(inc: np.ndarray, e: int) -> tuple[int, int] | None:
+    """The two vertices of a weight-2 edge (row ``e`` of the incidence), or None."""
+    vs = np.flatnonzero(inc[e])
+    return (int(vs[0]), int(vs[1])) if len(vs) == 2 else None
+
+
+def _extract_simple_cycle(inc: np.ndarray, remaining: set[int]) -> list[int] | None:
+    """Pull one simple cycle (list of edge indices) out of ``remaining`` and remove
+    its edges. ``remaining`` must have all-even vertex degree (a cycle-space
+    element). Returns None only if the edge set is malformed."""
+    adj: dict[int, list[int]] = {}
+    for e in remaining:
+        ends = _edge_ends(inc, e)
+        if ends is None:
+            return None
+        u, v = ends
+        adj.setdefault(u, []).append(e)
+        adj.setdefault(v, []).append(e)
+    start = next(iter(adj))
+    pos = {start: 0}
+    path_e: list[int] = []
+    cur = start
+    while True:
+        avail = [e for e in adj[cur] if e in remaining and e not in path_e]
+        if not avail:
+            return None
+        e = avail[0]
+        ends = _edge_ends(inc, e)
+        assert ends is not None
+        nxt = ends[1] if ends[0] == cur else ends[0]
+        path_e.append(e)
+        if nxt in pos:                               # closed a loop -> extract it
+            cyc = path_e[pos[nxt]:]
+            remaining.difference_update(cyc)
+            return cyc
+        pos[nxt] = len(pos)
+        cur = nxt
+
+
+def _cycle_vertex_order(inc: np.ndarray, cycle_edges: list[int]) -> list[int] | None:
+    """Vertex traversal order of a SIMPLE cycle given its edge indices (every
+    touched vertex must have in-cycle degree exactly 2)."""
+    adj: dict[int, list[int]] = {}
+    for e in cycle_edges:
+        ends = _edge_ends(inc, e)
+        if ends is None:
+            return None
+        u, v = ends
+        adj.setdefault(u, []).append(v)
+        adj.setdefault(v, []).append(u)
+    if any(len(nbrs) != 2 for nbrs in adj.values()):
+        return None
+    start = min(adj)
+    order = [start]
+    prev, cur = -1, start
+    for _ in range(len(cycle_edges) - 1):
+        nxt = adj[cur][0] if adj[cur][0] != prev else adj[cur][1]
+        order.append(nxt)
+        prev, cur = cur, nxt
+    return order if len(order) == len(cycle_edges) else None
+
+
+def _edge_between(inc: np.ndarray, cycle_edges: list[int], u: int, v: int) -> int | None:
+    for e in cycle_edges:
+        if _edge_ends(inc, e) in ((u, v), (v, u)):
+            return e
+    return None
+
+
 def cellulate(
     partial_0: np.ndarray,
     incidence: np.ndarray,
@@ -326,62 +395,83 @@ def cellulate(
     seed: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Cellulate large cycles (arXiv:2410.02753 Algorithm 3, "cellulate large
-    cycles"). FAITHFUL PORT of the paper authors' reference implementation
-    ``cellulate_long_cycles`` (Swaroop, Jochym-O'Connor, Yoder — repository
-    adapters-LDPC-surgery/cellulation.py, arXiv:2410.03628): build the graph from
-    ∂_1's weight-2 edges; while any cycle-basis cycle is longer than
-    ``target_weight`` (= ``max_len``), add the chord between the cycle's vertex 0
-    and its opposite vertex (index ``n//2``), then recompute the cycle basis and
-    take its first cycle. New chords become ∂_1 rows (with zero f_0 columns);
-    ∂_0 is then re-derived low-weight via Algorithm 2.
+    cycles"). For each ∂_0 row heavier than ``target_weight``, split it into
+    lower-weight cycles and REPLACE the heavy row with them — the paper's
+    "replacing the high weight row c with multiple lower weight rows corresponding
+    to the new cycles". Two mechanisms, both preserving the stabilizer group (the
+    replacements GF(2)-sum to the original row):
 
-    Precondition: ∂_1 rows are all weight-2 here (the Alg 3 branch runs
-    ``expand_hyperedges`` first), so every row maps to a graph edge.
+    1. Decompose a row into edge-disjoint SIMPLE cycles (Veblen) — a row that is a
+       union of small cycles is split at zero cost.
+    2. Chord-split any simple cycle still longer than ``target_weight``: add the
+       chord between opposite cycle vertices (as in the reference
+       ``cellulate_long_cycles``, Swaroop, Jochym-O'Connor, Yoder —
+       adapters-LDPC-surgery/cellulation.py, arXiv:2410.03628), replacing the
+       cycle with the two arcs+chord. Chords become weight-2 ∂_1 rows (zero f_0
+       columns).
+
+    Algorithm 2 is NOT re-run — its heuristic search does not reliably recover a
+    low-weight basis on large graphs, which is exactly why cellulation exists.
+    ``seed`` is accepted for API uniformity (the split is deterministic).
     """
-    import networkx as nx
-
     inc = np.asarray(incidence).astype(np.uint8).copy()
     f0 = np.asarray(f0).astype(np.uint8).copy()
     n_v = inc.shape[1]
+    rows = [set(int(e) for e in np.flatnonzero(r)) for r in np.asarray(partial_0)]
 
-    # Build G from ∂_1's weight-2 edges (mirrors the reference's G / G_mat).
-    G = nx.Graph()
-    G.add_nodes_from(range(n_v))
-    for row in inc:
-        vs = np.flatnonzero(row)
-        if len(vs) == 2:
-            G.add_edge(int(vs[0]), int(vs[1]))
-
-    new_edges: list[tuple[int, int]] = []
-    guard = 0
-    max_iter = 8 * inc.shape[0] + 64                 # backstop (the reference has none)
-    for cycle in nx.cycle_basis(G):                  # reference: for cycle in cycles
-        while len(cycle) > target_weight:            # reference: while len(cycle) > max_len
-            guard += 1
-            if guard > max_iter:                     # pragma: no cover  -- spin backstop
+    # budget: bounded work even if a row cannot be split below target.
+    max_splits = 8 * sum(max(0, len(r) - target_weight) for r in rows) + 4 * len(rows) + 8
+    splits = 0
+    changed = True
+    while changed and splits < max_splits:
+        changed = False
+        for idx in range(len(rows)):
+            if len(rows[idx]) <= target_weight:
+                continue
+            # (1) decompose into edge-disjoint simple cycles
+            remaining = set(rows[idx])
+            pieces: list[list[int]] = []
+            ok = True
+            while remaining:
+                cyc = _extract_simple_cycle(inc, remaining)
+                if cyc is None:
+                    ok = False
+                    break
+                pieces.append(cyc)
+            if not ok:                               # pragma: no cover  -- malformed row
+                continue
+            if len(pieces) > 1:                      # a union of smaller cycles -> just split
+                rows[idx] = set(pieces[0])
+                for p in pieces[1:]:
+                    rows.append(set(p))
+                splits += 1
+                changed = True
                 break
-            n = len(cycle)
-            u, v = sorted((int(cycle[0]), int(cycle[n // 2])))   # opposite vertices i=0, j=n//2
-            if not G.has_edge(u, v):
-                G.add_edge(u, v)
-                new_edges.append((u, v))
-            basis = nx.cycle_basis(G)
-            if not basis:                            # pragma: no cover
-                break
-            cycle = basis[0]                         # reference: cycle = nx.cycle_basis(G)[0]
-        if guard > max_iter:                         # pragma: no cover
+            # (2) single simple cycle still too long -> chord-split it
+            cyc = pieces[0]
+            order = _cycle_vertex_order(inc, cyc)
+            if order is None:                        # pragma: no cover
+                continue
+            k = len(order)
+            a, b = order[0], order[k // 2]           # opposite-vertex chord (balanced)
+            chord_idx = inc.shape[0]
+            chord = np.zeros((1, n_v), dtype=np.uint8)
+            chord[0, a] = 1
+            chord[0, b] = 1
+            inc = np.vstack([inc, chord]).astype(np.uint8)
+            f0 = np.hstack([f0, np.zeros((f0.shape[0], 1), np.uint8)])
+            arc1 = {_edge_between(inc, cyc, order[i], order[i + 1]) for i in range(0, k // 2)}
+            arc2 = {_edge_between(inc, cyc, order[i], order[(i + 1) % k]) for i in range(k // 2, k)}
+            rows[idx] = {e for e in arc1 if e is not None} | {chord_idx}
+            rows.append({e for e in arc2 if e is not None} | {chord_idx})
+            splits += 1
+            changed = True
             break
 
-    if new_edges:                                    # chords -> new ∂_1 rows + zero f_0 columns
-        extra = np.zeros((len(new_edges), n_v), dtype=np.uint8)
-        for r, (u, v) in enumerate(new_edges):
-            extra[r, u] = 1
-            extra[r, v] = 1
-        inc = np.vstack([inc, extra]).astype(np.uint8)
-        f0 = np.hstack([f0, np.zeros((f0.shape[0], len(new_edges)), np.uint8)])
-
-    # Re-derive the low-weight cycle basis on the cellulated graph (Algorithm 2).
-    d0 = algorithm_2(inc, np.zeros((0, n_v), np.uint8), f0, n_samples=200, seed=seed)
+    d0 = np.zeros((len(rows), inc.shape[0]), dtype=np.uint8)
+    for i, s in enumerate(rows):
+        for e in s:
+            d0[i, e] = 1
     return d0, inc, f0
 
 
