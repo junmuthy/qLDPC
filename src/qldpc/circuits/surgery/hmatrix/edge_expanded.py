@@ -165,11 +165,6 @@ def _rref_drop_zero(M: galois.FieldArray) -> galois.FieldArray:
     return R[nz]
 
 
-def _pivot_columns(R: galois.FieldArray) -> set[int]:
-    """Leading-1 columns of an RREF matrix with no zero rows."""
-    return {int(np.flatnonzero(np.asarray(row))[0]) for row in np.asarray(R)}
-
-
 def _random_invertible_gf2(k: int, rng: np.random.Generator) -> galois.FieldArray:
     """Random invertible k×k GF(2) matrix (rejection on full rank)."""
     if k == 0:
@@ -190,17 +185,23 @@ def algorithm_2(
 ) -> np.ndarray:
     """Random search for low-weight ∂_0 (arXiv:2410.02753 Algorithm 2).
 
-    ``incidence`` = ∂_1 (edge-vertex). Cycle space = left null space of incidence.
-    V = redundant cycles {vᵀ f_0 : v ∈ ker H_complementᵀ}; W = complement so
-    V ⊕ W = full cycle space. Returns ∂_0 = a low-max-row-weight generator of W.
+    ``incidence`` = ∂_1 (edge-vertex). Cycle space = left null space of ∂_1.
+    Follows Algorithm 2 line-for-line: V = redundant cycles
+    {vᵀ f_0 : v ∈ ker H_Zᵀ} (line 1), put in RREF (line 2); W starts as a FULL
+    cycle-space basis, "any matrix such that ker W ≅ im ∂_1" (line 3); rows of V
+    are added to rows of W to zero out the pivot columns of V in W (line 4);
+    W is put in RREF with zero rows removed (line 5) — this leaves W a
+    complement of V, V ⊕ W = full cycle space. ∂_0 ← W (line 6), then the
+    random AW + BV / AW search lowers the max row weight (lines 7-17).
     """
     rng = np.random.default_rng(seed)
     inc = GF2(np.asarray(incidence).astype(np.uint8))
     f0 = GF2(np.asarray(f0).astype(np.uint8))
     Hc = GF2(np.asarray(H_complement).astype(np.uint8))
 
-    # line 1: V ← basis of { vᵀ f_0 : v ∈ ker H_complementᵀ }.
-    # ker H_complementᵀ = left null space of H_complement: rows v with
+    # line 1: "Define V to be any matrix whose rows form a basis of
+    # { vᵀ f_0 | v ∈ ker H_Zᵀ }."  ker H_Zᵀ = {v : vᵀ H_Z = 0} = left null
+    # space of H_complement (H_Z when measuring X̄): rows v with
     # v @ H_complement = 0; each v has one entry per complementary check,
     # matching the rows of f_0 (arXiv:2410.02753 Alg 2 line 1).
     if Hc.shape[0] == 0:
@@ -208,25 +209,27 @@ def algorithm_2(
     else:
         ker_HcT = Hc.left_null_space()
     V_rows = ker_HcT @ f0 if ker_HcT.shape[0] else GF2(np.zeros((0, f0.shape[1]), np.uint8))
-    V = _rref_drop_zero(V_rows)                    # line 2: rref(V)
+    V = _rref_drop_zero(V_rows)                    # line 2: "Put V in reduced row echelon form."
 
-    # full cycle space of the graph defined by ∂_1 = left null space of incidence
-    cycle_space = inc.left_null_space()            # rows z with z @ incidence = 0
+    # line 3: "Define W to be any matrix such that ker W ≅ im ∂_1", i.e. a FULL
+    # basis of the cycle space (left null space of ∂_1); its right-kernel then
+    # has dim = rank ∂_1 (arXiv:2410.02753 Alg 2 line 3).
+    W = _rref_drop_zero(inc.left_null_space())     # rows z with z @ incidence = 0
 
-    # line 3-5: W = complement of V within cycle_space so that V ⊕ W spans the
-    # full cycle space (arXiv:2410.02753 Alg 2 lines 3-5). V and
-    # RREF(cycle_space) are both in RREF, and every nonzero vector of a
-    # subspace has its leading 1 in one of that subspace's RREF pivot columns;
-    # therefore the RREF(cycle_space) rows whose pivot column is NOT a pivot
-    # column of V are dim(cycle_space) - dim(V) rows independent of V:
-    # span(V) ∩ span(W) = 0 and span(V) + span(W) = cycle space.
-    cycle_rref = _rref_drop_zero(cycle_space)
-    V_pivots = _pivot_columns(V) if V.shape[0] else set()
-    keep = [i for i, row in enumerate(np.asarray(cycle_rref))
-            if int(np.flatnonzero(row)[0]) not in V_pivots]
-    W = cycle_rref[keep] if keep else GF2(np.zeros((0, inc.shape[0]), np.uint8))
+    # line 4: "Add rows of V to rows of W to zero out the pivot columns of V
+    # in W."  (V is RREF, so each V row's pivot = its first 1.)
+    if V.shape[0] and W.shape[0]:
+        W = np.asarray(W).copy()
+        Va = np.asarray(V)
+        for r in range(Va.shape[0]):
+            piv = int(np.flatnonzero(Va[r])[0])    # pivot column of this V row
+            hit = np.flatnonzero(W[:, piv] == 1)   # W rows carrying that pivot column
+            for w in hit:
+                W[w] ^= Va[r]                       # add the V row to zero column `piv`
+    # line 5: "Put W in reduced row echelon form with zero-rows removed."
+    W = _rref_drop_zero(GF2(np.asarray(W).astype(np.uint8)))
 
-    d0 = W                                         # line 6: ∂_0 ← W
+    d0 = W                                         # line 6: "Initialize ∂_0 ← W"
     best = _max_row_weight(d0)
     for _ in range(n_samples):                     # line 7: for i in 1..n
         k = d0.shape[0]
