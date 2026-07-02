@@ -195,7 +195,7 @@ def test_webster_table_i_ancilla_meas_comp_exact(code_index: int, n_anc: int) ->
     data = load_webster_seed_set(code_index)
     code = build_generalised_bicycle_code(data["l"], data["A"], data["B"])
     x1 = _webster_x_bar_operator(data)
-    g1 = build_gadget(code, x1, basis=Pauli.X)
+    g1 = build_gadget(code, x1, basis=Pauli.X, minimal_z_checks=False)
     n_ancilla = len(g1.Q_prime)
     n_meas_checks = int(g1.x.sum())  # |support|
     n_comp_checks = g1.partial_0.shape[0]
@@ -269,7 +269,7 @@ def test_webster_table_i_z_basis_ancilla_meas_comp_exact() -> None:
         d = load_webster_seed_set(code_index)
         c = build_generalised_bicycle_code(d["l"], d["A"], d["B"])
         z = _webster_z_bar_operator(d)
-        g = build_gadget(c, z, basis=Pauli.Z)
+        g = build_gadget(c, z, basis=Pauli.Z, minimal_z_checks=False)
         n_ancilla = len(g.Q_prime)
         n_meas_checks = len(g.support)
         n_comp_checks = g.partial_0.shape[0]
@@ -372,3 +372,161 @@ def test_x_merged_matches_legacy_build_gadget_x_frame() -> None:
     assert np.array_equal(p0, g.partial_0)
     assert np.array_equal(HX, g.HX_merged)
     assert np.array_equal(HZ, g.HZ_merged)
+
+
+# ---------------------------------------------------------------------------
+# minimize_z_checks — opt-in removal of redundant cycle Z-checks
+# (Cross, He, Rall, Yoder arXiv:2407.18393 Eq.(6): a cycle Z-check lying in
+# rowspan([H_Z | f_0]) is already implied by the deformed original checks and
+# can be dropped without changing the stabilizer group).
+# ---------------------------------------------------------------------------
+
+
+def _gf2_rank(matrix: np.ndarray) -> int:
+    import galois
+
+    arr = np.asarray(matrix).astype(np.uint8) % 2
+    return 0 if arr.shape[0] == 0 else int(galois.GF(2)(arr).row_space().shape[0])
+
+
+def _gross_x0_gadget():
+    """Un-boosted gadget measuring X̄_0 of gross [[144,12,12]] (dim U = 6)."""
+    import sympy
+
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
+
+    xs, ys = sympy.symbols("x y")
+    gross = codes.BBCode((12, 6), xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    x = np.asarray(gross.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    # full basis (minimal_z_checks=False) so minimize_z_checks has redundancy to drop
+    return build_gadget(gross, x, basis=Pauli.X, minimal_z_checks=False)
+
+
+def test_minimize_z_checks_drops_redundant_rows() -> None:
+    """Redundant cycle Z-checks are removed; every survivor stays independent."""
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import minimize_z_checks
+
+    g = _gross_x0_gadget()
+    g_min = minimize_z_checks(g)
+
+    # This code has redundant cycles, so the count strictly drops.
+    assert g_min.partial_0.shape[0] < g.partial_0.shape[0]
+
+    # No redundant row remains: cycle rows are independent of each other AND of
+    # the deformed original checks [H_Z | f_0] (the first n_Zorig rows).
+    n_orig = g.code.matrix_z.shape[0]
+    hz = np.asarray(g_min.HZ_merged)
+    top, cyc = hz[:n_orig], hz[n_orig:]
+    assert cyc.shape[0] == g_min.partial_0.shape[0]
+    assert _gf2_rank(hz) == _gf2_rank(top) + cyc.shape[0]
+
+
+def test_minimize_z_checks_preserves_stabilizer_group() -> None:
+    """The merged Z-stabilizer group (rowspan of HZ_merged) is unchanged."""
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import minimize_z_checks
+
+    g = _gross_x0_gadget()
+    g_min = minimize_z_checks(g)
+
+    full = np.asarray(g.HZ_merged)
+    trimmed = np.asarray(g_min.HZ_merged)
+    assert _gf2_rank(full) == _gf2_rank(trimmed) == _gf2_rank(np.vstack([full, trimmed]))
+
+
+def test_minimize_z_checks_preserves_edges_and_x_side() -> None:
+    """Only the Z-check block changes: qubits (edges) and X-checks are untouched."""
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import minimize_z_checks
+
+    g = _gross_x0_gadget()
+    g_min = minimize_z_checks(g)
+
+    assert g_min.support == g.support
+    assert g_min.Q_prime == g.Q_prime
+    assert g_min.data_checks == g.data_checks
+    assert np.array_equal(g_min.incidence, g.incidence)
+    assert np.array_equal(g_min.HX_merged, g.HX_merged)
+    assert np.array_equal(g_min.x, g.x)
+    assert g_min.basis is g.basis
+    assert g_min.code is g.code
+
+
+def test_minimize_z_checks_is_noop_when_already_minimal() -> None:
+    """Applying twice equals applying once (already-minimal gadget is a fixpoint)."""
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import minimize_z_checks
+
+    g = _gross_x0_gadget()
+    once = minimize_z_checks(g)
+    twice = minimize_z_checks(once)
+    assert twice.partial_0.shape[0] == once.partial_0.shape[0]
+    assert np.array_equal(np.asarray(twice.HZ_merged), np.asarray(once.HZ_merged))
+
+
+def test_minimize_z_checks_does_not_mutate_input() -> None:
+    """The input gadget is left untouched (pure function)."""
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import minimize_z_checks
+
+    g = _gross_x0_gadget()
+    before = np.asarray(g.partial_0).copy()
+    _ = minimize_z_checks(g)
+    assert np.array_equal(np.asarray(g.partial_0), before)
+
+
+def test_minimize_z_checks_handles_z_gadget_dual() -> None:
+    """For a Z̄ gadget the cycle checks live in HX_merged; still trimmed correctly."""
+    import sympy
+
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget, minimize_z_checks
+
+    xs, ys = sympy.symbols("x y")
+    gross = codes.BBCode((12, 6), xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    z = np.asarray(gross.get_logical_ops(Pauli.Z)[0]).astype(np.uint8)
+    g = build_gadget(gross, z, basis=Pauli.Z, minimal_z_checks=False)
+    g_min = minimize_z_checks(g)
+
+    # Cycle checks are X-type here → they live in HX_merged; HZ_merged is the
+    # opposite (untouched) side.
+    full = np.asarray(g.HX_merged)
+    trimmed = np.asarray(g_min.HX_merged)
+    assert _gf2_rank(full) == _gf2_rank(trimmed) == _gf2_rank(np.vstack([full, trimmed]))
+
+    n_comp = g.code.matrix_x.shape[0]
+    top, cyc = trimmed[:n_comp], trimmed[n_comp:]
+    assert cyc.shape[0] == g_min.partial_0.shape[0] <= g.partial_0.shape[0]
+    assert _gf2_rank(trimmed) == _gf2_rank(top) + cyc.shape[0]  # no redundant remains
+    assert np.array_equal(g_min.HZ_merged, g.HZ_merged)  # opposite side untouched
+    assert g_min.Q_prime == g.Q_prime
+
+
+def test_build_gadget_minimizes_z_checks_by_default() -> None:
+    """build_gadget default drops redundant cycle checks (covers the no-boost path)."""
+    import sympy
+
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget, minimize_z_checks
+
+    xs, ys = sympy.symbols("x y")
+    gross = codes.BBCode((12, 6), xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    x = np.asarray(gross.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    default = build_gadget(gross, x, basis=Pauli.X)
+    full = build_gadget(gross, x, basis=Pauli.X, minimal_z_checks=False)
+    assert default.partial_0.shape[0] < full.partial_0.shape[0]
+    # default is already minimal → applying minimize again is a no-op
+    assert minimize_z_checks(default).partial_0.shape[0] == default.partial_0.shape[0]
+
+
+def test_boost_gadget_minimizes_z_checks_by_default() -> None:
+    """boost_gadget re-applies minimize after recomputing the full cycle basis."""
+    import sympy
+
+    from qldpc.circuits.surgery import boost_gadget, build_gadget
+
+    xs, ys = sympy.symbols("x y")
+    gross = codes.BBCode((12, 6), xs**3 + ys + ys**2, ys**3 + xs + xs**2)
+    x = np.asarray(gross.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g0 = build_gadget(gross, x, basis=Pauli.X, minimal_z_checks=False)
+    boost_kw = dict(method="combinatorial", target=1.0, max_extra_qubits=30, seed=3)
+    default = boost_gadget(g0, **boost_kw)
+    full = boost_gadget(g0, minimal_z_checks=False, **boost_kw)
+    assert default.partial_0.shape[0] < full.partial_0.shape[0]
+    # boost preserves the Cheeger boost (edges/incidence identical, only Z-checks trimmed)
+    assert np.array_equal(default.incidence, full.incidence)
+    assert default.Q_prime == full.Q_prime

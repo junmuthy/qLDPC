@@ -209,7 +209,8 @@ def _layout_for(
     code: CSSCode, x: np.ndarray, basis: PauliXZ, extra: np.ndarray | None
 ) -> GadgetLayout:
     if extra is None:
-        return build_gadget(code, x, basis=basis)
+        # Golden freezes the RAW closed form; minimize_z_checks is a separate step.
+        return build_gadget(code, x, basis=basis, minimal_z_checks=False)
     return build_gadget_augmented(code, x, extra, basis=basis)
 
 

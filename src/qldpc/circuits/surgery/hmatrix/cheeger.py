@@ -18,7 +18,7 @@ import numpy as np
 
 from qldpc.codes.common import CSSCode
 
-from .PPM_X_Z import GadgetLayout
+from .PPM_X_Z import GadgetLayout, minimize_z_checks
 
 
 def _exact_boundary_cheeger(incidence: galois.FieldArray) -> tuple[float, np.ndarray]:
@@ -437,6 +437,7 @@ def boost_gadget(
     method: str,
     target: float,
     seed: int | None = None,
+    minimal_z_checks: bool = True,
     **kwargs: Any,
 ) -> GadgetLayout:
     """Single entry point for Cheeger / distance boost.
@@ -447,6 +448,11 @@ def boost_gadget(
         target: target Cheeger constant (for combinatorial) or
             target distance (for distance method; cast via int(target)).
         seed: RNG seed.
+        minimal_z_checks: if True (default), drop redundant cycle checks from the
+            boosted gadget via ``minimize_z_checks`` (the boost recomputes
+            ``partial_0`` as the full cycle basis, so this re-trims afterwards).
+            Set False for the full basis (e.g. Cain et al. arXiv:2603.28627
+            Table III counts).
         **kwargs: forwarded to the underlying boost function.
 
     Returns:
@@ -454,17 +460,19 @@ def boost_gadget(
         Q_prime.
     """
     if method == "combinatorial":
-        return boost_gadget_cheeger_combinatorial(
+        boosted = boost_gadget_cheeger_combinatorial(
             gadget,
             target_h=target,
             seed=seed,
             **kwargs,
         )
-    if method == "distance":
-        return boost_gadget_distance(
+    elif method == "distance":
+        boosted = boost_gadget_distance(
             gadget,
             target_distance=int(target),
             seed=seed,
             **kwargs,
         )
-    raise ValueError(f"unknown method: {method!r}. Allowed: 'combinatorial', 'distance'.")
+    else:
+        raise ValueError(f"unknown method: {method!r}. Allowed: 'combinatorial', 'distance'.")
+    return minimize_z_checks(boosted) if minimal_z_checks else boosted

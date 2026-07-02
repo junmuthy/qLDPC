@@ -63,6 +63,10 @@ def build_single_ppm_circuit(
     type on the data, so it is valid for an isolated readout/LER but not when the
     merged register must be handed back intact. CSS-type PPM only (X̄ or Z̄);
     inapplicable to Ȳ / mixed joints, which need both sectors.
+
+    The gadget passed in is used as-is; redundant cycle Z-checks are removed at
+    gadget-construction time (``build_gadget`` / ``boost_gadget`` default
+    ``minimal_z_checks=True``), not here.
     """
     if experiment_basis is None:
         experiment_basis = gadget.basis

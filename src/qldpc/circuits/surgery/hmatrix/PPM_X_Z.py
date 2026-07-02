@@ -25,6 +25,12 @@ from qldpc.objects import Pauli, PauliXZ
 GF2 = galois.GF(2)
 
 
+def _gf2_rank(matrix: np.ndarray) -> int:
+    """GF(2) row rank of a binary matrix (0 for an empty matrix)."""
+    arr = np.asarray(matrix).astype(np.uint8) % 2
+    return 0 if arr.shape[0] == 0 else int(GF2(arr).row_space().shape[0])
+
+
 def _restrict(
     H_complement: np.ndarray,
     x: np.ndarray,
@@ -145,6 +151,7 @@ def build_gadget(
     x: np.ndarray,
     *,
     basis: PauliXZ,
+    minimal_z_checks: bool = True,
 ) -> GadgetLayout:
     """Full L=1 gadget: closed-form ``_x_merged`` with X↔Z dual dispatch
     (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1;
@@ -156,6 +163,13 @@ def build_gadget(
     Q' ancilla qubits (κ) are indexed contiguously after the n data qubits.
     basis=Pauli.X: measures a logical X̄ (PPM of X̄). Validates H_Z @ x == 0 mod 2.
     basis=Pauli.Z: measures a logical Z̄ (PPM of Z̄). Validates H_X @ x == 0 mod 2.
+
+    ``minimal_z_checks`` (default True): drop redundant cycle checks via
+    ``minimize_z_checks`` (covers the no-boost path — when the gadget already has
+    h ≥ 1 and ``boost_gadget`` is skipped). Set False for the full cycle basis
+    (raw closed form, e.g. Cain et al. arXiv:2603.28627 Table III counts). Note
+    ``boost_gadget`` recomputes ``partial_0`` from scratch, so it re-applies its
+    own ``minimal_z_checks`` regardless of this flag.
     """
     x = np.asarray(x).astype(np.uint8)
     if basis is Pauli.X:
@@ -180,7 +194,7 @@ def build_gadget(
             code.matrix_z, code.matrix_x, x
         )
     Q_prime = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
-    return GadgetLayout(
+    gadget = GadgetLayout(
         code=code,
         x=x,
         support=support,
@@ -192,6 +206,53 @@ def build_gadget(
         Q_prime=Q_prime,
         basis=basis,
     )
+    return minimize_z_checks(gadget) if minimal_z_checks else gadget
+
+
+def minimize_z_checks(gadget: GadgetLayout) -> GadgetLayout:
+    """Drop cycle checks that are redundant with the deformed original checks.
+
+    ``partial_0`` (= ∂_0 = a full basis of the cycle space ker(∂_1)) generally
+    contains rows that already lie in rowspan([H_complement | f_0]) — the cycle
+    is a product of the deformed original checks, so it adds no new stabilizer
+    (Cross, He, Rall, Yoder arXiv:2407.18393 Eq.(6), "redundant cycles"; the
+    count removed is ``dim U``). This returns a new gadget keeping only the
+    ``dim(ker ∂_1) − dim U`` independent cycle checks.
+
+    The stabilizer group, code distance, ancilla qubits (``Q'``/edges), and the
+    entire opposite-type check side are unchanged — only redundant cycle-check
+    *generators* are removed. Opt-in: the default ``build_gadget`` keeps the full
+    cycle basis (e.g. to reproduce Cain et al. arXiv:2603.28627 Table III
+    counts). For an X̄ gadget the cycle checks are Z-type (in ``HZ_merged``); for
+    a Z̄ gadget they are X-type (in ``HX_merged``, the X↔Z dual).
+    """
+    if gadget.basis is Pauli.X:
+        merged = np.asarray(gadget.HZ_merged).astype(np.uint8)
+        n_comp = gadget.code.matrix_z.shape[0]
+    else:
+        merged = np.asarray(gadget.HX_merged).astype(np.uint8)
+        n_comp = gadget.code.matrix_x.shape[0]
+
+    top = merged[:n_comp]  # [H_complement | f_0] — deformed original checks
+    cyc = merged[n_comp:]  # [0 | ∂_0] — candidate cycle checks (row-aligned with partial_0)
+
+    # Greedily keep only cycle rows that increase the GF(2) rank, i.e. are not
+    # already implied by the original checks + previously kept cycles.
+    basis_arr = top.copy()
+    rank = _gf2_rank(basis_arr)
+    keep: list[int] = []
+    for i in range(cyc.shape[0]):
+        trial = np.vstack([basis_arr, cyc[i : i + 1]])
+        trial_rank = _gf2_rank(trial)
+        if trial_rank > rank:
+            basis_arr, rank = trial, trial_rank
+            keep.append(i)
+
+    new_partial_0 = np.asarray(gadget.partial_0)[keep].astype(np.uint8)
+    new_merged = np.vstack([top, cyc[keep]]).astype(np.uint8)
+    if gadget.basis is Pauli.X:
+        return dataclasses.replace(gadget, partial_0=new_partial_0, HZ_merged=new_merged)
+    return dataclasses.replace(gadget, partial_0=new_partial_0, HX_merged=new_merged)
 
 
 def build_gadget_augmented(
