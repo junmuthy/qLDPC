@@ -2,7 +2,12 @@
 Cain et al. arXiv:2603.28627 §B.1; Ide, Gowda, Nadkarni, Dauphinais
 arXiv:2410.02753 Eq.(62)).
 
-Closed-form structure (two primitives, basis dispatched via the X↔Z dual):
+``build_gadget`` (single-operator X̄/Z̄ measurement) assembles the merged
+matrices from ``edge_expanded_maps`` — the full arXiv:2410.02753 Algorithm 3
+(Cheeger ≥ 1 edge expansion + low-weight ∂_0) — per the mapping cone Eq.(12).
+
+Closed-form primitives kept for the joint/Ȳ path (basis dispatched via the
+X↔Z dual; consumed by ``PPM_joint.py`` and ``cheeger.py::boost_gadget``):
     _restrict   — restriction over GF(2): V₀=supp(x), C₀=complementary-basis
                   checks touching V₀, incidence=∂_1^T=H_complement[C₀,V₀],
                   partial_0=∂_0=ker(∂_1).
@@ -21,6 +26,8 @@ import numpy as np
 
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli, PauliXZ
+
+from .edge_expanded import edge_expanded_maps
 
 GF2 = galois.GF(2)
 
@@ -132,6 +139,11 @@ class GadgetLayout:
         incidence     = ∂_1^T  (|C₀|×|V₀| edge×vertex matrix; ∂_1 = incidence.T)
         partial_0     = ∂_0    (basis of ker(∂_1) over GF(2))
         Q_prime       = Q' (κ qubits, indexed after the n data qubits)
+        f1 / f0       = the remaining two mapping-cone maps (Ide, Gowda, Nadkarni,
+                        Dauphinais arXiv:2410.02753 Eq.(12): f_1 is the n×|V₀|
+                        support indicator, f_0 the |checks|×|edges| check-to-edge
+                        map). Optional: ``None`` on layouts produced by the
+                        closed-form joint/boost path (``build_gadget_augmented``).
     """
 
     code: CSSCode
@@ -144,6 +156,8 @@ class GadgetLayout:
     HZ_merged: np.ndarray
     Q_prime: tuple[int, ...]  # Q' ancilla qubit IDs
     basis: PauliXZ
+    f1: np.ndarray | None = None
+    f0: np.ndarray | None = None
 
 
 def build_gadget(
@@ -151,62 +165,77 @@ def build_gadget(
     x: np.ndarray,
     *,
     basis: PauliXZ,
-    minimal_z_checks: bool = True,
+    seed: int = 0,
+    n_samples: int = 200,
+    cellulate_to: int | str | None = "native",
 ) -> GadgetLayout:
-    """Full L=1 gadget: closed-form ``_x_merged`` with X↔Z dual dispatch
-    (Webster, Smith, Cohen arXiv:2511.15989 §II.A; Cain et al. arXiv:2603.28627 §B.1;
-    Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 Eq.(62)). Deterministic in
-    (code, x, basis). basis=Pauli.X builds H̃_X/H̃_Z directly; basis=Pauli.Z feeds
-    the swapped (H_Z, H_X) into ``_x_merged`` and swaps the merged matrices on the
-    way out (the X↔Z dual of §II.A).
+    """Full L=1 gadget via the edge-expanded homological measurement (Ide, Gowda,
+    Nadkarni, Dauphinais arXiv:2410.02753 Algorithm 3, assembled per Eq.(12)/(13)).
 
-    Q' ancilla qubits (κ) are indexed contiguously after the n data qubits.
-    basis=Pauli.X: measures a logical X̄ (PPM of X̄). Validates H_Z @ x == 0 mod 2.
-    basis=Pauli.Z: measures a logical Z̄ (PPM of Z̄). Validates H_X @ x == 0 mod 2.
+    ``edge_expanded_maps`` produces the four mapping-cone maps f_1, ∂_1, f_0, ∂_0
+    with Cheeger(∂_1) ≥ 1 (fault distance preserved, arXiv:2410.02753 Thm 4) and a
+    low-weight ∂_0 (Algorithm 2 random search; redundant cycles already removed).
+    The merged matrices are the mapping-cone blocks
 
-    ``minimal_z_checks`` (default True): drop redundant cycle checks via
-    ``minimize_z_checks`` (covers the no-boost path — when the gadget already has
-    h ≥ 1 and ``boost_gadget`` is skipped). Set False for the full cycle basis
-    (raw closed form, e.g. Cain et al. arXiv:2603.28627 Table III counts). Note
-    ``boost_gadget`` recomputes ``partial_0`` from scratch, so it re-applies its
-    own ``minimal_z_checks`` regardless of this flag.
+        H̃_X = [[H_X,   0 ],     H̃_Z = [[H_Z,  f_0],
+               [f_1^T, ∂_1]]            [ 0,   ∂_0]]
+
+    basis=Pauli.X: measures a logical X̄ (validates H_Z @ x == 0 mod 2);
+    basis=Pauli.Z: measures a logical Z̄ via the X↔Z dual — same construction on
+    the swapped (H_Z, H_X), merged matrices swapped on the way out
+    (arXiv:2410.02753 §III D). Q' ancilla (edge) qubits are indexed contiguously
+    after the n data qubits. Deterministic in (code, x, basis, seed).
+
+    ``cellulate_to``: "desired" max ∂_0 row weight triggering Algorithm 3's
+    hyperedge-expansion + cellulation branch. ``"native"`` (default) resolves to
+    the max row weight of the complementary check matrix; an int overrides;
+    ``None`` disables the branch (accept the main-path ∂_0 unconditionally).
     """
     x = np.asarray(x).astype(np.uint8)
     if basis is Pauli.X:
-        H_check = np.asarray(code.matrix_z).astype(np.uint8)
+        H_meas = np.asarray(code.matrix_x).astype(np.uint8)
+        H_comp = np.asarray(code.matrix_z).astype(np.uint8)
     elif basis is Pauli.Z:
-        H_check = np.asarray(code.matrix_x).astype(np.uint8)
+        H_meas = np.asarray(code.matrix_z).astype(np.uint8)
+        H_comp = np.asarray(code.matrix_x).astype(np.uint8)
     else:
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
-    if ((H_check @ x) % 2).any():
+    if ((H_comp @ x) % 2).any():
         which = "X" if basis is Pauli.X else "Z"
         comp = "H_Z" if basis is Pauli.X else "H_X"
         raise ValueError(f"x is not a logical-{which} support ({comp} @ x != 0).")
 
-    # basis=X: X frame directly; basis=Z: X↔Z dual (swap H_X/H_Z in, swap merged out)
-    # (Ide, Gowda, Nadkarni, Dauphinais arXiv:2410.02753 §III D — the dual of §2).
-    if basis is Pauli.X:
-        support, data_checks, incidence, partial_0, HX_m, HZ_m = _x_merged(
-            code.matrix_x, code.matrix_z, x
-        )
-    else:
-        support, data_checks, incidence, partial_0, HZ_m, HX_m = _x_merged(
-            code.matrix_z, code.matrix_x, x
-        )
-    Q_prime = tuple(range(code.num_qudits, code.num_qudits + len(data_checks)))
-    gadget = GadgetLayout(
+    ct = int(H_comp.sum(axis=1).max()) if cellulate_to == "native" else cellulate_to
+    cm = edge_expanded_maps(H_comp, x, seed=seed, n_samples=n_samples, cellulate_to=ct)
+
+    n = H_meas.shape[1]
+    n_edges = cm.incidence.shape[0]
+    d1 = cm.incidence.T.astype(np.uint8)  # ∂_1 (vertex×edge) for the H̃ block
+    f1T = cm.f1.T.astype(np.uint8)  # f_1^T (|V₀|×n support indicator)
+    # H̃_X = [[H_X, 0],[f1^T, ∂1]]; H̃_Z = [[H_Z, f0],[0, ∂0]] (arXiv:2410.02753 Eq 13)
+    HX = np.block(
+        [[H_meas, np.zeros((H_meas.shape[0], n_edges), np.uint8)], [f1T, d1]]
+    ).astype(np.uint8)
+    HZ = np.block(
+        [[H_comp, cm.f0], [np.zeros((cm.partial_0.shape[0], n), np.uint8), cm.partial_0]]
+    ).astype(np.uint8)
+    if basis is Pauli.Z:  # X↔Z dual: swap the merged matrices on the way out
+        HX, HZ = HZ, HX
+    Q_prime = tuple(range(code.num_qudits, code.num_qudits + n_edges))
+    return GadgetLayout(
         code=code,
         x=x,
-        support=support,
-        data_checks=data_checks,
-        incidence=incidence,
-        partial_0=partial_0,
-        HX_merged=HX_m,
-        HZ_merged=HZ_m,
+        support=cm.support,
+        data_checks=cm.data_checks,
+        incidence=cm.incidence,
+        partial_0=cm.partial_0,
+        HX_merged=HX,
+        HZ_merged=HZ,
         Q_prime=Q_prime,
         basis=basis,
+        f1=cm.f1,
+        f0=cm.f0,
     )
-    return minimize_z_checks(gadget) if minimal_z_checks else gadget
 
 
 def minimize_z_checks(gadget: GadgetLayout) -> GadgetLayout:
@@ -221,10 +250,12 @@ def minimize_z_checks(gadget: GadgetLayout) -> GadgetLayout:
 
     The stabilizer group, code distance, ancilla qubits (``Q'``/edges), and the
     entire opposite-type check side are unchanged — only redundant cycle-check
-    *generators* are removed. Opt-in: the default ``build_gadget`` keeps the full
-    cycle basis (e.g. to reproduce Cain et al. arXiv:2603.28627 Table III
-    counts). For an X̄ gadget the cycle checks are Z-type (in ``HZ_merged``); for
-    a Z̄ gadget they are X-type (in ``HX_merged``, the X↔Z dual).
+    *generators* are removed. Consumed by the closed-form joint/Ȳ path
+    (``cheeger.py::boost_gadget``); the edge-expanded ``build_gadget`` no longer
+    needs it (Algorithm 2 already returns a non-redundant ∂_0, arXiv:2410.02753
+    Alg 2 lines 1-6). For an X̄ gadget the cycle checks are Z-type (in
+    ``HZ_merged``); for a Z̄ gadget they are X-type (in ``HX_merged``, the X↔Z
+    dual).
     """
     if gadget.basis is Pauli.X:
         merged = np.asarray(gadget.HZ_merged).astype(np.uint8)

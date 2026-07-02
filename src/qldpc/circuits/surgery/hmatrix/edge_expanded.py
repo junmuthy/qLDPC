@@ -67,18 +67,6 @@ def boundary(incidence: np.ndarray, S: np.ndarray) -> np.ndarray:
     return (inc @ S % 2).astype(np.uint8)
 
 
-def _all_cuts(n_v: int):
-    """Yield (subset_mask, size) for 1 ≤ size ≤ n_v//2 via Gray-code order."""
-    half = n_v // 2
-    mask = 0
-    for k in range(1, 1 << n_v):
-        bit = (k & -k).bit_length() - 1
-        mask ^= 1 << bit
-        size = mask.bit_count()
-        if 1 <= size <= half:
-            yield mask, size
-
-
 def _mask_to_indicator(mask: int, n_v: int) -> np.ndarray:
     return np.array([(mask >> i) & 1 for i in range(n_v)], dtype=np.uint8)
 
