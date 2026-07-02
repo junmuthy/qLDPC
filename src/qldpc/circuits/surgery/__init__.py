@@ -18,8 +18,13 @@ from .circuit import (
     logical_state_init,
 )
 from .hmatrix.cheeger import boost_gadget, cheeger_constant
+from .hmatrix.logical_basis import (
+    logical_distance,
+    low_weight_logicals,
+    symplectic_logical_basis,
+)
 from .hmatrix.PPM_joint import Bridge, build_bridge
-from .hmatrix.PPM_X_Z import GadgetLayout, build_gadget
+from .hmatrix.PPM_X_Z import GadgetLayout, build_gadget, minimize_z_checks
 from .hmatrix.PPM_Y import YGadgetLayout, build_y_gadget
 
 __all__ = [
@@ -27,6 +32,7 @@ __all__ = [
     "YGadgetLayout",
     "Bridge",
     "build_gadget",
+    "minimize_z_checks",
     "build_y_gadget",
     "build_bridge",
     "build_single_ppm_circuit",
@@ -36,4 +42,7 @@ __all__ = [
     "logical_state_init",
     "boost_gadget",
     "cheeger_constant",
+    "low_weight_logicals",
+    "logical_distance",
+    "symplectic_logical_basis",
 ]
