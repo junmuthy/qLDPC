@@ -4,6 +4,8 @@ from qldpc.circuits.surgery.hmatrix.edge_expanded import restrict_maps
 from qldpc.circuits.surgery.hmatrix.edge_expanded import (
     boundary, cheeger_constant, sparsest_cut)
 from qldpc.circuits.surgery.hmatrix.edge_expanded import algorithm_1
+from qldpc.circuits.surgery.hmatrix.edge_expanded import (
+    GF2, algorithm_2, _random_invertible_gf2)
 
 STEANE_HZ = np.array([  # Steane [[7,1,3]] H_Z (arXiv:2410.02753 Eq.54), qubits 0..6
     [0,0,0,1,1,1,1],
@@ -74,3 +76,33 @@ def test_algorithm_1_noop_when_already_one():
     inc = _incidence([(0,1),(1,2),(2,3),(3,0)], 4)    # 4-cycle already h=1 (see Task 2)
     out = algorithm_1(inc, seed=0)
     np.testing.assert_array_equal(out, inc)
+
+
+def test_random_invertible_is_invertible():
+    rng = np.random.default_rng(3)
+    for _ in range(5):
+        A = _random_invertible_gf2(4, rng)
+        assert int(A.row_space().shape[0]) == 4       # full rank over GF(2)
+
+def test_algorithm_2_is_valid_cycle_basis_and_low_weight():
+    # A 6-cycle graph: edges (0,1)(1,2)(2,3)(3,4)(4,5)(5,0). Cycle space dim 1,
+    # the single cycle uses all 6 edges. With one big cycle, ∂0 = that weight-6 row.
+    inc = _incidence([(0,1),(1,2),(2,3),(3,4),(4,5),(5,0)], 6)
+    H_complement = np.zeros((0, 6), dtype=np.uint8)   # no backing checks (all edges are κ)
+    f0 = np.zeros((0, 6), dtype=np.uint8)             # |edges|=6 columns
+    d0 = algorithm_2(inc, H_complement, f0, n_samples=100, seed=0)
+    # rows are cycles: d0 @ incidence == 0 over GF(2)
+    assert np.all((np.asarray(d0).astype(int) @ inc.astype(int)) % 2 == 0)
+    # spans the whole cycle space (dim 1 here)
+    assert int(GF2(np.asarray(d0).astype(np.uint8)).row_space().shape[0]) == 1
+
+def test_algorithm_2_beats_arbitrary_basis_weight():
+    # Two triangles sharing edge structure so the arbitrary basis has a heavy row
+    # but a low-weight basis (two triangles) exists.
+    inc = _incidence([(0,1),(1,2),(0,2),(2,3),(3,4),(2,4)], 5)
+    H_complement = np.zeros((0, 5), dtype=np.uint8)
+    f0 = np.zeros((0, 6), dtype=np.uint8)
+    d0 = algorithm_2(inc, H_complement, f0, n_samples=300, seed=0)
+    assert np.all((np.asarray(d0).astype(int) @ inc.astype(int)) % 2 == 0)
+    # each independent cycle here is a triangle -> max row weight 3
+    assert int(np.asarray(d0).astype(int).sum(axis=1).max()) <= 3

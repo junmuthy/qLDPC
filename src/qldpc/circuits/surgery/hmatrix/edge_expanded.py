@@ -154,3 +154,90 @@ def algorithm_1(incidence: np.ndarray, *, max_extra: int = 200, seed: int = 0) -
         E_star = np.vstack([E_star, row])                          # line 13: E* ← E* ∪ {e}
         added += 1
     return E_star                                                 # line 15: return B
+
+
+def _rref_drop_zero(M: galois.FieldArray) -> galois.FieldArray:
+    """Reduced row echelon form with all-zero rows removed."""
+    if M.shape[0] == 0:
+        return M
+    R = M.row_reduce()
+    nz = np.asarray((R != 0).any(axis=1))
+    return R[nz]
+
+
+def _random_invertible_gf2(k: int, rng: np.random.Generator) -> galois.FieldArray:
+    """Random invertible k×k GF(2) matrix (rejection on full rank)."""
+    if k == 0:
+        return GF2(np.zeros((0, 0), dtype=np.uint8))
+    while True:
+        A = GF2(rng.integers(0, 2, size=(k, k), dtype=np.uint8))
+        if int(A.row_space().shape[0]) == k:
+            return A
+
+
+def algorithm_2(
+    incidence: np.ndarray,
+    H_complement: np.ndarray,
+    f0: np.ndarray,
+    *,
+    n_samples: int = 200,
+    seed: int = 0,
+) -> np.ndarray:
+    """Random search for low-weight ∂_0 (arXiv:2410.02753 Algorithm 2).
+
+    ``incidence`` = ∂_1 (edge-vertex). Cycle space = left null space of incidence.
+    V = redundant cycles {vᵀ f_0 : v ∈ ker H_complementᵀ}; W = complement so
+    V ⊕ W = full cycle space. Returns ∂_0 = a low-max-row-weight generator of W.
+    """
+    rng = np.random.default_rng(seed)
+    inc = GF2(np.asarray(incidence).astype(np.uint8))
+    f0 = GF2(np.asarray(f0).astype(np.uint8))
+    Hc = GF2(np.asarray(H_complement).astype(np.uint8))
+
+    # line 1: V ← basis of { vᵀ f_0 : v ∈ ker H_complementᵀ }.
+    # ker H_complementᵀ = left null space of H_complement: rows v with
+    # v @ H_complement = 0; each v has one entry per complementary check,
+    # matching the rows of f_0 (arXiv:2410.02753 Alg 2 line 1).
+    if Hc.shape[0] == 0:
+        ker_HcT = GF2(np.zeros((0, f0.shape[0]), dtype=np.uint8))
+    else:
+        ker_HcT = Hc.left_null_space()
+    V_rows = ker_HcT @ f0 if ker_HcT.shape[0] else GF2(np.zeros((0, f0.shape[1]), np.uint8))
+    V = _rref_drop_zero(V_rows)                    # line 2: rref(V)
+
+    # full cycle space of the graph defined by ∂_1 = left null space of incidence
+    cycle_space = inc.left_null_space()            # rows z with z @ incidence = 0
+
+    # line 3-5: W = complement of V within cycle_space, rref, zero rows removed.
+    stacked = np.vstack([np.asarray(V), np.asarray(cycle_space)]).astype(np.uint8)
+    # keep V rows first so row_reduce pivots them; the extra independent rows form W.
+    reduced = _rref_drop_zero(GF2(stacked))
+    # W = reduced rows not in rowspace(V): drop the first rank(V) pivot rows.
+    rank_V = int(V.row_space().shape[0]) if V.shape[0] else 0
+    W = reduced[rank_V:] if reduced.shape[0] > rank_V else GF2(
+        np.zeros((0, inc.shape[0]), np.uint8))
+
+    d0 = W                                         # line 6: ∂_0 ← W
+    best = _max_row_weight(d0)
+    for _ in range(n_samples):                     # line 7: for i in 1..n
+        k = d0.shape[0]
+        if k == 0:
+            break
+        A = _random_invertible_gf2(k, rng)         # line 8: A random invertible
+        B = GF2(rng.integers(0, 2, size=(k, V.shape[0]), dtype=np.uint8)) if V.shape[0] \
+            else GF2(np.zeros((k, 0), np.uint8))   # line 9: B random
+        AW = A @ W
+        if V.shape[0]:
+            cand = AW + B @ V                      # line 10: if maxwt(AW+BV) < best
+            wt = _max_row_weight(cand)
+            if wt < best:
+                d0, best = cand, wt                # line 11
+        wt_aw = _max_row_weight(AW)                # line 13: if maxwt(AW) < best
+        if wt_aw < best:
+            d0, best = AW, wt_aw                   # line 14
+    return np.asarray(d0).astype(np.uint8)         # line 17: return ∂_0
+
+
+def _max_row_weight(M: galois.FieldArray) -> int:
+    arr = np.asarray(M).astype(int)
+    return 0 if arr.shape[0] == 0 else int(arr.sum(axis=1).max())
