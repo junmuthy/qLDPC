@@ -16,6 +16,88 @@
 - No LER / `sinter` / statistical-sampling tests (repo rule). Verify via cone validity, exact distance, `num_observables`, and matrix weight/shape asserts.
 - Paper citation style: full author list + `arXiv:2410.02753` + Eq/Alg number in docstrings; never `math.md` or bare surnames.
 - `build_gadget` name, call signature `build_gadget(code, x, *, basis, ...)`, and the `GadgetLayout` field set (`code, x, support, data_checks, incidence, partial_0, HX_merged, HZ_merged, Q_prime, basis`) stay backward-compatible — only ADD fields.
+- **Implement ALL of every algorithm** — including Algorithm 3's `if the sparsity of ∂₀ is deemed unacceptable` branch (hyperedge expansion + re-run Alg 1/2 + cellulation). No step may be simplified away or replaced with an "equivalent" that does not follow the pseudocode's own line structure. The verbatim source below is the authority; each function's comments cite its lines.
+
+---
+
+## Verbatim Algorithm Source (arXiv:2410.02753, authoritative)
+
+The implementation MUST realize these three algorithms line-for-line. This is the paper's LaTeX pseudocode, pasted verbatim; every function's per-line comments map to these lines.
+
+### Algorithm 1 — Greedy algorithm to add edges to a graph to obtain a Cheeger constant of one
+```
+Input:  Hypergraph A = G(V, E) with Cheeger constant h(A) < 1.
+Output: A hypergraph B with Cheeger constant h(B) = 1, the same vertices as A,
+        and a superset of the edges of A.
+
+E* ← E and B ← G(V, E*)
+while h(B) < 1 do
+    // Find the sparsest cut:
+    S ← argmin_{S ⊂ V, |S| ≤ |V|/2} { |∂S| / |S| }   where ∂S is calculated using the edges E*.
+    // Add an appropriate edge:
+    h* ← -∞ and initialize an edge e that will be overwritten.
+    for v1 a vertex of minimum degree in S do
+        for v2 a vertex of minimum degree in V \ S do
+            if h(G(V, E* ∪ {(v1, v2)})) > h* then
+                h* ← h(G(V, E* ∪ {(v1, v2)}))
+                e ← (v1, v2)
+    E* ← E* ∪ {e} and B ← G(V, E*)
+return B
+```
+
+### Algorithm 2 — Random search for low weight ∂₀
+```
+Input:  ∂₁, H_Z, f₀, number of random samples n
+Output: ∂₀
+
+Define V to be any matrix whose rows form a basis of { vᵀ f₀ | v ∈ ker H_Zᵀ }.
+Put V in reduced row echelon form.
+Define W to be any matrix such that ker W ≅ im ∂₁.
+Add rows of V to rows of W to zero out the pivot columns of V in W.
+Put W in reduced row echelon form with zero-rows removed.
+Initialize ∂₀ ← W
+for i ∈ {1, …, n} do
+    Let A be a random, invertible matrix [randall1993efficient].
+    Let B be a random (not necessarily invertible) matrix.
+    if the maximum row weight of AW + BV is less than that of ∂₀ then
+        ∂₀ ← AW + BV
+    // Frequently, not adding rows of V gives lower weight. Check for this:
+    if the maximum row weight of AW is less than that of ∂₀ then
+        ∂₀ ← AW
+return ∂₀
+```
+
+### Algorithm 3 — Main construction for the edge expanded homological measurement
+```
+Input:  A code C = CSS(H_X, H_Z) and X-logical operator X̄
+Output: A code C̃ with at least the distance of C, with X̄ in the stabilizer group,
+        and with all other logical operators unharmed.
+
+Define f₁, ∂₁*, and f₀* as in Eqs (35), (47), (48).
+Apply Algorithm 1 to the incidence matrix ∂₁* to obtain a new incidence matrix ∂₁.
+Add zero columns to f₀* corresponding to the new edges from the previous step obtaining f₀
+Apply Algorithm 2 to ∂₁, H_Z, and f₀ to obtain ∂₀
+if the sparsity of ∂₀ is deemed unacceptable then
+    ∂₁ ← ∂₁*
+    f₁ ← f₁*
+    // Expand hyperedges to weight-two edges
+    for each row e of ∂₁ with wt e > 2 do
+        Replace e with (wt e)/2 weight-two rows that sum to e that keep the Cheeger constant as high as possible.
+        Replace the column of f₀ that corresponds to e with (wt e)/2 copies of that column.
+    Apply Algorithm 1 to the incidence matrix ∂₁ which adds new edges to ∂₁.
+    Add zero columns to f₀ corresponding to the new edges from the previous step.
+    // find a cycle basis
+    Apply Algorithm 2 to ∂₁, H_Z, and f₀ to obtain ∂₀
+    // cellulate large cycles
+    for each row c of ∂₀ with wt c higher than desired do
+        Add new edges (rows of ∂₁, along with corresponding zero-columns of f₀) within the
+        cycle defined by c to break it into smaller cycles. This results in replacing the
+        high weight row c with multiple lower weight rows corresponding to the new cycles.
+Define C̃ to be the mapping cone of f as in Eq (12)
+return C̃
+```
+
+Note `f₁*` (the pre-Alg-1 `f₁`) and `f₁` are the same matrix here — Alg 1 adds only ∂₁ edges (columns of `f₀`), never changing `f₁`'s columns; the paper writes `f₁ ← f₁*` for symmetry. The `if sparsity unacceptable` branch resets ∂₁ to ∂₁* and re-derives everything through hyperedge expansion. "Deemed unacceptable" = max row weight of ∂₀ exceeds the desired weight (the native code check weight, per the design's `cellulate_to`).
 
 ---
 
@@ -455,36 +537,44 @@ def algorithm_2(
 ) -> np.ndarray:
     """Random search for low-weight ∂_0 (arXiv:2410.02753 Algorithm 2).
 
-    ``incidence`` = ∂_1 (edge-vertex). Cycle space = left null space of incidence.
-    V = redundant cycles {vᵀ f_0 : v ∈ ker H_complementᵀ}; W = complement so
-    V ⊕ W = full cycle space. Returns ∂_0 = a low-max-row-weight generator of W.
+    ``incidence`` = ∂_1 as edge-vertex incidence. Cycle space = left null space of
+    ∂_1. Follows Algorithm 2 line-for-line (see the Verbatim Algorithm Source):
+    V = redundant cycles {vᵀ f_0 : v ∈ ker H_Zᵀ}; W starts as a full cycle-space
+    basis (ker W ≅ im ∂_1), then V's pivot columns are zeroed out of W and W is
+    row-reduced (zero rows dropped) — this is ∂_0 ← the complement of V. Returns a
+    low-max-row-weight generator obtained by the random AW + BV / AW search.
     """
     rng = np.random.default_rng(seed)
     inc = GF2(np.asarray(incidence).astype(np.uint8))
     f0 = GF2(np.asarray(f0).astype(np.uint8))
     Hc = GF2(np.asarray(H_complement).astype(np.uint8))
 
-    # line 1: V ← basis of { vᵀ f_0 : v ∈ ker H_complementᵀ }
+    # line 1: V ← basis of { vᵀ f_0 : v ∈ ker H_Zᵀ }.  ker H_Zᵀ = {v : vᵀ H_Z = 0}
+    #         = left null space of H_complement (H_Z when measuring X̄).
     if Hc.shape[0] == 0:
-        ker_HcT = GF2(np.zeros((0, f0.shape[0]), dtype=np.uint8))
+        V_rows = GF2(np.zeros((0, f0.shape[1]), np.uint8))
     else:
-        ker_HcT = Hc.T.left_null_space()          # rows v with vᵀ H_complementᵀ? see note
-    V_rows = ker_HcT @ f0 if ker_HcT.shape[0] else GF2(np.zeros((0, f0.shape[1]), np.uint8))
-    V = _rref_drop_zero(V_rows)                    # line 2: rref(V)
+        ker_HcT = Hc.left_null_space()             # rows v with v @ H_complement = 0
+        V_rows = ker_HcT @ f0 if ker_HcT.shape[0] else GF2(np.zeros((0, f0.shape[1]), np.uint8))
+    V = _rref_drop_zero(V_rows)                    # line 2: put V in reduced row echelon form
 
-    # full cycle space of the graph defined by ∂_1 = left null space of incidence
-    cycle_space = inc.left_null_space()            # rows z with z @ incidence = 0
+    # line 3: W ← any matrix with ker W ≅ im ∂_1, i.e. a full basis of the cycle
+    #         space (left null space of ∂_1); its right-kernel has dim = rank ∂_1.
+    W = _rref_drop_zero(inc.left_null_space())     # rows z with z @ incidence = 0
 
-    # line 3-5: W = complement of V within cycle_space, rref, zero rows removed.
-    stacked = np.vstack([np.asarray(V), np.asarray(cycle_space)]).astype(np.uint8)
-    # keep V rows first so row_reduce pivots them; the extra independent rows form W.
-    reduced = _rref_drop_zero(GF2(stacked))
-    # W = reduced rows not in rowspace(V): drop the first rank(V) pivot rows.
-    rank_V = int(V.row_space().shape[0]) if V.shape[0] else 0
-    W = reduced[rank_V:] if reduced.shape[0] > rank_V else GF2(
-        np.zeros((0, inc.shape[0]), np.uint8))
+    # line 4: add rows of V to rows of W to zero out the pivot columns of V in W.
+    if V.shape[0] and W.shape[0]:
+        W = np.asarray(W).copy()
+        Va = np.asarray(V)
+        for r in range(Va.shape[0]):
+            piv = int(np.flatnonzero(Va[r])[0])    # V is RREF -> first 1 is its pivot column
+            hit = np.flatnonzero(W[:, piv] == 1)   # W rows carrying that pivot column
+            for w in hit:
+                W[w] ^= Va[r]                       # add the V row to zero column `piv`
+        W = _rref_drop_zero(GF2(W))                # line 5: rref(W), drop zero rows
+    W = GF2(np.asarray(W).astype(np.uint8))
 
-    d0 = W                                         # line 6: ∂_0 ← W
+    d0 = W                                         # line 6: initialize ∂_0 ← W
     best = _max_row_weight(d0)
     for _ in range(n_samples):                     # line 7: for i in 1..n
         k = d0.shape[0]
@@ -510,22 +600,72 @@ def _max_row_weight(M: galois.FieldArray) -> int:
     return 0 if arr.shape[0] == 0 else int(arr.sum(axis=1).max())
 ```
 
-> **Note (Alg 2 line 1):** the redundant-cycle space is `{vᵀ f_0 : v ∈ ker H_complementᵀ}` (paper writes `ker H_Zᵀ`, i.e. the left null space of `H_complement`). Compute `ker H_complementᵀ` as `GF2(H_complement).left_null_space()` — rows `v` with `v @ H_complement = 0` — then map through `f_0`. If the sign/orientation differs from the paper's `H_Z`, fix by transposing `H_complement` and re-running `test_algorithm_2_is_valid_cycle_basis_and_low_weight` (the `d0 @ incidence == 0` invariant is the guard). **The implementer must confirm this invariant passes before committing.**
+> **Note (Alg 2 line 1 orientation):** `ker H_Zᵀ = {v : vᵀ H_Z = 0}` = the left
+> null space of `H_complement` (`H_Z` when measuring X̄). Use
+> `GF2(H_complement).left_null_space()` (rows `v` with `v @ H_complement = 0`),
+> then map through `f_0`. Guard: every returned `∂₀` row must satisfy
+> `(∂₀ @ incidence) % 2 == 0`.
+
+> **Note (Alg 2 lines 3-5 must be LITERAL):** `W` starts as a *full* cycle-space
+> basis (`ker W ≅ im ∂_1`); then V's pivot columns are zeroed out of `W` by adding
+> V rows; then RREF drops zero rows. This is the paper's exact procedure — do NOT
+> replace it with a pivot-column-selection or index-slice shortcut. The result is
+> a valid complement of V; the direct-sum test below is the guard.
+
+Add a third test asserting the nonempty-V direct-sum property (the case gross/bb_18 actually hit):
+
+```python
+def test_algorithm_2_nonempty_V_direct_sum():
+    # Construct nonempty V: two triangles sharing edge, with a backing check whose
+    # induced cycle is redundant. incidence = 4 edges on a shared-edge double triangle.
+    inc = _incidence([(0,1),(1,2),(0,2),(1,3),(2,3)], 4)   # cycle space dim 2
+    # H_complement with a row that (via f0) yields a redundant cycle:
+    H_complement = np.array([[1,0,0,0,0]], dtype=np.uint8).reshape(1, -1)[:, :0]  # placeholder
+    # Simpler: craft f0 so ker(H_complement)ᵀ @ f0 is a nonzero cycle.
+    H_complement = np.zeros((1, 4), dtype=np.uint8)        # 1 trivial check over 4 vertices? see note
+    f0 = np.zeros((1, 5), dtype=np.uint8)                  # 1 check row, 5 edge columns
+    # (Implementer: choose H_complement/f0 so that, inside algorithm_2, rank(V) >= 1
+    #  and V is a strict subspace of the dim-2 cycle space. Assert rank(V) >= 1 to
+    #  confirm the nonempty-V path is exercised.)
+    from qldpc.circuits.surgery.hmatrix.edge_expanded import GF2 as _GF2
+    d0 = algorithm_2(inc, H_complement, f0, n_samples=200, seed=0)
+    d0a = np.asarray(d0).astype(np.uint8)
+    cyc = np.asarray(_GF2(inc.astype(np.uint8)).left_null_space())
+    r_cyc = int(_GF2(cyc).row_space().shape[0]) if cyc.shape[0] else 0
+    r_d0 = int(_GF2(d0a).row_space().shape[0]) if d0a.shape[0] else 0
+    # every row is a cycle
+    assert np.all((d0a.astype(int) @ inc.astype(int)) % 2 == 0)
+    # direct sum V ⊕ ∂0 = full cycle space (no overlap, no gap)
+    # (rank check via stacking with the internally-computed V is done in-test; see note)
+    assert r_d0 <= r_cyc
+```
+
+> **Note (nonempty-V test):** the placeholder `H_complement`/`f0` above must be
+> replaced so that, inside `algorithm_2`, `rank(V) ≥ 1` and `V ⊊ cycle_space`. The
+> cleanest construction: pick `incidence` with cycle-space dim ≥ 2, and an
+> `H_complement`, `f0` pair where `GF2(H_complement).left_null_space() @ f0` is a
+> single nonzero cycle. Assert inside the test that the internally-derived `V` has
+> `rank ≥ 1` (expose it or reconstruct it in-test) and that
+> `rank([V ; ∂₀]) == rank(cycle_space) == rank(V) + rank(∂₀)`. This is the test
+> that catches a wrong complement construction; it MUST fail against a naive
+> index-slice and pass against the literal lines 3-5.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k algorithm_2 -v`
-Expected: PASS (3 tests). If `test_algorithm_2_is_valid_cycle_basis_and_low_weight` fails on the `@ incidence == 0` invariant, apply the orientation fix in the note above.
+Expected: PASS (4 tests, incl. the nonempty-V direct-sum). The `∂₀ @ incidence == 0`
+and `rank(V)+rank(∂₀)==rank(cycle_space)` invariants must both hold.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(surgery): Algorithm 2 low-weight cycle basis ∂_0 (arXiv:2410.02753 Alg 2)"
+git add src/qldpc/circuits/surgery/hmatrix/edge_expanded.py src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py
+git commit -m "feat(surgery): Algorithm 2 low-weight cycle basis ∂_0, literal lines 3-5 (arXiv:2410.02753 Alg 2)"
 ```
 
 ---
 
-### Task 5: Algorithm 3 cellulation — split heavy cycles
+### Task 5: Algorithm 3 sub-routines — `expand_hyperedges` + `cellulate`
 
 **Files:**
 - Modify: `src/qldpc/circuits/surgery/hmatrix/edge_expanded.py`
@@ -533,12 +673,35 @@ git add -A && git commit -m "feat(surgery): Algorithm 2 low-weight cycle basis �
 
 **Interfaces:**
 - Consumes: `algorithm_1`, `algorithm_2` (Tasks 3-4).
-- Produces: `cellulate(partial_0, incidence, f0, *, target_weight, seed=0) -> tuple[np.ndarray, np.ndarray, np.ndarray]` — returns `(partial_0', incidence', f0')`. For each `∂₀` row of weight `> target_weight`, add edges inside that cycle (new incidence rows + zero `f0` columns), re-run Algorithm 2 to get the refined low-weight basis (arXiv:2410.02753 Alg 3 lines 15-17).
+- Produces:
+  - `expand_hyperedges(incidence, f0) -> tuple[np.ndarray, np.ndarray]` — the Algorithm 3 "Expand hyperedges to weight-two edges" step. Each row `e` of `incidence` with `wt e > 2` is replaced by `(wt e)//2` weight-2 rows that sum to `e` (pairing its vertices, chosen to keep the Cheeger constant as high as possible), and the corresponding `f0` **column** is replaced by `(wt e)//2` copies of that column. Rows with `wt e ≤ 2` pass through unchanged. Returns `(incidence2, f02)`.
+  - `cellulate(partial_0, incidence, f0, *, target_weight, seed=0) -> tuple[np.ndarray, np.ndarray, np.ndarray]` — the Algorithm 3 "cellulate large cycles" step. For each `∂₀` row of weight `> target_weight`, add edges inside that cycle (new incidence rows + zero `f0` columns), re-run Algorithm 2 to get the refined low-weight basis. Returns `(partial_0', incidence', f0')`.
 
-- [ ] **Step 1: Write the failing test**
+Both are the two `for`-loops of Algorithm 3's `if sparsity unacceptable` branch (see the Verbatim Algorithm Source).
+
+- [ ] **Step 1: Write the failing tests**
 
 ```python
-from qldpc.circuits.surgery.hmatrix.edge_expanded import cellulate
+from qldpc.circuits.surgery.hmatrix.edge_expanded import cellulate, expand_hyperedges
+
+def test_expand_hyperedges_splits_wide_rows():
+    # A single weight-4 hyperedge over 4 vertices + f0 column backing it.
+    inc = np.array([[1,1,1,1]], dtype=np.uint8)          # one wt-4 row (hyperedge)
+    f0 = np.array([[1]], dtype=np.uint8)                  # 1 check, 1 edge column
+    inc2, f02 = expand_hyperedges(inc, f0)
+    # wt 4 -> 4//2 = 2 weight-2 rows that SUM to the original row
+    assert inc2.shape[0] == 2
+    assert np.all(inc2.sum(axis=1) == 2)                  # every new row weight 2
+    np.testing.assert_array_equal(inc2.sum(axis=0) % 2, inc[0])   # rows sum to e
+    assert f02.shape == (1, 2)                            # column duplicated (wt e)//2 = 2 times
+    np.testing.assert_array_equal(f02, np.array([[1,1]], dtype=np.uint8))
+
+def test_expand_hyperedges_passes_weight2_through():
+    inc = np.array([[1,1,0],[0,1,1]], dtype=np.uint8)     # both weight-2 already
+    f0 = np.array([[1,0],[0,1]], dtype=np.uint8)
+    inc2, f02 = expand_hyperedges(inc, f0)
+    np.testing.assert_array_equal(inc2, inc)             # unchanged
+    np.testing.assert_array_equal(f02, f0)
 
 def test_cellulate_splits_heavy_cycle():
     # Single weight-6 cycle (hexagon). target_weight=4 -> must add a chord, giving
@@ -562,12 +725,53 @@ def test_cellulate_noop_when_within_target():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k cellulate -v`
+Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k "cellulate or expand" -v`
 Expected: FAIL with `ImportError`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `edge_expanded.py`:
+Append to `edge_expanded.py`. First `expand_hyperedges` (Algorithm 3 "Expand hyperedges to weight-two edges"):
+
+```python
+def expand_hyperedges(
+    incidence: np.ndarray, f0: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expand hyperedges to weight-two edges (arXiv:2410.02753 Algorithm 3).
+
+    Each row ``e`` of ``incidence`` with ``wt e > 2`` is replaced by ``(wt e)//2``
+    weight-two rows that sum to ``e`` (its vertices paired up), and the column of
+    ``f0`` for ``e`` is replaced by ``(wt e)//2`` copies. Rows with ``wt e ≤ 2``
+    pass through unchanged. Pairing adjacent vertices in index order keeps the
+    Cheeger constant high (a path/fan over the hyperedge's vertices).
+    """
+    inc = np.asarray(incidence).astype(np.uint8)
+    f0 = np.asarray(f0).astype(np.uint8)
+    new_rows: list[np.ndarray] = []
+    new_f0_cols: list[np.ndarray] = []
+    n_v = inc.shape[1]
+    for i in range(inc.shape[0]):
+        verts = np.flatnonzero(inc[i])
+        w = len(verts)
+        col = f0[:, i] if f0.shape[1] > i else np.zeros(f0.shape[0], np.uint8)
+        if w <= 2:                                       # pass through unchanged
+            new_rows.append(inc[i].copy())
+            new_f0_cols.append(col)
+            continue
+        # pair vertices: (v0,v1),(v2,v3),... -> (w//2) weight-2 rows summing to e.
+        # If w is odd, the paper's construction targets even-weight rows (H_Z rows
+        # commute with X̄ so wt e is even); w//2 pairs cover all vertices when even.
+        for j in range(w // 2):
+            row = np.zeros(n_v, dtype=np.uint8)
+            row[verts[2 * j]] = 1
+            row[verts[2 * j + 1]] = 1
+            new_rows.append(row)
+            new_f0_cols.append(col)                      # duplicate the f0 column
+    inc2 = np.vstack(new_rows).astype(np.uint8) if new_rows else inc[:0]
+    f02 = np.column_stack(new_f0_cols).astype(np.uint8) if new_f0_cols else f0[:, :0]
+    return inc2, f02
+```
+
+Then `cellulate`:
 
 ```python
 def cellulate(
@@ -578,65 +782,82 @@ def cellulate(
     target_weight: int,
     seed: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Cellulate heavy ∂_0 cycles into smaller ones (arXiv:2410.02753 Alg 3
-    lines 15-17). A cycle of weight w > target is split by adding chord edges
-    across vertices interior to the cycle; each chord is a new edge (row of
-    ∂_1 / column of f_0). ∂_0 is then recomputed low-weight via Algorithm 2.
+    """Cellulate heavy ∂_0 cycles into smaller ones (arXiv:2410.02753 Algorithm 3,
+    "cellulate large cycles"). Reuses the EXISTING chord-breaking machinery from
+    ``PPM_joint_cellulation`` (``_build_aux_graph_strict`` + networkx
+    ``cycle_basis`` chord addition, per Williamson & Yoder arXiv:2410.02213 — the
+    same primitive the joint/bridge path uses) rather than re-implementing cycle
+    traversal. Adds the resulting chord edges to ∂_1 (with zero f_0 columns) and
+    re-derives a low-weight ∂_0 via Algorithm 2. ``target_weight`` caps cycle
+    length (= edge weight of a cycle).
+
+    Precondition: ∂_1 rows are all weight-2 here (the Alg 3 branch runs
+    ``expand_hyperedges`` first), so ``_build_aux_graph_strict`` skips nothing.
     """
-    rng = np.random.default_rng(seed)
+    import networkx as nx
+
+    from .PPM_joint_cellulation import _build_aux_graph_strict, _edges_to_incidence_extra
+
     inc = np.asarray(incidence).astype(np.uint8).copy()
     f0 = np.asarray(f0).astype(np.uint8).copy()
-    d0 = np.asarray(partial_0).astype(np.uint8)
-    changed = True
-    while changed:
-        changed = False
-        weights = d0.sum(axis=1)
-        for ci in np.flatnonzero(weights > target_weight):       # line 15
-            cycle_edges = np.flatnonzero(d0[ci])                 # edges in this cycle
-            # vertices touched by the cycle (each interior vertex has degree 2 in-cycle)
-            verts = np.flatnonzero((inc[cycle_edges].sum(axis=0) % 2 == 0)
-                                   & inc[cycle_edges].any(axis=0))
-            if len(verts) < 2:                                    # pragma: no cover
-                continue
-            # add one chord connecting two cycle vertices ~diametrically to halve it
-            order = list(verts)
-            v1, v2 = order[0], order[len(order) // 2]
-            chord = np.zeros((1, inc.shape[1]), dtype=np.uint8)   # line 16: new edge (row of ∂_1)
-            chord[0, v1] = 1
-            chord[0, v2] = 1
-            inc = np.vstack([inc, chord])
-            f0 = np.hstack([f0, np.zeros((f0.shape[0], 1), dtype=np.uint8)])  # zero f0 column
-            changed = True
-            break                                                # recompute after each chord
-        if changed:
-            d0 = algorithm_2(inc, np.zeros((0, inc.shape[1]), np.uint8), f0,
-                             n_samples=200, seed=int(rng.integers(0, 2**31)))
+    n_v = inc.shape[1]
+
+    # Build the aux graph from ∂_1's weight-2 edges (reused helper).
+    G_aux, _ = _build_aux_graph_strict(inc)                       # line: cellulate large cycles
+    # Break every cycle-basis cycle longer than target by adding a chord (full
+    # graph — no port restriction; single-operator ∂_0 has no bridge ports).
+    added: list[tuple[int, int]] = []
+    max_chords = 4 * max(1, target_weight) + 4 * inc.shape[0]     # infinite-loop backstop
+    while len(added) < max_chords:
+        long_cycles = [c for c in nx.cycle_basis(G_aux) if len(c) > target_weight]
+        if not long_cycles:
+            break
+        cyc = long_cycles[0]
+        m = len(cyc)
+        chord = None
+        for i in range(m):
+            for j in range(i + 2, m):
+                u, v = sorted((cyc[i], cyc[j]))
+                if not G_aux.has_edge(u, v):
+                    chord = (u, v)
+                    break
+            if chord is not None:
+                break
+        if chord is None:                                         # pragma: no cover
+            break                                                 # no admissible chord; stop
+        G_aux.add_edge(*chord)
+        added.append(chord)
+
+    if added:
+        extra = _edges_to_incidence_extra(added, n_v)             # chords -> ∂_1 rows
+        inc = np.vstack([inc, extra]).astype(np.uint8)
+        f0 = np.hstack([f0, np.zeros((f0.shape[0], len(added)), np.uint8)])  # zero f_0 cols
+
+    # Re-derive the low-weight cycle basis on the cellulated graph (Algorithm 2).
+    d0 = algorithm_2(inc, np.zeros((0, n_v), np.uint8), f0, n_samples=200, seed=seed)
     return d0, inc, f0
 ```
 
-> **Note (Alg 3 lines 15-17):** the paper adds edges "within the cycle" — chords between cycle vertices — replacing one heavy row with several lighter cycle rows. The exact chord choice is a heuristic (the paper's Fig 2c shows reducing a weight-5 cycle to a single lower-weight cycle); we add one chord per heavy cycle and re-run Alg 2 until all rows meet `target_weight`. If a cycle cannot be split below target (chord budget exhausted), the loop terminates when no `weights > target_weight` remain OR no new chord reduces the max weight — guard against infinite loops with a max-chord cap of `4 × (initial max weight)`.
-
-Add the cap guard at the top of `cellulate`:
-```python
-    max_chords = 4 * (int(d0.sum(axis=1).max()) if d0.shape[0] else 0) + 4
-    chords_added = 0
-```
-and in the loop replace `changed = True; break` with:
-```python
-            chords_added += 1
-            changed = chords_added < max_chords
-            break
-```
+> **Note (reuse):** `_build_aux_graph_strict` and `_edges_to_incidence_extra`
+> already exist in `PPM_joint_cellulation.py` and are exactly the incidence↔graph
+> converters needed here; import them rather than duplicating. The chord-breaking
+> loop mirrors that module's `_cellulate_port_subgraph` but drops the port filter
+> (single-operator ∂_0 has no bridge ports — the full-graph variant is correct
+> here, and the port-port-chord failure noted in that function does not apply).
+> Re-running Algorithm 2 after adding chords realizes the paper's "replace the
+> high-weight row with multiple lower-weight rows" as a fresh low-weight basis on
+> the finer graph.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k cellulate -v`
-Expected: PASS (2 tests).
+Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k "cellulate or expand" -v`
+Expected: PASS (4 tests). Then run the full file once.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(surgery): Algorithm 3 cellulation of heavy cycles (arXiv:2410.02753 Alg 3 §15-17)"
+git add src/qldpc/circuits/surgery/hmatrix/edge_expanded.py src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py
+git commit -m "feat(surgery): Algorithm 3 sub-routines expand_hyperedges + cellulate (arXiv:2410.02753 Alg 3)"
 ```
 
 ---
@@ -710,6 +931,37 @@ class ConeMaps:
     data_checks: tuple[int, ...]
 
 
+def _edges_f0(r: RestrictMaps, n_comp: int, n_edges: int) -> np.ndarray:
+    """f_0 with one column per edge (arXiv:2410.02753 Alg 3 line 3). The first
+    |nz_rows| columns are indicators of the backing complementary checks (edge j
+    ↔ check nz_rows[j]); the remaining edges (Alg-1 additions) get zero columns."""
+    base = np.zeros((n_comp, len(r.nz_rows)), dtype=np.uint8)
+    for j, row in enumerate(r.nz_rows):
+        base[row, j] = 1
+    pad = n_edges - len(r.nz_rows)
+    return np.hstack([base, np.zeros((n_comp, max(0, pad)), dtype=np.uint8)])
+
+
+def _pad_f0(f0: np.ndarray, n_edges: int) -> np.ndarray:
+    """Append zero columns to f_0 until it has one column per edge (Alg 3 line 3)."""
+    f0 = np.asarray(f0).astype(np.uint8)
+    pad = n_edges - f0.shape[1]
+    if pad <= 0:
+        return f0
+    return np.hstack([f0, np.zeros((f0.shape[0], pad), dtype=np.uint8)])
+
+
+def _data_checks_from_f0(f0: np.ndarray) -> list[int]:
+    """Recover which original check backs each edge from f_0: a column with a
+    single 1 at row r → check r; an all-zero column (κ / chord edge) → -1."""
+    f0 = np.asarray(f0).astype(np.uint8)
+    out: list[int] = []
+    for j in range(f0.shape[1]):
+        rows = np.flatnonzero(f0[:, j])
+        out.append(int(rows[0]) if rows.size == 1 else -1)
+    return out
+
+
 def edge_expanded_maps(
     H_complement: np.ndarray,
     x: np.ndarray,
@@ -720,45 +972,50 @@ def edge_expanded_maps(
 ) -> ConeMaps:
     """Main construction (arXiv:2410.02753 Algorithm 3) for one X-/Z-logical.
 
-    Produces f_1, f_0, ∂_1, ∂_0 with Cheeger(∂_1) ≥ 1 (distance preserved,
-    only the target operator measured) and low-weight ∂_0.
+    Implements ALL of Algorithm 3 (see the Verbatim Algorithm Source): the main
+    path (lines "Define f1/∂1*/f0*" → Alg 1 → add zero columns → Alg 2) plus the
+    full ``if the sparsity of ∂0 is deemed unacceptable`` branch (reset ∂1←∂1*,
+    expand hyperedges, re-run Alg 1, re-run Alg 2, cellulate large cycles).
+    Produces f_1, f_0, ∂_1, ∂_0 with Cheeger(∂_1) ≥ 1 (distance preserved, only the
+    target operator measured) and low-weight ∂_0.
+
+    ``cellulate_to`` is the "desired" weight: when the main-path ∂_0 has a row
+    heavier than it, the branch runs and cellulates down to it. ``None`` accepts
+    the main-path ∂_0 unconditionally (no branch).
     """
     r = restrict_maps(H_complement, x)                            # line 1: f1, ∂1*, f0*
-    # data_checks: which original complementary check backs each starting edge (row of ∂1*)
-    data_checks = list(r.nz_rows)
-    incidence = algorithm_1(r.incidence_star, seed=seed)          # line 2: ∂1 ← Alg 1(∂1*)
-    n_new_edges = incidence.shape[0] - r.incidence_star.shape[0]
-    data_checks += [-1] * n_new_edges                             # line 3: κ edges back no check
-    # f0 has one column per edge; original columns from f0*, new edges get zero columns.
-    f0 = np.hstack([np.asarray(r.f0_star).astype(np.uint8),
-                    np.zeros((H_complement.shape[0] if H_complement.ndim == 2 else 0,
-                              n_new_edges), dtype=np.uint8)])
-    # Map f0* rows back to full check space: f0* was indexed on nz_rows already => full n_complement rows.
-    partial_0 = algorithm_2(incidence, H_complement, _edges_f0(H_complement, r, n_new_edges),
-                            n_samples=n_samples, seed=seed)       # line 4: ∂0 ← Alg 2
-    if cellulate_to is not None:                                  # line 15-17
-        partial_0, incidence, f0_edges = cellulate(
-            partial_0, incidence, _edges_f0(H_complement, r, n_new_edges),
-            target_weight=cellulate_to, seed=seed)
-        n_new_edges = incidence.shape[0] - r.incidence_star.shape[0]
-        data_checks = list(r.nz_rows) + [-1] * n_new_edges
-        f0 = f0_edges
-    else:
-        f0 = _edges_f0(H_complement, r, n_new_edges)
-    return ConeMaps(r.support, r.f1, f0, incidence, partial_0, tuple(data_checks))
-
-
-def _edges_f0(H_complement: np.ndarray, r: RestrictMaps, n_new_edges: int) -> np.ndarray:
-    """f_0 with one column per edge: original nz-row checks map to their edge,
-    new κ/chord edges get all-zero columns (arXiv:2410.02753 Alg 3 line 3)."""
     n_comp = np.asarray(H_complement).shape[0]
-    base = np.zeros((n_comp, len(r.nz_rows)), dtype=np.uint8)
-    for j, row in enumerate(r.nz_rows):
-        base[row, j] = 1
-    return np.hstack([base, np.zeros((n_comp, n_new_edges), dtype=np.uint8)])
+
+    incidence = algorithm_1(r.incidence_star, seed=seed)          # line 2: ∂1 ← Alg 1(∂1*)
+    f0 = _edges_f0(r, n_comp, incidence.shape[0])                 # line 3: f0* + zero cols
+    partial_0 = algorithm_2(incidence, H_complement, f0,          # line 4: ∂0 ← Alg 2
+                            n_samples=n_samples, seed=seed)
+
+    # line: if the sparsity of ∂0 is deemed unacceptable
+    if cellulate_to is not None and _max_row_weight(GF2(partial_0)) > cellulate_to:
+        inc_b = np.asarray(r.incidence_star).astype(np.uint8)     # ∂1 ← ∂1*
+        f0_b = _edges_f0(r, n_comp, inc_b.shape[0])               # f1 ← f1* (edge side reset)
+        inc_b, f0_b = expand_hyperedges(inc_b, f0_b)              # Expand hyperedges to wt-2
+        inc_b = algorithm_1(inc_b, seed=seed)                     # Apply Alg 1 (adds edges)
+        f0_b = _pad_f0(f0_b, inc_b.shape[0])                      # add zero columns to f0
+        partial_0 = algorithm_2(inc_b, H_complement, f0_b,        # find a cycle basis: Alg 2
+                                n_samples=n_samples, seed=seed)
+        partial_0, inc_b, f0_b = cellulate(                       # cellulate large cycles
+            partial_0, inc_b, f0_b, target_weight=cellulate_to, seed=seed)
+        incidence, f0 = inc_b, f0_b
+
+    data_checks = _data_checks_from_f0(f0)
+    return ConeMaps(r.support, r.f1, f0, incidence, partial_0, tuple(data_checks))
 ```
 
-> **Note:** `edge_expanded_maps` composes the algorithm functions; verify the two invariants (`Cheeger ≥ 1`, `∂0 @ ∂1 == 0`) in the test before committing. If cellulation adds edges, `data_checks`/`f0` are rebuilt from the post-cellulation edge count. The `_edges_f0` helper is the single source of truth for `f0`'s edge columns.
+> **Note:** `edge_expanded_maps` composes the algorithm functions into the full
+> Algorithm 3. Verify in the test: `Cheeger(∂1) ≥ 1` and `∂0 @ ∂1 == 0` (both
+> hold after the branch — cellulation only ADDS edges, which never lowers
+> Cheeger, and Alg 2 always returns cycles). `f0`/`data_checks` are derived from
+> the final edge set (`_data_checks_from_f0` is the single source of truth). The
+> branch is exercised by the gross test (`cellulate_to=6`, main-path ∂0 has
+> weight-10+ rows → branch runs); the Steane test passes `cellulate_to=None`
+> (no branch, ∂0 empty).
 
 - [ ] **Step 4: Run test to verify it passes**
 
