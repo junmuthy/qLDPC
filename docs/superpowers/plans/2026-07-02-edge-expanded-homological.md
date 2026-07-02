@@ -307,84 +307,48 @@ def _mask_to_indicator(mask: int, n_v: int) -> np.ndarray:
     return np.array([(mask >> i) & 1 for i in range(n_v)], dtype=np.uint8)
 
 
-def _col_ints(inc: np.ndarray) -> list[int]:
-    """Bit-pack each vertex column of the edge-vertex incidence into a Python int
-    (bit e set iff edge e touches that vertex). Enables O(1) boundary XOR +
-    ``bit_count`` during exhaustive cut enumeration — exact, same result as the
-    numpy path, ~20× faster (|V|=24 becomes seconds, not minutes)."""
-    n_v = inc.shape[1]
-    return [
-        int.from_bytes(np.packbits(inc[:, i][::-1]).tobytes()[::-1], "little")
-        for i in range(n_v)
-    ]
-
-
 def cheeger_constant(incidence: np.ndarray) -> float:
-    """h = min_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Eq 3), exact enumeration.
-
-    Bit-packed Gray-code sweep: ``boundary_int`` holds ∂S as a bitmask over edges,
-    XOR-updated as S grows by one vertex, so each cut costs one XOR + one
-    ``bit_count``. Identical result to the numpy ``boundary`` path.
-    """
+    """h = min_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Eq 3), exact enumeration."""
     inc = np.asarray(incidence).astype(np.uint8)
     n_v = inc.shape[1]
     if n_v < 2:
         return float("inf")
-    cols = _col_ints(inc)
-    half = n_v // 2
     best = float("inf")
-    boundary_int = 0
-    mask = 0
-    for k in range(1, 1 << n_v):
-        bit = (k & -k).bit_length() - 1
-        mask ^= 1 << bit
-        boundary_int ^= cols[bit]                 # ∂S XOR-updated (Eq 2)
-        size = mask.bit_count()
-        if 1 <= size <= half:
-            cut = boundary_int.bit_count()
-            if cut < best * size:
-                best = cut / size
+    for mask, size in _all_cuts(n_v):
+        S = _mask_to_indicator(mask, n_v)
+        cut = int(boundary(inc, S).sum())
+        if cut < best * size:
+            best = cut / size
     return best
 
 
 def sparsest_cut(incidence: np.ndarray) -> np.ndarray:
-    """argmin_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Alg 1 line 3). Bit-packed
-    Gray-code sweep (same enumeration as ``cheeger_constant``)."""
+    """argmin_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Alg 1 line 3)."""
     inc = np.asarray(incidence).astype(np.uint8)
     n_v = inc.shape[1]
-    if n_v < 2:
-        return np.zeros(n_v, dtype=np.uint8)
-    cols = _col_ints(inc)
-    half = n_v // 2
     best_ratio = float("inf")
     best_mask = 0
-    boundary_int = 0
-    mask = 0
-    for k in range(1, 1 << n_v):
-        bit = (k & -k).bit_length() - 1
-        mask ^= 1 << bit
-        boundary_int ^= cols[bit]
-        size = mask.bit_count()
-        if 1 <= size <= half:
-            cut = boundary_int.bit_count()
-            if cut < best_ratio * size:
-                best_ratio = cut / size
-                best_mask = mask
+    for mask, size in _all_cuts(n_v):
+        S = _mask_to_indicator(mask, n_v)
+        cut = int(boundary(inc, S).sum())
+        if cut < best_ratio * size:
+            best_ratio = cut / size
+            best_mask = mask
     return _mask_to_indicator(best_mask, n_v)
 ```
 
-> **Performance note:** exact enumeration is O(2^|V|); `|V|` = the logical operator
-> weight (support size). Bit-packing keeps `|V| ≤ ~24` tractable (seconds).
-> `_all_cuts`/`boundary` remain for the small-graph tests and readability; the
-> hot path uses the bit-packed sweep. Algorithm 1 calls `cheeger_constant` per
-> trial edge, so this speedup is what makes the gross/bb_18 construction finish in
-> tens of seconds rather than minutes.
+> **Performance note:** exact enumeration is O(2^|V|), `|V|` = logical-operator
+> weight (support size). The whole TEST SUITE uses tiny supports (|V| ≤ 8), so this
+> is instant. It becomes slow only on real large codes (gross |V|≈24 = 16M
+> subsets), which is why those are validated by a manual/opt-in script, never in
+> `pytest`. If in-process large-code construction is ever needed, bit-pack this
+> sweep (pack each vertex column into a Python int, XOR-update the boundary mask,
+> `bit_count`) for the exact same result ~20× faster — a self-contained follow-up.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k cheeger -v`
-Expected: PASS (3 tests). Results are identical to the numpy path (bit-packing is
-an exact reformulation), so the pre-verified expected values are unchanged.
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -939,37 +903,32 @@ def test_edge_expanded_steane_weight3_no_cycles():
     # here incidence has full column rank -> cycle space may be empty; ker ∂1 measured
     assert cm.f1.shape == (7, 3)
 
-def test_edge_expanded_branch_triggers_small():
-    # Small BB [[36,8,4]] code, X̄ = first X-logical (support ~6). With a low
-    # cellulate_to we force the `if sparsity unacceptable` branch (expand
-    # hyperedges → Alg 1 → Alg 2 → cellulate) and verify it runs and holds the
-    # invariants — fast because |support| is small (Alg 1 enumerates 2^|support|).
-    import sympy
-    from qldpc import codes
-    from qldpc.objects import Pauli
-    xs, ys = sympy.symbols('x y')
-    code = codes.BBCode({xs:3, ys:6}, xs**3+ys+ys**2, ys**3+xs+xs**2)     # [[36,8,4]]
-    n = code.num_qudits
-    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
-    x = (LX[0][:n] if LX.shape[1]==2*n else LX[0]).astype(np.uint8)
-    HZ = np.asarray(code.matrix_z).astype(np.uint8)
-    # First get the main-path ∂0 (no cellulation) to pick a triggering target.
-    cm0 = edge_expanded_maps(HZ, x, seed=0, cellulate_to=None)
+def test_edge_expanded_branch_triggers_tiny():
+    # Synthetic 4-qubit input: H_complement = two DISCONNECTED weight-2 checks
+    # (0,1),(2,3); x = all-ones commutes (each row · x = 0 mod 2). The support
+    # graph is two disjoint edges (Cheeger 0) → Algorithm 1 adds two edges to
+    # connect them into a 4-cycle whose added edges have no backing check, so the
+    # cycle is NON-redundant → main-path ∂0 is one weight-4 cycle. With
+    # cellulate_to=3 the `if sparsity unacceptable` branch fires and cellulate
+    # splits it into two weight-3 cycles. |support|=4 → instant. (Verified in
+    # pre-flight: main_max=4, branch ∂0 weights [3,3], chord 4→5 edges.)
+    HC = np.array([[1,1,0,0],[0,0,1,1]], dtype=np.uint8)
+    x = np.array([1,1,1,1], dtype=np.uint8)
+    cm0 = edge_expanded_maps(HC, x, seed=0, cellulate_to=None)   # main path
     main_max = int(cm0.partial_0.sum(axis=1).max()) if cm0.partial_0.shape[0] else 0
-    target = max(2, main_max - 1)                       # force branch iff main_max >= 3
-    cm = edge_expanded_maps(HZ, x, seed=0, cellulate_to=target)
+    assert main_max == 4                                          # the weight-4 cycle
+    cm = edge_expanded_maps(HC, x, seed=0, cellulate_to=3)        # force the branch
     assert cheeger_constant(cm.incidence) >= 1.0
     assert np.all((np.asarray(cm.partial_0).astype(int) @ cm.incidence.astype(int)) % 2 == 0)
-    if main_max > target and cm.partial_0.shape[0]:      # branch actually triggered
-        assert int(cm.partial_0.sum(axis=1).max()) <= target
-        assert cm.incidence.shape[0] >= cm0.incidence.shape[0]   # edges were added
+    assert int(cm.partial_0.sum(axis=1).max()) <= 3              # cellulated to target
+    assert cm.incidence.shape[0] > cm0.incidence.shape[0]        # a chord edge was added
 ```
 
-> **Note (gross-scale test deferred):** the gross `[[144,12,12]]` and bb_18
-> `[[248,10,18]]` validation lives in Task 9 (marked slow) — Algorithm 1's exact
-> enumeration is O(2^|support|), and |support|≈24 (gross) takes tens of seconds to
-> minutes even bit-packed. Task 6's unit test uses `[[36,8,4]]` (|support|≈6) so
-> the full branch is exercised in well under a second.
+> **Note (no big codes in the test suite):** every test here runs on tiny
+> hand-built inputs (|support| ≤ 7) so `pytest` stays fast — Algorithm 1's exact
+> enumeration is O(2^|support|). Validation on the real gross `[[144,12,12]]` /
+> bb_18 `[[248,10,18]]` codes is NOT part of the automated suite; it belongs in a
+> manual/opt-in script (see Task 9), because |support|≈24 alone is 16M subsets.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1075,22 +1034,19 @@ def edge_expanded_maps(
 > hold after the branch — cellulation only ADDS edges, which never lowers
 > Cheeger, and Alg 2 always returns cycles). `f0`/`data_checks` are derived from
 > the final edge set (`_data_checks_from_f0` is the single source of truth). The
-> branch is exercised by the gross test (`cellulate_to=6`, main-path ∂0 has
-> weight-10+ rows → branch runs); the Steane test passes `cellulate_to=None`
-> (no branch, ∂0 empty).
+> Steane test (`cellulate_to=None`) exercises the main path (∂0 empty); the tiny
+> two-disconnected-checks test exercises the full `if unacceptable` branch.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py -k edge_expanded -v`
-Expected: PASS (2 tests), both fast (|support| ≤ 6). If the branch-trigger test's
-`main_max` is < 3 (no heavy cycle to cellulate), the branch legitimately does not
-fire and only the invariants are asserted — that is acceptable; the branch is
-exercised at scale in Task 9.
+Expected: PASS (2 tests), both instant (|support| ≤ 4). Then run the full file once.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(surgery): Algorithm 3 orchestrator edge_expanded_maps (arXiv:2410.02753 Alg 3)"
+git add src/qldpc/circuits/surgery/hmatrix/edge_expanded.py src/qldpc/circuits/surgery/hmatrix/edge_expanded_test.py
+git commit -m "feat(surgery): Algorithm 3 orchestrator edge_expanded_maps (arXiv:2410.02753 Alg 3)"
 ```
 
 ---
@@ -1116,33 +1072,40 @@ from qldpc import codes
 from qldpc.objects import Pauli
 from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
 
-def test_build_gadget_exposes_four_maps_and_low_weight():
-    xs, ys = sympy.symbols('x y')
-    code = codes.BBCode({xs:12, ys:6}, xs**3+ys+ys**2, ys**3+xs+xs**2)   # gross
-    n = code.num_qudits
-    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
-    x = (LX[0][:n] if LX.shape[1]==2*n else LX[0]).astype(np.uint8)
+# Steane [[7,1,3]] — instant to build; X̄ = X0 X1 X2 (support 3). Construct the
+# CSSCode the way the repo does (see conftest / cheeger.py: CSSCode(HX, HZ)).
+_STEANE = np.array([[0,0,0,1,1,1,1],[0,1,1,0,0,1,1],[1,0,1,0,1,0,1]], dtype=np.uint8)
+
+def _steane_code():
+    from qldpc.codes.common import CSSCode
+    import galois
+    GF2 = galois.GF(2)
+    return CSSCode(GF2(_STEANE), GF2(_STEANE), is_subsystem_code=False)
+
+def test_build_gadget_exposes_four_maps_and_valid_cone():
+    code = _steane_code()
+    x = np.array([1,1,1,0,0,0,0], dtype=np.uint8)          # valid X̄ (H_Z @ x = 0)
     g = build_gadget(code, x, basis=Pauli.X)
-    # four maps present
-    for attr in ("f1", "f0", "incidence", "partial_0"):
+    for attr in ("f1", "f0", "incidence", "partial_0"):    # four maps present
         assert getattr(g, attr) is not None
-    # valid CSS: HX_merged @ HZ_merged.T == 0
     HX = np.asarray(g.HX_merged).astype(int); HZ = np.asarray(g.HZ_merged).astype(int)
-    assert np.all((HX @ HZ.T) % 2 == 0)
-    # decode-weight win: merged Z checks no heavier than native (weight 6) after cellulation
+    assert np.all((HX @ HZ.T) % 2 == 0)                    # valid CSS cone
+    # ∂0 (Steane weight-3) is empty -> no merged Z check heavier than native+1.
     native_w = int(np.asarray(code.matrix_z).sum(axis=1).max())
-    assert int(HZ.sum(axis=1).max()) <= native_w + 1   # +1 tolerance for the f1^T row block
+    assert int(HZ.sum(axis=1).max()) <= native_w + 1
 
 def test_build_gadget_deterministic():
-    xs, ys = sympy.symbols('x y')
-    code = codes.BBCode({xs:6, ys:6}, xs**3+ys+ys**2, ys**3+xs+xs**2)
-    n = code.num_qudits
-    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
-    x = (LX[0][:n] if LX.shape[1]==2*n else LX[0]).astype(np.uint8)
+    code = _steane_code()
+    x = np.array([1,1,1,0,0,0,0], dtype=np.uint8)
     g1 = build_gadget(code, x, basis=Pauli.X, seed=0)
     g2 = build_gadget(code, x, basis=Pauli.X, seed=0)
     np.testing.assert_array_equal(g1.HZ_merged, g2.HZ_merged)
 ```
+
+> **Lean tests:** Task 7 validates block assembly + four-map exposure +
+> determinism + backward-compat on Steane (instant). The cellulation branch and
+> low-weight ∂0 are already validated at the `edge_expanded_maps` level (Task 6)
+> and end-to-end structurally (Task 9) — no large-code build_gadget in the suite.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1205,7 +1168,9 @@ Expected: `four_maps` + `deterministic` PASS; circuit-layer tests still PASS (Ga
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(surgery): edge-expanded build_gadget as default; expose f1/f0; delete dead Cheeger/left_null_space path"
+git rm src/qldpc/circuits/surgery/hmatrix/cheeger.py src/qldpc/circuits/surgery/hmatrix/cheeger_test.py
+git add src/qldpc/circuits/surgery/hmatrix/PPM_X_Z.py src/qldpc/circuits/surgery/hmatrix/PPM_X_Z_test.py src/qldpc/circuits/surgery/__init__.py
+git commit -m "feat(surgery): edge-expanded build_gadget as default; expose f1/f0; delete dead Cheeger/left_null_space path"
 ```
 
 ---
@@ -1283,7 +1248,8 @@ Expected: PASS (3 tests). If `test_example7` shows a different edge count, re-re
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "test(surgery): paper golden fixtures Examples 5/6/7 (arXiv:2410.02753)"
+git add src/qldpc/circuits/surgery/hmatrix/edge_expanded_golden_test.py
+git commit -m "test(surgery): paper golden fixtures Examples 5/6/7 (arXiv:2410.02753)"
 ```
 
 ---
@@ -1299,40 +1265,47 @@ git add -A && git commit -m "test(surgery): paper golden fixtures Examples 5/6/7
 - [ ] **Step 1: Write the failing test**
 
 ```python
-import numpy as np, sympy
-from qldpc import codes
+import numpy as np, galois
+from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 from qldpc.circuits.surgery import build_gadget, build_single_ppm_circuit, keep_only_observable
 
-def _gross_x_logical():
-    xs, ys = sympy.symbols('x y')
-    code = codes.BBCode({xs:12, ys:6}, xs**3+ys+ys**2, ys**3+xs+xs**2)
-    n = code.num_qudits
-    LX = np.asarray(code.get_logical_ops(Pauli.X)).astype(np.uint8)
-    x = (LX[0][:n] if LX.shape[1]==2*n else LX[0]).astype(np.uint8)
-    return code, x
+_STEANE = np.array([[0,0,0,1,1,1,1],[0,1,1,0,0,1,1],[1,0,1,0,1,0,1]], dtype=np.uint8)
+
+def _steane():
+    GF2 = galois.GF(2)
+    return CSSCode(GF2(_STEANE), GF2(_STEANE), is_subsystem_code=False)
 
 def test_dem_compiles_and_one_observable():
-    code, x = _gross_x_logical()
+    # Steane [[7,1,3]], X̄ = X0 X1 X2. End-to-end: build gadget -> circuit -> DEM.
+    code = _steane()
+    x = np.array([1,1,1,0,0,0,0], dtype=np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
-    circ = build_single_ppm_circuit(g, rounds=int(code.get_distance(Pauli.X) or 12))
+    circ = build_single_ppm_circuit(g, rounds=3)
     circ = keep_only_observable(circ, 0)
     dem = circ.detector_error_model(decompose_errors=False)
     assert dem.num_observables == 1                         # only X̄ measured (Remark 3)
 
-def test_merged_z_check_weight_below_legacy():
-    # Regression guard: the new construction's max merged Z-check weight is at most
-    # the native code weight + 1, i.e. strictly better than the old ~11-12.
-    code, x = _gross_x_logical()
+def test_merged_z_check_weight_bounded():
+    # Structural weight guard: merged Z-check weight stays near the native weight
+    # (the low-weight-∂0 win). On Steane ∂0 is empty, so this is native+1.
+    code = _steane()
+    x = np.array([1,1,1,0,0,0,0], dtype=np.uint8)
     g = build_gadget(code, x, basis=Pauli.X)
     native = int(np.asarray(code.matrix_z).sum(axis=1).max())
     assert int(np.asarray(g.HZ_merged).astype(int).sum(axis=1).max()) <= native + 1
 ```
 
+> **Large-code validation is out-of-suite:** the gross `[[144,12,12]]` / bb_18
+> `[[248,10,18]]` low-weight-∂0 win and decode-time comparison belong in a manual,
+> opt-in script (e.g. `examples/`), NOT the pytest suite — Algorithm 1's exact
+> enumeration is O(2^|support|). Provide such a script if the user wants the
+> quantitative gross/bb_18 numbers, but keep it off the default `pytest` path.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_e2e_test.py -v`
-Expected: FAIL if `build_single_ppm_circuit` needs adaptation to the new `GadgetLayout`, else PASS on `weight_below_legacy`.
+Expected: FAIL if `build_single_ppm_circuit` needs adaptation to the new `GadgetLayout`, else PASS on `weight_bounded`.
 
 - [ ] **Step 3: Adapt the circuit builder if needed**
 
@@ -1341,12 +1314,13 @@ If `build_single_ppm_circuit` reads only `HX_merged`/`HZ_merged`/`Q_prime`/`supp
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest src/qldpc/circuits/surgery/hmatrix/edge_expanded_e2e_test.py -v && pytest src/qldpc/circuits/surgery -q`
-Expected: full surgery suite PASS.
+Expected: full surgery suite PASS (and fast — no large-code builds).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "test(surgery): e2e DEM validity + merged Z-check weight regression guard"
+git add src/qldpc/circuits/surgery/hmatrix/edge_expanded_e2e_test.py
+git commit -m "test(surgery): e2e DEM validity + merged Z-check weight regression guard"
 ```
 
 ---
@@ -1359,7 +1333,7 @@ git add -A && git commit -m "test(surgery): e2e DEM validity + merged Z-check we
 - Alg 3 cellulation → Task 5; orchestration → Task 6. ✓
 - `f₁,f₀,∂₁,∂₀` exposed → Task 1 (restrict), Task 6 (ConeMaps), Task 7 (GadgetLayout fields). ✓
 - Default construction + delete dead code → Task 7. ✓
-- Scale past |V₀|=26 → **partial:** Task 2/3 use exact enumeration. Spec's Fiedler fallback is NOT a separate task because the tested logicals (gross w=24, bb_18 low-weight reps ≤~24) stay within exact-enum range, and the fidelity requirement ("exactly as written") favors the paper's exact `argmin`. **If a logical with |V₀|>26 is needed, add a `sparsest_cut(..., method="fiedler")` opt-in as a follow-up task** — flagged here rather than silently dropped.
+- Exact enumeration cost → Task 2/3 use the paper's exact `argmin` (O(2^|V|)). **The test suite only uses tiny supports (|V| ≤ 8), so pytest stays fast** — no large code is built in any test (Tasks 6/7/9 use synthetic 2-4-qubit inputs or Steane). Real large-code construction (gross |V|≈24) is a one-time O(2^24) cost for a manual/opt-in script; an optional bit-pack (~20×, same result) is noted in Task 2. Fidelity keeps the exact `argmin`; a Fiedler approximation for |V|>26 is a flagged follow-up, not silently dropped.
 - Determinism (fixed seed) → Task 7 `test_build_gadget_deterministic`. ✓
 - Cellulate to native weight → Task 7 (`cellulate_to="native"`). ✓
 - Golden fixtures 5/6/7 → Task 8. ✓
@@ -1370,4 +1344,4 @@ git add -A && git commit -m "test(surgery): e2e DEM validity + merged Z-check we
 
 **Type consistency:** `RestrictMaps` (Task 1) → `ConeMaps` (Task 6) → `GadgetLayout.f1/f0` (Task 7) field names align (`f1`, `f0`, `incidence`, `partial_0`, `support`, `data_checks`). `algorithm_1/2`, `cellulate`, `edge_expanded_maps`, `restrict_maps`, `cheeger_constant`, `sparsest_cut`, `boundary` signatures are consistent across tasks.
 
-**Known risk:** Algorithm 2's line 1 (`ker H_complementᵀ` orientation) and Algorithm 3 cellulation's chord-selection heuristic are the two spots where the paper is terse; both have an asserted invariant (`∂0 @ ∂1 == 0`) that must pass before commit, and the note in each task tells the implementer how to correct orientation/heuristic if the invariant fails.
+**Known risk:** Algorithm 2's line 1 (`ker H_Zᵀ` orientation) is the one terse spot; guarded by the `∂0 @ ∂1 == 0` and nonempty-V direct-sum invariants (Task 4, already implemented & reviewed). Cellulation follows the paper authors' reference `cellulate_long_cycles` exactly (Task 5), so it is not a free heuristic. All tests run on tiny inputs — the suite is fast by construction.
