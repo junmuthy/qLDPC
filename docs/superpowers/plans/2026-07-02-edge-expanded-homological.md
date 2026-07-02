@@ -177,9 +177,13 @@ def test_cheeger_path_graph_p8_example4():
     S = np.array([1,1,1,0,0,0], dtype=np.uint8)
     assert int(boundary(inc, S).sum()) == 0        # {v0,v1,v2} is a full component -> empty boundary
 
-def test_cheeger_triangle_is_one():
-    inc = _incidence([(0,1),(1,2),(0,2)], 3)       # triangle: every single-vertex cut has |∂S|=2,|S|=1
+def test_cheeger_square_is_one():
+    # 4-cycle: |V|=4, half=2. Single vertex -> |∂S|=2 (ratio 2); adjacent pair
+    # {0,1} -> boundary edges (1,2),(3,0) = 2, ratio 2/2 = 1. So h = 1.
+    inc = _incidence([(0,1),(1,2),(2,3),(3,0)], 4)
     assert cheeger_constant(inc) == 1.0
+    # (Sanity: a triangle has h=2 here, NOT 1, because half=1 admits only single-vertex cuts.)
+    assert cheeger_constant(_incidence([(0,1),(1,2),(0,2)], 3)) == 2.0
 
 def test_sparsest_cut_returns_min_ratio_set():
     inc = _incidence([(0,1),(1,2),(3,4),(4,5)], 6)
@@ -292,7 +296,7 @@ def test_algorithm_1_reaches_cheeger_one():
         assert np.all(added.sum(axis=1) == 2)         # each new edge is weight-2
 
 def test_algorithm_1_noop_when_already_one():
-    inc = _incidence([(0,1),(1,2),(0,2)], 3)          # triangle already h=1
+    inc = _incidence([(0,1),(1,2),(2,3),(3,0)], 4)    # 4-cycle already h=1 (see Task 2)
     out = algorithm_1(inc, seed=0)
     np.testing.assert_array_equal(out, inc)
 ```
