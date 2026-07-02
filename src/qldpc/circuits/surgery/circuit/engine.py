@@ -366,9 +366,15 @@ def _surgery_final_detectors(
         )
     )
     if single_sector:
-        # Keep only measured-basis checks (drops the complementary gauge G).
+        # Keep only measured-basis checks (drops the complementary gauge G). Key off
+        # experiment_basis (the data readout / OBSERVABLE Pauli type), NOT gadget.basis,
+        # to match the QEC-cycle round-detector filter and _reliable_checks: the final
+        # detectors reconstruct the experiment_basis-sector data stabs from the M-record.
+        # Opposite-basis (experiment_basis != gadget.basis) previously intersected the
+        # reconstructable checks with the wrong sector -> ∅ final detectors -> the k−t
+        # block observables were left undetectable (decoder blind, LER → raw flip rate).
         measured = set(
-            qubit_ids.checks_x if gadget.basis is Pauli.X else qubit_ids.checks_z
+            qubit_ids.checks_x if experiment_basis is Pauli.X else qubit_ids.checks_z
         )
         reliable &= measured
 

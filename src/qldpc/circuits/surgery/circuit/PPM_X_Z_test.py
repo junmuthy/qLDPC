@@ -124,6 +124,57 @@ def test_single_sector_preserves_observable_detectability(basis: PauliXZ) -> Non
     assert undetectable == 0, f"{undetectable} observable-flipping errors became undetectable"
 
 
+@pytest.mark.parametrize("gadget_basis", [Pauli.X, Pauli.Z])
+def test_single_sector_opposite_basis_observable_detectability(gadget_basis: PauliXZ) -> None:
+    """Regression: single_sector on the OPPOSITE-basis experiment (experiment_basis
+    != gadget.basis) must keep the k−t block observables detectable.
+
+    The final-detector single_sector filter (``_surgery_final_detectors``) must key
+    off ``experiment_basis`` (the data-readout / observable Pauli type), NOT
+    ``gadget.basis`` — mirroring the QEC-cycle round-detector filter and
+    ``_reliable_checks``. Keying off gadget.basis intersected the reconstructable
+    (experiment_basis-sector) checks with the wrong sector, emitting ZERO final
+    detectors: the k−t Z̄ (or X̄) block observables became undetectable, the decoder
+    went blind, and the LER ran to the raw flip probability (>0.5). Cain et al.
+    arXiv:2603.28627 Appendix D averages the X- and Z-basis experiments on ONE
+    gadget, so both must decode. Uses [[36, 8]] so k−t = 7 observables exist
+    (Steane k=1 would give 0 and be vacuous).
+    """
+    import sympy
+
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc.circuits.surgery.circuit.PPM_X_Z import build_single_ppm_circuit
+    from qldpc.circuits.surgery.hmatrix.PPM_X_Z import build_gadget
+
+    xs, ys = sympy.symbols("x y")
+    code = codes.BBCode({xs: 3, ys: 6}, xs**3 + ys + ys**2, ys**3 + xs + xs**2)  # [[36, 8]]
+    op = code.get_logical_ops(gadget_basis)[0]
+    g = build_gadget(code, np.asarray(op).astype(np.uint8), basis=gadget_basis)
+    opposite = Pauli.Z if gadget_basis is Pauli.X else Pauli.X
+    noise = DepolarizingNoiseModel(0.01)
+    single = build_single_ppm_circuit(
+        g,
+        rounds=3,
+        noise_model=noise,
+        destructive_measure_data=True,
+        single_sector=True,
+        experiment_basis=opposite,  # opposite-basis -> k−t block observables (no time-like L)
+    )
+    assert single.num_observables == code.dimension - 1
+    dem = single.detector_error_model()
+    undetectable = sum(
+        1
+        for e in dem.flattened()
+        if e.type == "error"
+        and any(t.is_logical_observable_id() for t in e.targets_copy())
+        and not any(t.is_relative_detector_id() for t in e.targets_copy())
+    )
+    assert undetectable == 0, (
+        f"gadget={gadget_basis.name}, exp={opposite.name}: {undetectable} "
+        f"observable-flipping errors became undetectable (single_sector dropped final detectors)"
+    )
+
+
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_build_single_ppm_circuit_block_observables_full_k_block(basis: PauliXZ) -> None:
     """Match-basis single PPM emits the full k-logical block + time-like L = k+1

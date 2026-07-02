@@ -447,3 +447,43 @@ def test_joint_ppm_single_sector_preserves_observables_shrinks_dem(_steane_joint
     assert ss.num_detectors < full.num_detectors  # complementary sector dropped
     _, obs = ss.compile_detector_sampler().sample(shots=64, separate_observables=True)
     assert not obs.any()  # all observables still deterministic from the kept sector
+
+
+def test_joint_ppm_single_sector_opposite_basis_observable_detectability(
+    _steane_joint_fixture,
+) -> None:
+    """Regression: single_sector on the OPPOSITE-basis joint experiment
+    (experiment_basis != bridge.basis) keeps its (k_l + k_r) − 1 block observables
+    detectable.
+
+    The shared ``_surgery_final_detectors`` single_sector filter must key off
+    ``experiment_basis`` (the data-readout Pauli type), NOT the gadget/bridge basis
+    — otherwise it intersects the reconstructable checks with the wrong sector,
+    emits ZERO final detectors, and the block observables become undetectable
+    (decoder blind, LER → raw flip rate). Cain et al. arXiv:2603.28627 Appendix D
+    averages the X- and Z-basis experiments on one gadget/bridge, so both must
+    decode. Mirrors the single-PPM ``test_single_sector_opposite_basis_*``.
+    """
+    from qldpc.circuits import DepolarizingNoiseModel
+    from qldpc.circuits.surgery.circuit.PPM_joint import build_joint_ppm_circuit
+
+    g_l, g_r, bridge = _steane_joint_fixture
+    opposite = Pauli.Z if bridge.basis is Pauli.X else Pauli.X
+    noise = DepolarizingNoiseModel(0.01)
+    ss, _ = build_joint_ppm_circuit(
+        g_l, g_r, bridge, rounds=3, noise_model=noise,
+        single_sector=True, experiment_basis=opposite,
+    )
+    assert ss.num_observables == g_l.code.dimension + g_r.code.dimension - 1
+    dem = ss.detector_error_model()
+    undetectable = sum(
+        1
+        for e in dem.flattened()
+        if e.type == "error"
+        and any(t.is_logical_observable_id() for t in e.targets_copy())
+        and not any(t.is_relative_detector_id() for t in e.targets_copy())
+    )
+    assert undetectable == 0, (
+        f"opposite-basis joint (exp={opposite.name}): {undetectable} observable-flipping "
+        f"errors became undetectable (single_sector dropped final detectors)"
+    )
