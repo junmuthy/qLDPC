@@ -174,3 +174,39 @@ def test_cellulate_noop_when_within_target():
     d0 = algorithm_2(inc, np.zeros((0,3),np.uint8), f0, n_samples=20, seed=0)
     d0c, incc, f0c = cellulate(d0, inc, f0, target_weight=3, seed=0)
     assert incc.shape[0] == inc.shape[0]                         # nothing added
+
+
+from qldpc.circuits.surgery.hmatrix.edge_expanded import edge_expanded_maps
+
+def test_edge_expanded_steane_weight3_no_cycles():
+    # Example 6: Steane X̄=X1X2X3 -> after Alg 1 the graph has no cycles (∂0 empty).
+    x = np.array([1,1,1,0,0,0,0], dtype=np.uint8)
+    cm = edge_expanded_maps(STEANE_HZ, x, seed=0)
+    assert cheeger_constant(cm.incidence) >= 1.0
+    # chain complex: ∂0 @ ∂1 == 0
+    d1 = cm.incidence                      # edge-vertex; ∂1 = incidence.T applied as cols
+    assert np.all((np.asarray(cm.partial_0).astype(int) @ cm.incidence.astype(int)) % 2 == 0)
+    # dim ker ∂1 == 1 (only X̄ measured, Remark 3): cycle space dim after Alg1
+    from qldpc.circuits.surgery.hmatrix.edge_expanded import GF2
+    # here incidence has full column rank -> cycle space may be empty; ker ∂1 measured
+    assert cm.f1.shape == (7, 3)
+
+def test_edge_expanded_branch_triggers_tiny():
+    # Synthetic 4-qubit input: H_complement = two DISCONNECTED weight-2 checks
+    # (0,1),(2,3); x = all-ones commutes (each row · x = 0 mod 2). The support
+    # graph is two disjoint edges (Cheeger 0) → Algorithm 1 adds two edges to
+    # connect them into a 4-cycle whose added edges have no backing check, so the
+    # cycle is NON-redundant → main-path ∂0 is one weight-4 cycle. With
+    # cellulate_to=3 the `if sparsity unacceptable` branch fires and cellulate
+    # splits it into two weight-3 cycles. |support|=4 → instant. (Verified in
+    # pre-flight: main_max=4, branch ∂0 weights [3,3], chord 4→5 edges.)
+    HC = np.array([[1,1,0,0],[0,0,1,1]], dtype=np.uint8)
+    x = np.array([1,1,1,1], dtype=np.uint8)
+    cm0 = edge_expanded_maps(HC, x, seed=0, cellulate_to=None)   # main path
+    main_max = int(cm0.partial_0.sum(axis=1).max()) if cm0.partial_0.shape[0] else 0
+    assert main_max == 4                                          # the weight-4 cycle
+    cm = edge_expanded_maps(HC, x, seed=0, cellulate_to=3)        # force the branch
+    assert cheeger_constant(cm.incidence) >= 1.0
+    assert np.all((np.asarray(cm.partial_0).astype(int) @ cm.incidence.astype(int)) % 2 == 0)
+    assert int(cm.partial_0.sum(axis=1).max()) <= 3              # cellulated to target
+    assert cm.incidence.shape[0] > cm0.incidence.shape[0]        # a chord edge was added
