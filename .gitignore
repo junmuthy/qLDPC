@@ -21,6 +21,10 @@ __pycache__
 # sphinx documentation
 docs/build
 
+# archived notebooks (kept locally, not committed)
+docs/archive
+examples/archive
+
 # cython build artifacts
 build
 *.c
