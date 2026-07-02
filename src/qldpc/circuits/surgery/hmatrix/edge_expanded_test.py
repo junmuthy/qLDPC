@@ -6,6 +6,7 @@ from qldpc.circuits.surgery.hmatrix.edge_expanded import (
 from qldpc.circuits.surgery.hmatrix.edge_expanded import algorithm_1
 from qldpc.circuits.surgery.hmatrix.edge_expanded import (
     GF2, algorithm_2, _random_invertible_gf2)
+from qldpc.circuits.surgery.hmatrix.edge_expanded import cellulate, expand_hyperedges
 
 STEANE_HZ = np.array([  # Steane [[7,1,3]] H_Z (arXiv:2410.02753 Eq.54), qubits 0..6
     [0,0,0,1,1,1,1],
@@ -134,3 +135,42 @@ def test_algorithm_2_beats_arbitrary_basis_weight():
     assert np.all((np.asarray(d0).astype(int) @ inc.astype(int)) % 2 == 0)
     # each independent cycle here is a triangle -> max row weight 3
     assert int(np.asarray(d0).astype(int).sum(axis=1).max()) <= 3
+
+
+def test_expand_hyperedges_splits_wide_rows():
+    # A single weight-4 hyperedge over 4 vertices + f0 column backing it.
+    inc = np.array([[1,1,1,1]], dtype=np.uint8)          # one wt-4 row (hyperedge)
+    f0 = np.array([[1]], dtype=np.uint8)                  # 1 check, 1 edge column
+    inc2, f02 = expand_hyperedges(inc, f0)
+    # wt 4 -> 4//2 = 2 weight-2 rows that SUM to the original row
+    assert inc2.shape[0] == 2
+    assert np.all(inc2.sum(axis=1) == 2)                  # every new row weight 2
+    np.testing.assert_array_equal(inc2.sum(axis=0) % 2, inc[0])   # rows sum to e
+    assert f02.shape == (1, 2)                            # column duplicated (wt e)//2 = 2 times
+    np.testing.assert_array_equal(f02, np.array([[1,1]], dtype=np.uint8))
+
+def test_expand_hyperedges_passes_weight2_through():
+    inc = np.array([[1,1,0],[0,1,1]], dtype=np.uint8)     # both weight-2 already
+    f0 = np.array([[1,0],[0,1]], dtype=np.uint8)
+    inc2, f02 = expand_hyperedges(inc, f0)
+    np.testing.assert_array_equal(inc2, inc)             # unchanged
+    np.testing.assert_array_equal(f02, f0)
+
+def test_cellulate_splits_heavy_cycle():
+    # Single weight-6 cycle (hexagon). target_weight=4 -> must add a chord, giving
+    # two cycles each of weight <= 4.
+    inc = _incidence([(0,1),(1,2),(2,3),(3,4),(4,5),(5,0)], 6)
+    f0 = np.zeros((0, 6), dtype=np.uint8)
+    d0 = algorithm_2(inc, np.zeros((0,6),np.uint8), f0, n_samples=50, seed=0)
+    assert int(np.asarray(d0).astype(int).sum(axis=1).max()) == 6
+    d0c, incc, f0c = cellulate(d0, inc, f0, target_weight=4, seed=0)
+    assert incc.shape[0] > inc.shape[0]                          # chord edge(s) added
+    assert np.all((np.asarray(d0c).astype(int) @ incc.astype(int)) % 2 == 0)  # still cycles
+    assert int(np.asarray(d0c).astype(int).sum(axis=1).max()) <= 4
+
+def test_cellulate_noop_when_within_target():
+    inc = _incidence([(0,1),(1,2),(0,2)], 3)
+    f0 = np.zeros((0, 3), dtype=np.uint8)
+    d0 = algorithm_2(inc, np.zeros((0,3),np.uint8), f0, n_samples=20, seed=0)
+    d0c, incc, f0c = cellulate(d0, inc, f0, target_weight=3, seed=0)
+    assert incc.shape[0] == inc.shape[0]                         # nothing added

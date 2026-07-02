@@ -253,3 +253,109 @@ def algorithm_2(
 def _max_row_weight(M: galois.FieldArray) -> int:
     arr = np.asarray(M).astype(int)
     return 0 if arr.shape[0] == 0 else int(arr.sum(axis=1).max())
+
+
+def expand_hyperedges(
+    incidence: np.ndarray, f0: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expand hyperedges to weight-two edges (arXiv:2410.02753 Algorithm 3).
+
+    Each row ``e`` of ``incidence`` with ``wt e > 2`` is replaced by ``(wt e)//2``
+    weight-two rows that sum to ``e`` (its vertices paired up), and the column of
+    ``f0`` for ``e`` is replaced by ``(wt e)//2`` copies. Rows with ``wt e ≤ 2``
+    pass through unchanged. Pairing adjacent vertices in index order keeps the
+    Cheeger constant high (a path/fan over the hyperedge's vertices).
+    """
+    inc = np.asarray(incidence).astype(np.uint8)
+    f0 = np.asarray(f0).astype(np.uint8)
+    new_rows: list[np.ndarray] = []
+    new_f0_cols: list[np.ndarray] = []
+    n_v = inc.shape[1]
+    for i in range(inc.shape[0]):
+        verts = np.flatnonzero(inc[i])
+        w = len(verts)
+        col = f0[:, i] if f0.shape[1] > i else np.zeros(f0.shape[0], np.uint8)
+        if w <= 2:                                       # pass through unchanged
+            new_rows.append(inc[i].copy())
+            new_f0_cols.append(col)
+            continue
+        # pair vertices: (v0,v1),(v2,v3),... -> (w//2) weight-2 rows summing to e.
+        # If w is odd, the paper's construction targets even-weight rows (H_Z rows
+        # commute with X̄ so wt e is even); w//2 pairs cover all vertices when even.
+        for j in range(w // 2):
+            row = np.zeros(n_v, dtype=np.uint8)
+            row[verts[2 * j]] = 1
+            row[verts[2 * j + 1]] = 1
+            new_rows.append(row)
+            new_f0_cols.append(col)                      # duplicate the f0 column
+    inc2 = np.vstack(new_rows).astype(np.uint8) if new_rows else inc[:0]
+    f02 = np.column_stack(new_f0_cols).astype(np.uint8) if new_f0_cols else f0[:, :0]
+    return inc2, f02
+
+
+def cellulate(
+    partial_0: np.ndarray,
+    incidence: np.ndarray,
+    f0: np.ndarray,
+    *,
+    target_weight: int,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cellulate large cycles (arXiv:2410.02753 Algorithm 3, "cellulate large
+    cycles"). FAITHFUL PORT of the paper authors' reference implementation
+    ``cellulate_long_cycles`` (Swaroop, Jochym-O'Connor, Yoder — repository
+    adapters-LDPC-surgery/cellulation.py, arXiv:2410.03628): build the graph from
+    ∂_1's weight-2 edges; while any cycle-basis cycle is longer than
+    ``target_weight`` (= ``max_len``), add the chord between the cycle's vertex 0
+    and its opposite vertex (index ``n//2``), then recompute the cycle basis and
+    take its first cycle. New chords become ∂_1 rows (with zero f_0 columns);
+    ∂_0 is then re-derived low-weight via Algorithm 2.
+
+    Precondition: ∂_1 rows are all weight-2 here (the Alg 3 branch runs
+    ``expand_hyperedges`` first), so every row maps to a graph edge.
+    """
+    import networkx as nx
+
+    inc = np.asarray(incidence).astype(np.uint8).copy()
+    f0 = np.asarray(f0).astype(np.uint8).copy()
+    n_v = inc.shape[1]
+
+    # Build G from ∂_1's weight-2 edges (mirrors the reference's G / G_mat).
+    G = nx.Graph()
+    G.add_nodes_from(range(n_v))
+    for row in inc:
+        vs = np.flatnonzero(row)
+        if len(vs) == 2:
+            G.add_edge(int(vs[0]), int(vs[1]))
+
+    new_edges: list[tuple[int, int]] = []
+    guard = 0
+    max_iter = 8 * inc.shape[0] + 64                 # backstop (the reference has none)
+    for cycle in nx.cycle_basis(G):                  # reference: for cycle in cycles
+        while len(cycle) > target_weight:            # reference: while len(cycle) > max_len
+            guard += 1
+            if guard > max_iter:                     # pragma: no cover  -- spin backstop
+                break
+            n = len(cycle)
+            u, v = sorted((int(cycle[0]), int(cycle[n // 2])))   # opposite vertices i=0, j=n//2
+            if not G.has_edge(u, v):
+                G.add_edge(u, v)
+                new_edges.append((u, v))
+            basis = nx.cycle_basis(G)
+            if not basis:                            # pragma: no cover
+                break
+            cycle = basis[0]                         # reference: cycle = nx.cycle_basis(G)[0]
+        if guard > max_iter:                         # pragma: no cover
+            break
+
+    if new_edges:                                    # chords -> new ∂_1 rows + zero f_0 columns
+        extra = np.zeros((len(new_edges), n_v), dtype=np.uint8)
+        for r, (u, v) in enumerate(new_edges):
+            extra[r, u] = 1
+            extra[r, v] = 1
+        inc = np.vstack([inc, extra]).astype(np.uint8)
+        f0 = np.hstack([f0, np.zeros((f0.shape[0], len(new_edges)), np.uint8)])
+
+    # Re-derive the low-weight cycle basis on the cellulated graph (Algorithm 2).
+    d0 = algorithm_2(inc, np.zeros((0, n_v), np.uint8), f0, n_samples=200, seed=seed)
+    return d0, inc, f0
