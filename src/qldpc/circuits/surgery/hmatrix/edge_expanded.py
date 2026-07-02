@@ -165,6 +165,11 @@ def _rref_drop_zero(M: galois.FieldArray) -> galois.FieldArray:
     return R[nz]
 
 
+def _pivot_columns(R: galois.FieldArray) -> set[int]:
+    """Leading-1 columns of an RREF matrix with no zero rows."""
+    return {int(np.flatnonzero(np.asarray(row))[0]) for row in np.asarray(R)}
+
+
 def _random_invertible_gf2(k: int, rng: np.random.Generator) -> galois.FieldArray:
     """Random invertible k×k GF(2) matrix (rejection on full rank)."""
     if k == 0:
@@ -208,14 +213,18 @@ def algorithm_2(
     # full cycle space of the graph defined by ∂_1 = left null space of incidence
     cycle_space = inc.left_null_space()            # rows z with z @ incidence = 0
 
-    # line 3-5: W = complement of V within cycle_space, rref, zero rows removed.
-    stacked = np.vstack([np.asarray(V), np.asarray(cycle_space)]).astype(np.uint8)
-    # keep V rows first so row_reduce pivots them; the extra independent rows form W.
-    reduced = _rref_drop_zero(GF2(stacked))
-    # W = reduced rows not in rowspace(V): drop the first rank(V) pivot rows.
-    rank_V = int(V.row_space().shape[0]) if V.shape[0] else 0
-    W = reduced[rank_V:] if reduced.shape[0] > rank_V else GF2(
-        np.zeros((0, inc.shape[0]), np.uint8))
+    # line 3-5: W = complement of V within cycle_space so that V ⊕ W spans the
+    # full cycle space (arXiv:2410.02753 Alg 2 lines 3-5). V and
+    # RREF(cycle_space) are both in RREF, and every nonzero vector of a
+    # subspace has its leading 1 in one of that subspace's RREF pivot columns;
+    # therefore the RREF(cycle_space) rows whose pivot column is NOT a pivot
+    # column of V are dim(cycle_space) - dim(V) rows independent of V:
+    # span(V) ∩ span(W) = 0 and span(V) + span(W) = cycle space.
+    cycle_rref = _rref_drop_zero(cycle_space)
+    V_pivots = _pivot_columns(V) if V.shape[0] else set()
+    keep = [i for i, row in enumerate(np.asarray(cycle_rref))
+            if int(np.flatnonzero(row)[0]) not in V_pivots]
+    W = cycle_rref[keep] if keep else GF2(np.zeros((0, inc.shape[0]), np.uint8))
 
     d0 = W                                         # line 6: ∂_0 ← W
     best = _max_row_weight(d0)

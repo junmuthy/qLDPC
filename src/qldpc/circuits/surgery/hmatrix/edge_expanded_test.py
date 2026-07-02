@@ -96,6 +96,34 @@ def test_algorithm_2_is_valid_cycle_basis_and_low_weight():
     # spans the whole cycle space (dim 1 here)
     assert int(GF2(np.asarray(d0).astype(np.uint8)).row_space().shape[0]) == 1
 
+def test_algorithm_2_nonempty_V_direct_sum():
+    # Theta graph: 2 vertices joined by 3 parallel edges -> cycle space dim 2.
+    # H_complement has a redundant pair of identical checks, so
+    # ker(H_complementᵀ) = span{[1,1]} is nonzero, and f0 maps it to the
+    # nonzero redundant cycle [0,1,1]. V = span{[0,1,1]} is then a STRICT
+    # nonempty subspace of the cycle space, exercising Algorithm 2 lines 3-5
+    # (arXiv:2410.02753 Algorithm 2): W must satisfy V ⊕ W = full cycle space.
+    inc = _incidence([(0, 1), (0, 1), (0, 1)], 2)          # 3 parallel edges
+    H_complement = np.array([[1, 1], [1, 1]], dtype=np.uint8)  # redundant checks
+    f0 = np.array([[0, 1, 0], [0, 0, 1]], dtype=np.uint8)  # rows↔checks, cols↔edges
+    # V exactly as computed inside algorithm_2 (lines 1-2)
+    V = (GF2(H_complement).left_null_space() @ GF2(f0)).row_space()
+    rank_V = int(V.shape[0])
+    assert rank_V >= 1                                     # V genuinely nonempty
+    cycle_space = GF2(inc).left_null_space()
+    rank_cycles = int(cycle_space.row_space().shape[0])
+    assert rank_V < rank_cycles                            # strict subspace (1 < 2)
+    d0 = algorithm_2(inc, H_complement, f0, n_samples=50, seed=0)
+    # every row of ∂0 is still a cycle
+    assert np.all((np.asarray(d0).astype(int) @ inc.astype(int)) % 2 == 0)
+    # direct sum, no gap: span(V) + span(∂0) = full cycle space
+    stacked = np.vstack([np.asarray(V).astype(np.uint8), d0.astype(np.uint8)])
+    assert int(GF2(stacked).row_space().shape[0]) == rank_cycles
+    # direct sum, no overlap: rank(∂0) + rank(V) = rank(cycle space)
+    rank_d0 = int(GF2(d0.astype(np.uint8)).row_space().shape[0])
+    assert rank_d0 + rank_V == rank_cycles
+
+
 def test_algorithm_2_beats_arbitrary_basis_weight():
     # Two triangles sharing edge structure so the arbitrary basis has a heavy row
     # but a low-weight basis (two triangles) exists.
