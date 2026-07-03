@@ -192,7 +192,9 @@ def test_joint_xx_in_stabilizer_on_webster_intracode(code_index: int) -> None:
     """Webster BB codes 0..3 intra-code: (x_1, x_2 padded, 0...) is in rowspan(H_X^merged).
 
     Replaces deleted path-graph tests; pins the SkipTree adapter construction across
-    the full Webster Table I code family rather than just code 0.
+    the full Webster Table I code family. Code 3 ([[510,16]], |support|=26) is cheap
+    again now that build_gadget uses the Fiedler path above |V|=20 (~0.07 s, was
+    ~200 s under the old exact O(2^26) Cheeger sweep).
     """
     import galois
 
