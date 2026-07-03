@@ -32,12 +32,11 @@ You may wonder why we need lattice surgery? First, we cannot destructively measu
 \section{Single logical PPM: gadget construction}
 \subsection{Construction}
 
-The next question is how to construct the lattice surgery? First we start with the single gadget construction, to measure the logical $\bar{X}$ as an example. Let the original CSS code have $n$ data qubits with check matrices
-  $H_X \in \mathbb{F}_2^{m_X \times n}$ and $H_Z \in \mathbb{F}_2^{m_Z \times n}$. The merged code is composite by the original $(Q, S_X, S_Z)$ and the extra ancilla system $(Q', S_X', S_Z')$, where $Q, Q'$ is the qubits, $S_X, S_X'$ is the $X$ stabilizer and $S_Z, S_Z'$ is the $Z$ stabilizers. The whole check matrix defined as
+The next question is how to construct the lattice surgery? First we start with the single gadget construction, to measure the logical $\bar{X}$ as an example. Since CSS codes and $3$-term chain complexes are equivalent, we build the merged code as the \emph{mapping cone} of a chain map $f:\mathcal{A}\to\mathcal{C}$ (Ide, Gowda, Nadkarni, Dauphinais, arXiv:2410.02753, Eqs.~(12)--(13)). The original code $\mathcal{C}$ is the complex $C_2 \xrightarrow{H_X^T} C_1 \xrightarrow{H_Z} C_0$ with $C_1$ the $n$ data qubits, $C_2$ the $X$-checks, $C_0$ the $Z$-checks, $H_X \in \mathbb{F}_2^{m_X \times n}$, $H_Z \in \mathbb{F}_2^{m_Z \times n}$, and $H_Z H_X^T = 0$. The ancilla is a second $3$-term complex $\mathcal{A}: A_1 \xrightarrow{\partial_1} A_0 \xrightarrow{\partial_0} A_{-1}$ with $A_1 = S_X'$, $A_0 = Q'$, $A_{-1} = S_Z'$ and $\partial_0\partial_1 = 0$. The cone of $f$ merges the original $(Q, S_X, S_Z)$ with the ancilla $(Q', S_X', S_Z')$; its check matrices are
 \begin{equation}
     \tilde{H}_X = \begin{pmatrix}
         H_X & 0 \\
-        f_1^T & \partial_1
+        f_1^T & \partial_1^T
     \end{pmatrix},
     \qquad 
     \tilde{H}_Z=\begin{pmatrix}
@@ -45,7 +44,7 @@ The next question is how to construct the lattice surgery? First we start with t
         0 & \partial_0
     \end{pmatrix}.
 \end{equation}
-The goal is to provide the universal construction for these extra matrix element $f_1, \partial_1, f_0, \partial_0$.
+The goal is to provide the universal construction of the chain map and ancilla boundaries $f_1, \partial_1, f_0, \partial_0$.
 
 The gadget construction is associated with the chosen logical operator. For a logical-$\bar X$ representative with support
   $x \in \mathbb{F}_2^n$ satisfying $H_Z x = 0$. We can defined several space. First, set $V_0$ is the physical qubit that logical operator $\bar{X}$ has support
@@ -62,9 +61,9 @@ Based on these two sets, we can define the projection to the sets. For any order
   \end{equation}
   We can find the projection $\pi_S M \pi_T^{T} = M[S,T]$ for arbitary matrix $M$ where $M[S,T]$ is the numpy style index.
   
-  Therefore we can construct a matrix how $Z$ stabilizers overlap with the logical $\bar{X}$, the vertex--edge incidence  $(\partial_1)_{i,j} =  (\pi_{V_0} H_Z^T \pi_{C_0}^{T})_{i,j} = (H_Z)_{c_j, v_i}$, with $\partial_1 \in \mathbb{F}_2^{|V_0|\times|C_0|}$. We take $\partial_1$ in this vertex--edge orientation, so it enters $\tilde H_X$ untransposed; the cited arXiv:2410.02753 Eq.~(62) writes the edge--vertex $\partial_1$ and hence the transpose $\partial_1^T$. Besides, since the new introduced X stabilizer also should overlap with the original qubit $Q$, the data attachment is $f_1^T = \pi_{V_0} \in \mathbb{F}_2^{|V_0|\times n}$ (i.e.\ $f_1 = \pi_{V_0}^T$). From here we find that we have $|V_0|$ new $S_X'$ ancilla stabilizer and $C_0$ new $Q'$ anciall qubits.
+  The boundary $\partial_1: A_1 \to A_0$ records how each new $X$-stabilizer acts on the ancilla qubits---the overlap of the $Z$-stabilizers with $\bar{X}$'s support---in the edge--vertex orientation of arXiv:2410.02753 Eq.~(12): $(\partial_1)_{j,i} = (\pi_{C_0} H_Z \pi_{V_0}^{T})_{j,i} = (H_Z)_{c_j, v_i}$, with $\partial_1 \in \mathbb{F}_2^{|C_0|\times|V_0|}$, so it enters $\tilde H_X$ as $\partial_1^T$. The chain map's other component attaches the new $X$-stabilizers to the original data qubits, $f_1 = \pi_{V_0}^T$ (i.e.\ $f_1^T = \pi_{V_0} \in \mathbb{F}_2^{|V_0|\times n}$). From here we find that we have $|V_0|$ new $S_X'$ ancilla stabilizers and $|C_0|$ new $Q'$ ancilla qubits.
 
-  Since we've introduced new ancilla qubits $Q'$, the original $S_Z$ should has more support $f_0 = \pi_{C_0}^T \in \mathbb{F}_2^{m_Z\times  |C_0|}$. Finally, to perform the gauge fixing, we have to introduce extra $S_Z'$ stabilizer $\partial_0$ such that $\partial_1 \partial_0^T = 0$. This is because we need to fix the extra logical qubits in the introducing of the ancilla qubits. To completely fix the gauge we have $\operatorname{row}( \partial_0) =  \ker \partial_1 \in \mathbb{F}_2^{|C_0|}$, i.e.\ $\partial_0$ spans the full subspace of ancilla $Z$-operators commuting with the new $X$-stabilizers (this gauge block is written $G$ in arXiv:2410.02753 Eq.~(62) and $\partial_0$ in Eq.~(68); we use $\partial_0 = \ker \partial_1$ throughout). Without introducing $\partial_0$, the logical operator dim is $n+|C_0|-m_X-m_Z-|V_0|$. After introducing the $\partial_0$ with gauge fixing, the dimension is $n+|C_0|-m_X-m_Z-|V_0|-r$, where $r= \dim \operatorname{row} \partial_0=|C_0|-|V_0|+\dim \ker(\partial_1^T)$. Therefore the final merged code logical dimension is $k-\dim \ker(\partial_1^T)$. In the low-rate surgery we have $\dim \ker(\partial_1^T)=1$, because $\ker(\partial_1^T) \in \mathbb{F}_2^{|V_0|}$ means the linear independence of the stabilizer $S_X'$ on the ancilla qubits. 
+  Since the new ancilla qubits $Q'$ are introduced, the original $Z$-checks pick up support on them through the chain-map component $f_0 = \pi_{C_0}^T \in \mathbb{F}_2^{m_Z\times  |C_0|}$. Finally $\partial_0: A_0 \to A_{-1}$ is the gauge-fixing boundary, chosen so that $\mathcal{A}$ is a chain complex, $\partial_0 \partial_1 = 0$; equivalently $\operatorname{row}(\partial_0) = \ker(\partial_1^T) \in \mathbb{F}_2^{|C_0|}$ spans the ancilla $Z$-operators commuting with the new $X$-stabilizers, i.e.\ the cycle space of $G_{\mathrm{aux}}$. (arXiv:2410.02753 writes this gauge block $G$ in Eq.~(62)/(12) and $\partial_0$ in Eq.~(68)/(13); we use $\partial_0$ throughout.) The chain-complex relation $\partial_0 \partial_1 = 0$ is exactly the CSS commutation of the two new stabilizer families. Without introducing $\partial_0$, the logical dimension is $n+|C_0|-m_X-m_Z-|V_0|$; gauge fixing removes $r= \dim \operatorname{row} \partial_0=|C_0|-|V_0|+\dim \ker(\partial_1)$ of them, leaving the merged logical dimension $k-\dim \ker(\partial_1)$. In the low-rate surgery $\dim \ker(\partial_1)=1$, since $\ker(\partial_1) \in \mathbb{F}_2^{|V_0|}$ is the single linear dependence of the stabilizers $S_X'$ on the ancilla qubits, namely $\prod_i (S_X')_i = \bar X$.
 
   
   Finally, the merged check matrix is
@@ -100,13 +99,13 @@ Based on these two sets, we can define the projection to the sets. For any order
 
 The new $X$ stabilizer is
   \begin{equation}
- (S_X')_i = \prod_{l=0}^{n-1} X_l^{(f_1^T)_{i,l}} \prod_{k=0}^{|C_0|-1} X_{\kappa_k}^{(\partial_1)_{i,k}}, \quad
+ (S_X')_i = \prod_{l=0}^{n-1} X_l^{(f_1^T)_{i,l}} \prod_{k=0}^{|C_0|-1} X_{\kappa_k}^{(\partial_1^T)_{i,k}}, \quad
   i=0,\dots,|V_0|-1.
   \end{equation}
 
 The exponent on each ancilla $\kappa_k$ in $\prod_i (S_X')_i$ is
   \begin{equation}
-  \sum_{i=0}^{|V_0|-1}(\partial_1)_{i,k}
+  \sum_{i=0}^{|V_0|-1}(\partial_1^T)_{i,k}
   = \bigl(\mathbf{1}^T \pi_{V_0} H_Z^T \pi_{C_0}^T\bigr)_k
   = (H_Z x)^T \pi_{C_0}^T \big|_k
   = 0,
@@ -119,8 +118,8 @@ The exponent on each ancilla $\kappa_k$ in $\prod_i (S_X')_i$ is
 
 \subsection{Boost}
 
-So far we have provided a concrete construction of the gadget only specify a logical operator $\bar{X}$ and the original check matrix. However, to make the merged code still has the distance $O(d)$, we have to randomly add more ancilla qubits and checks to obtain a better auxiliary graph $G_{\mathrm{aux}}$. Reading $\partial_1$ as a vertex-edge incidence matrix defines an auxiliary
-  graph $G_{\mathrm{aux}}$ with the dictionary: vertex $\leftrightarrow$ new $X$-stabilizer $(S_X')_i$,
+So far we have provided a concrete construction of the gadget only specify a logical operator $\bar{X}$ and the original check matrix. However, to make the merged code still has the distance $O(d)$, we have to randomly add more ancilla qubits and checks to obtain a better auxiliary graph $G_{\mathrm{aux}}$. Reading $\partial_1$ as an edge--vertex incidence matrix (rows $=$ edges $Q'$, columns $=$ vertices $S_X'$) defines an auxiliary
+  graph $G_{\mathrm{aux}}$ with the dictionary: vertex $\leftrightarrow$ supported qubits of logical $\bar{X}$, $(S_X')_i$,
   edge $\leftrightarrow$ ancilla $Q'$, cycle $\leftrightarrow$ new $Z$-stabilizer $(S_Z')_l$. 
   
   If the extended graph has the cheeger boundary constant $h \geq 1$ with
@@ -130,6 +129,14 @@ So far we have provided a concrete construction of the gadget only specify a log
   \end{equation}
   where $\partial V \subseteq E_{\mathrm{aux}}$ is the edge cut between $V$ and $V_0 \setminus V$. If initially the condition is not satisfied, we should randomly add weight-$2$ rows to $\partial_1$, or equivalently, edges to $G_{\mathrm{aux}}$. Any $Z$-logical of the merged code is then supported on $|V|$ data qubits and
   $|\partial V| \geq |V|$ ancillas, so its weight is $\Omega(d)$ and the original distance is preserved.
+
+  \subsection{Some understanding}
+
+  And here is the key link to surgery: the value of the measured logical operator L is not stored in the
+  data qubits at one instant---it is reconstructed from the time record of the merge stabilizer outcomes
+  (their parity across the rounds). So a time-like chain spanning all $\tau$ rounds flips the reported value
+  of L while leaving the stored state untouched and (in the bulk) undetected. That is exactly a time-like
+  logical error: an incorrect measurement of the target operator.
 
 \section{Joint logical PPM: universal adapter}
 
@@ -152,11 +159,11 @@ So far we have provided a concrete construction of the gadget only specify a log
   \begin{description}
   \item[\textsc{Cellulation}.] Augments $\partial_1^{s}$ with weight-$2$ rows until the port-induced
   subgraph of $G_{\mathrm{aux}}^s$ is connected and has bounded basis-cycle length.
-  \item[\textsc{SkipTree}.]     By Swaroop et al.\ Thm.~7, the input is the  the cellulated port subgraph $(\partial_1^{s,\mathrm{aug}})^T$ and the output is a $(3,2)$-sparse
+  \item[\textsc{SkipTree}.]     By Swaroop et al.\ Thm.~7, the input is the  the cellulated port subgraph $\partial_1^{s,\mathrm{aug}}$ and the output is a $(3,2)$-sparse
   matrix $T_s$ and permutation matrix $P_{\sigma_s}$ with
    \begin{equation}
   \underbrace{T_s}_{(w-1)\times m^s_{\mathrm{aug}}}
-  \Bigg(\underbrace{(\partial_1^{s,\mathrm{aug}})^T}_{m^s_{\mathrm{aug}}\times|V_0^s|}
+  \Bigg(\underbrace{\partial_1^{s,\mathrm{aug}}}_{m^s_{\mathrm{aug}}\times|V_0^s|}
   \underbrace{\pi_{\mathcal{P}_s}^T}_{|V_0^s|\times w}
   \Bigg)
   \underbrace{P_{\sigma_s}}_{w\times w}
@@ -185,8 +192,8 @@ So far we have provided a concrete construction of the gadget only specify a log
   \begin{pmatrix}
   H_X^l & 0 & 0 & 0 & 0 \\
   0 & H_X^r & 0 & 0 & 0 \\
-  f_1^{l,T} & 0 & \partial_1^{l,\mathrm{aug}} & 0 & \pi_{\mathcal{P}_l}^T P_{\sigma_l} \\
-  0 & f_1^{r,T} & 0 & \partial_1^{r,\mathrm{aug}} & \pi_{\mathcal{P}_r}^T P_{\sigma_r}
+  f_1^{l,T} & 0 & \partial_1^{l,\mathrm{aug},T} & 0 & \pi_{\mathcal{P}_l}^T P_{\sigma_l} \\
+  0 & f_1^{r,T} & 0 & \partial_1^{r,\mathrm{aug},T} & \pi_{\mathcal{P}_r}^T P_{\sigma_r}
   \end{pmatrix},
   \end{equation}
   \begin{equation}
@@ -222,18 +229,18 @@ Expand $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T$ as a
   $5 \times 4$ block matrix indexed by the $\tilde H_X$ and $\tilde H_Z$.
   Most blocks are trivially zero. But we consider the extra term $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T[4,:]$, which involves the new introduced bridge check matrix. We find the new term is to invovles the 
   \begin{equation}
-  T_s (\partial_1^{s,\mathrm{aug}})^T \;+\; H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s}.
+  T_s \partial_1^{s,\mathrm{aug}} \;+\; H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s}.
   \end{equation}
   The SkipTree identity is
   \begin{equation}
-  T_s (\partial_1^{s,\mathrm{aug}})^T \pi_{\mathcal{P}_s}^T = H_R\, P_{\sigma_s}^T.
+  T_s \partial_1^{s,\mathrm{aug}} \pi_{\mathcal{P}_s}^T = H_R\, P_{\sigma_s}^T.
   \end{equation}
   Because
-  $T_s (\partial_1^{s,\mathrm{aug}})^T$ is already zero on non-port columns of
+  $T_s \partial_1^{s,\mathrm{aug}}$ is already zero on non-port columns of
   $V_0^s$, multiplying both sides on the right by $\pi_{\mathcal{P}_s}$ recovers
   the full matrix,
   \begin{equation}
-  T_s (\partial_1^{s,\mathrm{aug}})^T = H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s},
+  T_s \partial_1^{s,\mathrm{aug}} = H_R\, P_{\sigma_s}^T \pi_{\mathcal{P}_s},
   \end{equation}
   so the two terms in the block are equal and cancel in $\mathbb{F}_2$. Therefore $\tilde H_Z^{\mathrm{joint}} (\tilde H_X^{\mathrm{joint}})^T = 0$.
 

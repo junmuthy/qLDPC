@@ -115,15 +115,27 @@ This removes the current `|V₀| ≤ 26` hard limit.
 
 ## Integration
 
-- `build_gadget(code, x, *, basis, seed=0, construction="edge_expanded")` runs
-  the new path by **default**, producing all four maps.
+- `build_gadget(code, x, *, basis, seed=0, n_samples=..., cellulate_to=...)` runs
+  the new edge-expanded path (the only path), producing all four maps.
 - `GadgetLayout` gains explicit `f1` and `f0` fields (currently reconstructed
   inline in `_x_merged`), so `f₁, f₀, ∂₁ (=incidence.T), ∂₀ (=partial_0)` are all
   first-class on the returned layout.
-- The old `left_null_space` + `cheeger.py` boost path is retained only as
-  `construction="legacy"` for the Cain et al. Table III golden reproduction
-  (`minimal_z_checks=False`). Default-path golden tests are regenerated to the
-  new lower-weight matrices.
+- **Fidelity requirement (hard):** each of `greedy_cheeger_edges`,
+  `low_weight_cycle_basis`, `cellulate`, and `edge_expanded_gadget` mirrors the
+  paper's pseudocode **line-for-line**, in the same step order, with a comment on
+  each block citing the exact Algorithm/line it implements. No "equivalent"
+  shortcuts or reordering.
+- **Delete dead code:** the old arbitrary-basis path is *replaced*, not kept
+  behind a flag. Once the new construction is the default, the now-unused pieces
+  are deleted on this branch (git-reversible): `cheeger.py`'s
+  `boost_gadget_cheeger_combinatorial` / `boost_gadget_distance` /
+  `_augment_incidence_with_random_edges` / spectral+exact enum helpers that no
+  longer have a caller, and the weight-blind `minimize_z_checks` (superseded by
+  Algorithm 2). Tests that only covered the deleted code are removed; tests that
+  assert real properties (cone validity, distance, num_observables) are
+  regenerated against the new lower-weight matrices. The Cain et al. Table III
+  count check is re-expressed against the new construction (or dropped if it only
+  pinned the old arbitrary basis).
 - `basis=Pauli.Z` reuses the identical primitives via the X↔Z dual (swap
   `H_X`/`H_Z` in, swap merged matrices out), matching the current dispatch.
 - **Determinism:** a fixed default `seed=0` makes `build_gadget(code, x, basis)`
