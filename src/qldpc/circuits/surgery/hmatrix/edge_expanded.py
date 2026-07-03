@@ -83,17 +83,72 @@ def _col_ints(inc: np.ndarray) -> list[int]:
     ]
 
 
-def cheeger_constant(incidence: np.ndarray) -> float:
-    """h = min_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Eq 3), exact enumeration.
+# Above this many vertices the exact 2^|V| Cheeger enumeration gets too slow and
+# the Fiedler-sweep approximation is used instead (see _fiedler_sweep_cuts). The
+# single-sweep cost doubles per vertex (|V|=20 ≈ 0.09 s, |V|=24 ≈ 1.5 s, |V|=26 ≈
+# 6 s) and build_gadget runs ~10-20 sweeps, so |V|=20 keeps an exact build ≲ 2 s
+# while |V|=26 would take minutes. Support ≤ 20 (typical low-weight logicals) stays
+# certified-exact; heavier operators (e.g. products, Webster3's weight-26 logical)
+# fall to the fast spectral estimate.
+_EXACT_CHEEGER_MAX_V = 20
 
-    Bit-packed Gray-code sweep: ``boundary_int`` holds ∂S as a bitmask over edges,
-    XOR-updated as S grows by one vertex, so each cut costs one XOR + one
-    ``bit_count``. Identical result to the numpy ``boundary`` path.
+
+def _graph_laplacian(inc: np.ndarray) -> np.ndarray:
+    """Dense |V|×|V| combinatorial Laplacian L = D − A, clique-expanding any
+    hyperedge (weight > 2 row) into all pairwise vertex adjacencies."""
+    inc = np.asarray(inc).astype(np.uint8)
+    n_v = inc.shape[1]
+    A = np.zeros((n_v, n_v), dtype=np.float64)
+    for row in inc:
+        verts = np.flatnonzero(row)
+        for i in range(len(verts)):
+            for j in range(i + 1, len(verts)):
+                A[verts[i], verts[j]] += 1.0
+                A[verts[j], verts[i]] += 1.0
+    return np.diag(A.sum(axis=1)) - A
+
+
+def _fiedler_sweep_cuts(inc: np.ndarray) -> np.ndarray:
+    """Approximate sparsest-cut family for |V| too large to enumerate exactly.
+
+    Orders vertices by the Fiedler vector (2nd eigenvector of the graph Laplacian,
+    Cheeger's inequality) and returns the prefix ("sweep") cuts S_k = {first k
+    vertices in Fiedler order}, 1 ≤ |S_k| ≤ |V|/2. Returned as a (|cuts|×|V|) 0/1
+    matrix; each row scored with the same exact parity boundary as the exact path.
+    """
+    inc = np.asarray(inc).astype(np.uint8)
+    n_v = inc.shape[1]
+    _, vecs = np.linalg.eigh(_graph_laplacian(inc))
+    fiedler = vecs[:, 1]                                # 2nd-smallest eigenvector
+    order = np.argsort(fiedler, kind="stable")
+    half = n_v // 2
+    cuts = np.zeros((half, n_v), dtype=np.uint8)
+    running = np.zeros(n_v, dtype=np.uint8)
+    for k in range(half):
+        running[order[k]] = 1
+        cuts[k] = running
+    return cuts
+
+
+def cheeger_constant(incidence: np.ndarray) -> float:
+    """h = min_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Eq 3).
+
+    Exact for |V| ≤ ``_EXACT_CHEEGER_MAX_V`` via a bit-packed Gray-code sweep over
+    all 2^|V| subsets (``boundary_int`` holds ∂S as an edge bitmask, XOR-updated as
+    S grows by one vertex, one XOR + one ``bit_count`` per cut). For larger |V| the
+    exact sweep is infeasible, so the minimum is taken over the Fiedler sweep cuts
+    only — a spectral estimate (h may be over-reported if a sparser cut is missed),
+    not a certified bound.
     """
     inc = np.asarray(incidence).astype(np.uint8)
     n_v = inc.shape[1]
     if n_v < 2:
         return float("inf")
+    if n_v > _EXACT_CHEEGER_MAX_V:
+        cuts = _fiedler_sweep_cuts(inc)
+        boundary_counts = (inc @ cuts.T % 2).sum(axis=0)   # |∂S| per sweep cut
+        sizes = cuts.sum(axis=1)
+        return float((boundary_counts[sizes > 0] / sizes[sizes > 0]).min())
     cols = _col_ints(inc)
     half = n_v // 2
     best = float("inf")
@@ -112,12 +167,20 @@ def cheeger_constant(incidence: np.ndarray) -> float:
 
 
 def sparsest_cut(incidence: np.ndarray) -> np.ndarray:
-    """argmin_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Alg 1 line 3). Bit-packed
-    Gray-code sweep (same enumeration as ``cheeger_constant``)."""
+    """argmin_{1≤|S|≤|V|/2} |∂S|/|S|  (arXiv:2410.02753 Alg 1 line 3). Exact
+    bit-packed Gray-code sweep for |V| ≤ ``_EXACT_CHEEGER_MAX_V`` (same enumeration
+    as ``cheeger_constant``); for larger |V|, the argmin over the Fiedler sweep
+    cuts (approximate, spectral)."""
     inc = np.asarray(incidence).astype(np.uint8)
     n_v = inc.shape[1]
     if n_v < 2:
         return np.zeros(n_v, dtype=np.uint8)
+    if n_v > _EXACT_CHEEGER_MAX_V:
+        cuts = _fiedler_sweep_cuts(inc)
+        boundary_counts = (inc @ cuts.T % 2).sum(axis=0)
+        sizes = cuts.sum(axis=1)
+        ratios = np.where(sizes > 0, boundary_counts / np.maximum(sizes, 1), np.inf)
+        return cuts[int(np.argmin(ratios))].copy()
     cols = _col_ints(inc)
     half = n_v // 2
     best_ratio = float("inf")
@@ -154,11 +217,8 @@ def algorithm_1(incidence: np.ndarray, *, max_extra: int = 200, seed: int = 0) -
     n_v = E_star.shape[1]
     if n_v < 2:
         return E_star
-    if n_v > 26:
-        raise ValueError(
-            f"algorithm_1: |V| = {n_v} > 26; exact Cheeger enumeration is infeasible. "
-            f"Reduce the logical operator weight or add a Fiedler-sweep fallback."
-        )
+    if n_v > _EXACT_CHEEGER_MAX_V:
+        return _algorithm_1_fiedler(E_star, max_extra=max_extra)
 
     # Precompute the valid cuts (1 ≤ |S| ≤ |V|//2) once: masks (subset bitmasks) and
     # sizes. ``cuts[i]`` = #edges with odd intersection with subset i (maintained
@@ -226,6 +286,51 @@ def algorithm_1(incidence: np.ndarray, *, max_extra: int = 200, seed: int = 0) -
     return E_star                                                 # line 15: return B
 
 
+def _algorithm_1_fiedler(E_star: np.ndarray, *, max_extra: int) -> np.ndarray:
+    """Algorithm 1 for |V| > ``_EXACT_CHEEGER_MAX_V``, where exact 2^|V| Cheeger
+    enumeration is infeasible (arXiv:2410.02753 Alg 1, Fiedler-sweep variant).
+
+    Same greedy shape as the exact path — sparsest cut, then add the edge across it
+    (min-degree endpoints) that maximizes the resulting Cheeger — but both the
+    stop-test and every candidate score are taken over the Fiedler sweep cuts
+    (``_fiedler_sweep_cuts``) rather than all subsets. The sweep is recomputed on
+    the current graph each iteration (adding an edge shifts the Fiedler order).
+    ``h ≥ 1`` is therefore best-effort (spectral estimate), not certified.
+    """
+    n_v = E_star.shape[1]
+    added = 0
+    while True:
+        cuts = _fiedler_sweep_cuts(E_star)                        # (|cuts|×|V|)
+        cut_counts = (E_star @ cuts.T % 2).sum(axis=0).astype(np.float64)  # |∂S|
+        sizes = cuts.sum(axis=1).astype(np.float64)
+        ratios = cut_counts / sizes
+        if ratios.min() >= 1.0:                                   # stop: h(B) ≥ 1
+            return E_star
+        if added >= max_extra:
+            raise RuntimeError(f"Algorithm 1 (Fiedler) exceeded max_extra={max_extra}")
+        S = cuts[int(np.argmin(ratios))]
+        deg = E_star.sum(axis=0)
+        inside = np.flatnonzero(S == 1)
+        outside = np.flatnonzero(S == 0)
+        min_in = inside[deg[inside] == deg[inside].min()]         # min-degree in S
+        min_out = outside[deg[outside] == deg[outside].min()]     # min-degree in V∖S
+        h_star = -np.inf
+        best_edge = None
+        for v1 in min_in:
+            col_v1 = cuts[:, v1].astype(np.float64)
+            for v2 in min_out:
+                delta = np.abs(col_v1 - cuts[:, v2])              # edge (v1,v2) ∈ ∂S?
+                h = float(((cut_counts + delta) / sizes).min())
+                if h > h_star:
+                    h_star = h
+                    best_edge = (int(v1), int(v2))
+        row = np.zeros((1, n_v), dtype=np.uint8)
+        row[0, best_edge[0]] = 1
+        row[0, best_edge[1]] = 1
+        E_star = np.vstack([E_star, row])
+        added += 1
+
+
 def _rref_drop_zero(M: galois.FieldArray) -> galois.FieldArray:
     """Reduced row echelon form with all-zero rows removed."""
     if M.shape[0] == 0:
@@ -245,6 +350,72 @@ def _random_invertible_gf2(k: int, rng: np.random.Generator) -> galois.FieldArra
             return A
 
 
+def _bitint(vec: np.ndarray) -> int:
+    """Pack a 0/1 vector into a Python int (bit e set iff ``vec[e]``)."""
+    x = 0
+    for e in np.flatnonzero(np.asarray(vec)):
+        x |= 1 << int(e)
+    return x
+
+
+def _horton_candidates(incidence: np.ndarray) -> list[tuple[int, frozenset[int]]]:
+    """Low-weight cycle-space vectors via Horton's minimum-cycle-basis candidate
+    set [J. D. Horton, "A polynomial-time algorithm to find the shortest cycle
+    basis of a graph", SIAM J. Comput. 16(2), 358-366 (1987)].
+
+    Builds a graph from the weight-2 edges of ``incidence`` and, from a BFS
+    (shortest-path) tree rooted at every vertex, forms the fundamental cycle of
+    each non-tree edge. The union over all roots contains a minimum cycle basis.
+    Hyperedges (weight > 2 rows) are skipped here; the caller completes the basis
+    from the full cycle space if the weight-2 candidates do not span it.
+
+    Returns ``[(weight, frozenset(edge indices)), ...]`` sorted lightest-first,
+    deduplicated.
+    """
+    import collections
+
+    inc = np.asarray(incidence).astype(np.uint8)
+    n_edges, n_v = inc.shape
+    ends: dict[int, tuple[int, int]] = {}
+    adj: dict[int, list[tuple[int, int]]] = {v: [] for v in range(n_v)}
+    for e in range(n_edges):
+        vs = np.flatnonzero(inc[e])
+        if len(vs) == 2:
+            u, v = int(vs[0]), int(vs[1])
+            ends[e] = (u, v)
+            adj[u].append((v, e))
+            adj[v].append((u, e))
+
+    cands: dict[frozenset[int], int] = {}
+    for root in range(n_v):
+        parent: dict[int, tuple[int, int]] = {root: (-1, -1)}   # v -> (parent, edge)
+        dq = collections.deque([root])
+        while dq:
+            x = dq.popleft()
+            for (y, e) in adj[x]:
+                if y not in parent:
+                    parent[y] = (x, e)
+                    dq.append(y)
+        tree_edges = {pe for (_, pe) in parent.values() if pe != -1}
+
+        def climb(a: int) -> set[int]:
+            s: set[int] = set()
+            while parent[a][0] != -1:
+                pa, pe = parent[a]
+                s.add(pe)
+                a = pa
+            return s
+
+        for e, (u, v) in ends.items():
+            if e in tree_edges or u not in parent or v not in parent:
+                continue
+            cyc = {e} ^ (climb(u) ^ climb(v))       # e + tree path u..v = simple cycle
+            key = frozenset(cyc)
+            if key and key not in cands:
+                cands[key] = len(key)
+    return sorted(((w, key) for key, w in cands.items()))
+
+
 def algorithm_2(
     incidence: np.ndarray,
     H_complement: np.ndarray,
@@ -253,76 +424,142 @@ def algorithm_2(
     n_samples: int = 200,
     seed: int = 0,
 ) -> np.ndarray:
-    """Random search for low-weight ∂_0 (arXiv:2410.02753 Algorithm 2).
+    """Low-weight ∂_0: a minimum-cycle-basis complement of the redundant cycles.
 
     ``incidence`` = ∂_1 (edge-vertex). Cycle space = left null space of ∂_1.
-    Follows Algorithm 2 line-for-line: V = redundant cycles
-    {vᵀ f_0 : v ∈ ker H_Zᵀ} (line 1), put in RREF (line 2); W starts as a FULL
-    cycle-space basis, "any matrix such that ker W ≅ im ∂_1" (line 3); rows of V
-    are added to rows of W to zero out the pivot columns of V in W (line 4);
-    W is put in RREF with zero rows removed (line 5) — this leaves W a
-    complement of V, V ⊕ W = full cycle space. ∂_0 ← W (line 6), then the
-    random AW + BV / AW search lowers the max row weight (lines 7-17).
+    ∂_0 must be a complement of V = redundant cycles {vᵀ f_0 : v ∈ ker H_Zᵀ}
+    (arXiv:2410.02753 Alg 2 line 1) in that cycle space, kept low-weight.
+
+    This DEVIATES from arXiv:2410.02753 Algorithm 2, whose random A·W + B·V
+    search does not lower the weight of a dense RREF starting basis (multiplying
+    by a random invertible A only makes rows denser) and stalls far above the
+    achievable minimum — e.g. weight 13 vs. 5 on the bb_18 [[248,10,18]] gadget
+    graph, forcing needless cellulation. Instead ∂_0 is built greedily from
+    Horton's minimum-cycle-basis candidates [Horton, SIAM J. Comput. 16(2),
+    358-366 (1987)]: lightest cycles first, each kept only if independent modulo
+    V, until a full complement is chosen. If the weight-2 Horton candidates do
+    not span the whole cycle space (hyperedges present), the remaining rows are
+    completed from the full cycle-space basis so the complement is always valid.
+
+    ``n_samples`` / ``seed`` are retained for API compatibility; the construction
+    is deterministic and does not use them.
     """
-    rng = np.random.default_rng(seed)
+    del n_samples, seed                            # deterministic; kept for API compat
     inc = GF2(np.asarray(incidence).astype(np.uint8))
     f0 = GF2(np.asarray(f0).astype(np.uint8))
     Hc = GF2(np.asarray(H_complement).astype(np.uint8))
+    n_edges = int(inc.shape[0])
 
-    # line 1: "Define V to be any matrix whose rows form a basis of
-    # { vᵀ f_0 | v ∈ ker H_Zᵀ }."  ker H_Zᵀ = {v : vᵀ H_Z = 0} = left null
-    # space of H_complement (H_Z when measuring X̄): rows v with
-    # v @ H_complement = 0; each v has one entry per complementary check,
-    # matching the rows of f_0 (arXiv:2410.02753 Alg 2 line 1).
+    # V = redundant cycles (arXiv:2410.02753 Alg 2 line 1). ker H_Zᵀ = left null
+    # space of H_complement (H_Z when measuring X̄): rows v with v @ H_complement
+    # = 0, one entry per complementary check, matching the rows of f_0.
     if Hc.shape[0] == 0:
         ker_HcT = GF2(np.zeros((0, f0.shape[0]), dtype=np.uint8))
     else:
         ker_HcT = Hc.left_null_space()
     V_rows = ker_HcT @ f0 if ker_HcT.shape[0] else GF2(np.zeros((0, f0.shape[1]), np.uint8))
-    V = _rref_drop_zero(V_rows)                    # line 2: "Put V in reduced row echelon form."
+    V = _rref_drop_zero(V_rows)
 
-    # line 3: "Define W to be any matrix such that ker W ≅ im ∂_1", i.e. a FULL
-    # basis of the cycle space (left null space of ∂_1); its right-kernel then
-    # has dim = rank ∂_1 (arXiv:2410.02753 Alg 2 line 3).
-    W = _rref_drop_zero(inc.left_null_space())     # rows z with z @ incidence = 0
+    # full cycle space (left null space of ∂_1) and the complement dimension ∂_0 needs
+    Z1 = _rref_drop_zero(inc.left_null_space())
+    target_dim = int(Z1.shape[0]) - int(V.shape[0])
+    if target_dim <= 0:
+        return np.zeros((0, n_edges), dtype=np.uint8)
 
-    # line 4: "Add rows of V to rows of W to zero out the pivot columns of V
-    # in W."  (V is RREF, so each V row's pivot = its first 1.)
-    if V.shape[0] and W.shape[0]:
-        W = np.asarray(W).copy()
-        Va = np.asarray(V)
-        for r in range(Va.shape[0]):
-            piv = int(np.flatnonzero(Va[r])[0])    # pivot column of this V row
-            hit = np.flatnonzero(W[:, piv] == 1)   # W rows carrying that pivot column
-            for w in hit:
-                W[w] ^= Va[r]                       # add the V row to zero column `piv`
-    # line 5: "Put W in reduced row echelon form with zero-rows removed."
-    W = _rref_drop_zero(GF2(np.asarray(W).astype(np.uint8)))
+    # online GF(2) rank over edge-indexed bitmasks; seed pivots with V so a
+    # candidate is accepted iff it is independent MODULO V.
+    pivots: dict[int, int] = {}
 
-    d0 = W                                         # line 6: "Initialize ∂_0 ← W"
-    best = _max_row_weight(d0)
-    for _ in range(n_samples):                     # line 7: for i in 1..n
-        k = d0.shape[0]
-        if k == 0:
+    def add_pivot(bitmask: int) -> bool:
+        x = bitmask
+        while x:
+            hb = x.bit_length() - 1
+            p = pivots.get(hb)
+            if p is None:
+                pivots[hb] = x
+                return True
+            x ^= p
+        return False
+
+    for i in range(V.shape[0]):
+        add_pivot(_bitint(np.asarray(V[i])))
+
+    chosen: list[np.ndarray] = []
+
+    def take(bitmask: int, edges: frozenset[int] | np.ndarray) -> bool:
+        if not add_pivot(bitmask):
+            return False
+        vec = np.zeros(n_edges, dtype=np.uint8)
+        vec[list(edges) if isinstance(edges, frozenset) else np.flatnonzero(edges)] = 1
+        chosen.append(vec)
+        return len(chosen) == target_dim
+
+    # 1) greedy over lightest Horton cycles
+    for _w, key in _horton_candidates(incidence):
+        if take(sum(1 << e for e in key), key):
+            return np.array(chosen, dtype=np.uint8).reshape(-1, n_edges)
+
+    # 2) complete from the full cycle-space basis (handles hyperedges / gaps)
+    for i in range(Z1.shape[0]):
+        row = np.asarray(Z1[i]).astype(np.uint8)
+        if take(_bitint(row), row):
             break
-        A = _random_invertible_gf2(k, rng)         # line 8: A random invertible
-        B = GF2(rng.integers(0, 2, size=(k, V.shape[0]), dtype=np.uint8)) if V.shape[0] \
-            else GF2(np.zeros((k, 0), np.uint8))   # line 9: B random
-        AW = A @ W
-        if V.shape[0]:
-            cand = AW + B @ V                      # line 10: if maxwt(AW+BV) < best
-            wt = _max_row_weight(cand)
-            if wt < best:
-                d0, best = cand, wt                # line 11
-        wt_aw = _max_row_weight(AW)                # line 13: if maxwt(AW) < best
-        if wt_aw < best:
-            d0, best = AW, wt_aw                   # line 14
-    return np.asarray(d0).astype(np.uint8)         # line 17: return ∂_0
+    return np.array(chosen, dtype=np.uint8).reshape(-1, n_edges)
 
 
 def _max_row_weight(M: galois.FieldArray) -> int:
     arr = np.asarray(M).astype(int)
     return 0 if arr.shape[0] == 0 else int(arr.sum(axis=1).max())
+
+
+class _UnionFind:
+    """Minimal union-find over vertex indices, for the Cheeger-aware pairing."""
+
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+
+    def find(self, x: int) -> int:
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]   # path halving
+            x = self.parent[x]
+        return x
+
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[ra] = rb
+
+
+def _cheeger_aware_pairing(verts: list[int], uf: _UnionFind) -> list[tuple[int, int]]:
+    """Perfect matching of a hyperedge's ``verts`` that keeps the Cheeger constant
+    as high as possible (arXiv:2410.02753 Algorithm 3, hyperedge-expansion step).
+
+    A weight-2 replacement must be a perfect matching (each vertex once) so the
+    rows sum to the original edge (Eq 36). Among matchings, connectivity is what
+    keeps the Cheeger constant up, so pairs are chosen greedily to join vertices in
+    DIFFERENT current components (merging them); once no cross-component pair
+    remains, leftovers are paired in order. ``uf`` accumulates across hyperedges.
+    """
+    unmatched = list(verts)
+    pairs: list[tuple[int, int]] = []
+    while len(unmatched) >= 2:
+        pick: tuple[int, int] | None = None
+        for i in range(len(unmatched)):
+            for j in range(i + 1, len(unmatched)):
+                if uf.find(unmatched[i]) != uf.find(unmatched[j]):
+                    pick = (i, j)
+                    break
+            if pick is not None:
+                break
+        if pick is None:
+            pick = (0, 1)                                 # all one component; pair in order
+        i, j = pick
+        a, b = unmatched[i], unmatched[j]
+        uf.union(a, b)
+        pairs.append((a, b))
+        unmatched.pop(j)                                  # j > i, remove it first
+        unmatched.pop(i)
+    return pairs
 
 
 def expand_hyperedges(
@@ -331,31 +568,40 @@ def expand_hyperedges(
     """Expand hyperedges to weight-two edges (arXiv:2410.02753 Algorithm 3).
 
     Each row ``e`` of ``incidence`` with ``wt e > 2`` is replaced by ``(wt e)//2``
-    weight-two rows that sum to ``e`` (its vertices paired up), and the column of
-    ``f0`` for ``e`` is replaced by ``(wt e)//2`` copies. Rows with ``wt e ≤ 2``
-    pass through unchanged. Pairing adjacent vertices in index order keeps the
-    Cheeger constant high (a path/fan over the hyperedge's vertices).
+    weight-two rows that sum to ``e`` (a perfect matching of its vertices, so the
+    row space still contains ``e`` per Eq 36), and the column of ``f0`` for ``e``
+    is replaced by ``(wt e)//2`` copies. Rows with ``wt e ≤ 2`` pass through.
+
+    The matching is chosen to "keep the Cheeger constant as high as possible"
+    (Algorithm 3): a union-find seeded with the existing weight-2 edges drives a
+    greedy that pairs vertices in DIFFERENT components first (``_cheeger_aware_
+    pairing``), leaving the expanded graph maximally connected so the subsequent
+    Algorithm 1 adds far fewer edges. (Odd ``wt e`` never arises — H_Z rows commute
+    with X̄, so every restricted edge has even weight.)
     """
     inc = np.asarray(incidence).astype(np.uint8)
     f0 = np.asarray(f0).astype(np.uint8)
+    n_v = inc.shape[1]
+    # seed union-find with the pass-through weight-2 edges so hyperedge matchings
+    # connect across the graph that already exists.
+    uf = _UnionFind(n_v)
+    for i in range(inc.shape[0]):
+        vs = np.flatnonzero(inc[i])
+        if len(vs) == 2:
+            uf.union(int(vs[0]), int(vs[1]))
     new_rows: list[np.ndarray] = []
     new_f0_cols: list[np.ndarray] = []
-    n_v = inc.shape[1]
     for i in range(inc.shape[0]):
-        verts = np.flatnonzero(inc[i])
-        w = len(verts)
+        verts = [int(v) for v in np.flatnonzero(inc[i])]
         col = f0[:, i] if f0.shape[1] > i else np.zeros(f0.shape[0], np.uint8)
-        if w <= 2:                                       # pass through unchanged
+        if len(verts) <= 2:                              # pass through unchanged
             new_rows.append(inc[i].copy())
             new_f0_cols.append(col)
             continue
-        # pair vertices: (v0,v1),(v2,v3),... -> (w//2) weight-2 rows summing to e.
-        # If w is odd, the paper's construction targets even-weight rows (H_Z rows
-        # commute with X̄ so wt e is even); w//2 pairs cover all vertices when even.
-        for j in range(w // 2):
+        for a, b in _cheeger_aware_pairing(verts, uf):
             row = np.zeros(n_v, dtype=np.uint8)
-            row[verts[2 * j]] = 1
-            row[verts[2 * j + 1]] = 1
+            row[a] = 1
+            row[b] = 1
             new_rows.append(row)
             new_f0_cols.append(col)                      # duplicate the f0 column
     inc2 = np.vstack(new_rows).astype(np.uint8) if new_rows else inc[:0]

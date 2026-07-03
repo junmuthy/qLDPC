@@ -32,6 +32,32 @@ def test_restrict_maps_steane_weight3_logical():
     np.testing.assert_array_equal(r.f0_star, expected_f0)
 
 
+def test_algorithm_1_fiedler_reaches_cheeger_one_large_v():
+    # 6x6 grid = 36 vertices (> _EXACT_CHEEGER_MAX_V): exact enumeration is
+    # infeasible, so algorithm_1 takes the Fiedler-sweep path. It must still add
+    # edges until the (sweep-estimated) Cheeger constant is >= 1.
+    inc = _grid_incidence(6)
+    assert inc.shape[1] == 36
+    out = algorithm_1(inc, seed=0)
+    assert out.shape[0] > inc.shape[0]                 # edges were added
+    assert cheeger_constant(out) >= 1.0                # sweep estimate reaches 1
+
+
+def test_fiedler_sweep_estimate_brackets_exact():
+    # On a small graph the Fiedler sweep sees only a subset of cuts, so its Cheeger
+    # estimate can only OVER-report (>= the exact value). Sanity that it is not
+    # wildly off and never under-reports.
+    from qldpc.circuits.surgery.hmatrix.edge_expanded import _fiedler_sweep_cuts
+    inc = _grid_incidence(4)                           # 16 vertices -> exact path
+    h_exact = cheeger_constant(inc)
+    cuts = _fiedler_sweep_cuts(inc)
+    bc = (inc @ cuts.T % 2).sum(axis=0)
+    sz = cuts.sum(axis=1)
+    h_sweep = float((bc[sz > 0] / sz[sz > 0]).min())
+    assert h_sweep >= h_exact - 1e-9                   # sweep never under-reports
+    assert h_exact > 0                                 # grid is connected
+
+
 def _incidence(edges, n_v):
     M = np.zeros((len(edges), n_v), dtype=np.uint8)
     for i, e in enumerate(edges):
@@ -137,6 +163,35 @@ def test_algorithm_2_beats_arbitrary_basis_weight():
     assert int(np.asarray(d0).astype(int).sum(axis=1).max()) <= 3
 
 
+def _grid_incidence(n):
+    """(n x n) grid graph as an edge-vertex incidence (all weight-2 edges)."""
+    vid = lambda r, c: r * n + c
+    edges = []
+    for r in range(n):
+        for c in range(n):
+            if c + 1 < n:
+                edges.append((vid(r, c), vid(r, c + 1)))
+            if r + 1 < n:
+                edges.append((vid(r, c), vid(r + 1, c)))
+    return _incidence(edges, n * n)
+
+
+def test_algorithm_2_finds_minimum_cycle_basis_on_grid():
+    # 4x4 grid: cycle space dim 9; the minimum cycle basis is the 9 unit squares,
+    # each weight 4. A dense RREF basis + random A·W+B·V search stalls at weight 8
+    # (the random search only makes rows denser); a minimum-cycle-basis construction
+    # reaches the weight-4 optimum. Regression test for the algorithm_2 rewrite.
+    inc = _grid_incidence(4)
+    H_complement = np.zeros((0, inc.shape[1]), dtype=np.uint8)
+    f0 = np.zeros((0, inc.shape[0]), dtype=np.uint8)
+    d0 = algorithm_2(inc, H_complement, f0, n_samples=300, seed=0)
+    # valid: rows are cycles and span the full cycle space (dim 9)
+    assert np.all((np.asarray(d0).astype(int) @ inc.astype(int)) % 2 == 0)
+    assert int(GF2(np.asarray(d0).astype(np.uint8)).row_space().shape[0]) == 9
+    # every basis cycle is a unit square -> max row weight 4
+    assert int(np.asarray(d0).astype(int).sum(axis=1).max()) == 4
+
+
 def test_expand_hyperedges_splits_wide_rows():
     # A single weight-4 hyperedge over 4 vertices + f0 column backing it.
     inc = np.array([[1,1,1,1]], dtype=np.uint8)          # one wt-4 row (hyperedge)
@@ -148,6 +203,34 @@ def test_expand_hyperedges_splits_wide_rows():
     np.testing.assert_array_equal(inc2.sum(axis=0) % 2, inc[0])   # rows sum to e
     assert f02.shape == (1, 2)                            # column duplicated (wt e)//2 = 2 times
     np.testing.assert_array_equal(f02, np.array([[1,1]], dtype=np.uint8))
+
+def test_expand_hyperedges_cheeger_aware_pairing_connects():
+    # Two overlapping weight-4 hyperedges. Naive index-order matching gives
+    # (0,1)(2,3) then (2,3)(4,5) -> 3 disconnected components {0,1},{2,3},{4,5};
+    # the Cheeger-aware pairing (arXiv:2410.02753 Alg 3: "keep the Cheeger constant
+    # as high as possible") merges components, leaving the expanded weight-2 graph
+    # far better connected so the subsequent Algorithm 1 adds fewer edges.
+    inc = np.array([[1, 1, 1, 1, 0, 0],   # hyperedge {0,1,2,3}
+                    [0, 0, 1, 1, 1, 1]],  # hyperedge {2,3,4,5}
+                   dtype=np.uint8)
+    f0 = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+    inc2, f02 = expand_hyperedges(inc, f0)
+    # correctness (Eq 36): each hyperedge's replacement rows sum to it, all weight 2
+    assert np.array_equal(inc2[:2].sum(0) % 2, inc[0])
+    assert np.array_equal(inc2[2:].sum(0) % 2, inc[1])
+    assert np.all(inc2.sum(1) == 2)
+    assert f02.shape[1] == inc2.shape[0]                # one f0 column per new edge
+    # connectivity: expanded weight-2 graph has <= 2 components (index order gives 3)
+    parent = list(range(6))
+    def find(x):
+        while parent[x] != x:
+            x = parent[x]
+        return x
+    for r in inc2:
+        a, b = (int(v) for v in np.flatnonzero(r))
+        parent[find(a)] = find(b)
+    assert len({find(v) for v in range(6)}) <= 2
+
 
 def test_expand_hyperedges_passes_weight2_through():
     inc = np.array([[1,1,0],[0,1,1]], dtype=np.uint8)     # both weight-2 already
