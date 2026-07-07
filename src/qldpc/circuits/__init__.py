@@ -35,6 +35,7 @@ from .memory import (
     AlphaSyndrome,
     EdgeColoring,
     EdgeColoringXZ,
+    BellPairParitySyndrome,
     MemoryExperimentParts,
     SyndromeMeasurementStrategy,
     get_logical_bell_prep,
@@ -97,4 +98,5 @@ __all__ = [
     "get_transversal_ops",
     "MeasurementRecord",
     "ParityMeasurementRecord",
+    "BellPairParitySyndrome",
 ]

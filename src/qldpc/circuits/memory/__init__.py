@@ -19,6 +19,7 @@ from ..bookkeeping import (
     # QubitIDs,
     # Record,
 )
+from .bell_pair_syndrome import BellPairParitySyndrome
 
 __all__ = [
     "AlphaSyndrome",
@@ -33,4 +34,5 @@ __all__ = [
     "SyndromeMeasurementStrategy",
     "MeasurementRecord",
     "ParityMeasurementRecord",
+    "BellPairParitySyndrome",
 ]
