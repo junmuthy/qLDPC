@@ -12,6 +12,13 @@ from .syndrome_measurement import (
     EdgeColoringXZ,
     SyndromeMeasurementStrategy,
 )
+from ..bookkeeping import (
+    # DetectorRecord,
+    MeasurementRecord,
+    ParityMeasurementRecord,
+    # QubitIDs,
+    # Record,
+)
 
 __all__ = [
     "AlphaSyndrome",
@@ -24,4 +31,6 @@ __all__ = [
     "EdgeColoring",
     "EdgeColoringXZ",
     "SyndromeMeasurementStrategy",
+    "MeasurementRecord",
+    "ParityMeasurementRecord",
 ]

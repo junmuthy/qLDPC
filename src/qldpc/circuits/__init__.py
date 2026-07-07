@@ -6,9 +6,16 @@ from .benchmarking import (
 from .bookkeeping import (
     DetectorRecord,
     MeasurementRecord,
+    ParityMeasurementRecord,
     QubitIDs,
     Record,
 )
+# from .bookkeeping import (
+#     DetectorRecord,
+#     MeasurementRecord,
+#     QubitIDs,
+#     Record,
+# )
 from .common import (
     get_pauli_product_measurements,
     get_unaddressed_measurements,
@@ -88,4 +95,6 @@ __all__ = [
     "get_transversal_circuit",
     "get_transversal_circuits",
     "get_transversal_ops",
+    "MeasurementRecord",
+    "ParityMeasurementRecord",
 ]

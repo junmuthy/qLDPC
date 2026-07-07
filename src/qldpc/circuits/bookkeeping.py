@@ -200,21 +200,33 @@ class Record(Mapping[Hashable, list[int]]):
         return record
 
 
+# class MeasurementRecord(Record):
+#     """An organized record of measurements in a Stim circuit."""
+
+#     def get_target_rec(self, qubit: Hashable, measurement_index: int = -1) -> stim.target_rec:
+#         """Retrieve a Stim measurement record target for the given qubit.
+
+#         Args:
+#             qubit: The qubit whose measurement record we want.
+#             measurement_index: An index specifying which measurement of the specified qubit we want.
+#                 A measurement_index of 0 would be the first measurement of the qubit, while a
+#                 measurement_index of -1 would be the most recent measurement.  Default value: -1.
+
+#         Returns:
+#             stim.target_rec: A Stim measurement record target.
+#         """
+#         measurements = self.get_events(qubit)
+#         if not -len(measurements) <= measurement_index < len(measurements):
+#             raise ValueError(
+#                 f"Invalid measurement index {measurement_index} for qubit {qubit} with "
+#                 f"{len(measurements)} measurements"
+#             )
+#         return stim.target_rec(measurements[measurement_index] - self.num_events)
 class MeasurementRecord(Record):
-    """An organized record of measurements in a Stim circuit."""
+    """An organized record of measurements in a circuit."""
 
     def get_target_rec(self, qubit: Hashable, measurement_index: int = -1) -> stim.target_rec:
-        """Retrieve a Stim measurement record target for the given qubit.
-
-        Args:
-            qubit: The qubit whose measurement record we want.
-            measurement_index: An index specifying which measurement of the specified qubit we want.
-                A measurement_index of 0 would be the first measurement of the qubit, while a
-                measurement_index of -1 would be the most recent measurement.  Default value: -1.
-
-        Returns:
-            stim.target_rec: A Stim measurement record target.
-        """
+        """Retrieve a Stim measurement record target for the given qubit."""
         measurements = self.get_events(qubit)
         if not -len(measurements) <= measurement_index < len(measurements):
             raise ValueError(
@@ -223,6 +235,240 @@ class MeasurementRecord(Record):
             )
         return stim.target_rec(measurements[measurement_index] - self.num_events)
 
+    def get_target_recs(
+        self,
+        qubit: Hashable,
+        measurement_index: int = -1,
+    ) -> list[stim.GateTarget]:
+        """Retrieve Stim record targets whose parity defines this measurement.
+
+        For a normal MeasurementRecord, each measurement is just one raw measurement bit.
+        This method exists so memory.py can consume either MeasurementRecord or
+        ParityMeasurementRecord uniformly.
+        """
+        return [self.get_target_rec(qubit, measurement_index)]
+
+
+class ParityMeasurementRecord(Mapping[Hashable, list[tuple[int, ...]]]):
+    """Record of parity-valued measurements.
+
+    Each key maps to a list of measurement groups.  Each group is a tuple of raw
+    measurement indices, and the parity/XOR of that group is the effective
+    measurement value.
+
+    Examples:
+        {check_id: (0, 1)}
+            means the check syndrome is m0 XOR m1.
+
+        {check_id: [(0, 1), (6, 7)]}
+            means the same check was measured twice, first as m0 XOR m1 and then
+            as m6 XOR m7.
+    """
+
+    num_events: int
+    key_to_event_groups: dict[Hashable, list[tuple[int, ...]]]
+
+    def __init__(
+        self,
+        initial_record: (
+            Mapping[Hashable, int | Iterable[int] | Iterable[Iterable[int]]]
+            | MeasurementRecord
+            | None
+        ) = None,
+        *,
+        num_events: int | None = None,
+    ) -> None:
+        self.key_to_event_groups = collections.defaultdict(list)
+        self.num_events = 0
+
+        if initial_record:
+            self.append(initial_record)
+
+        if num_events is not None:
+            if num_events < self.num_events:
+                raise ValueError(
+                    f"Provided num_events={num_events} is smaller than the "
+                    f"{self.num_events} events inferred from the record"
+                )
+            self.num_events = num_events
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({dict(self.key_to_event_groups)})"
+
+    def __str__(self) -> str:
+        return repr(self)
+
+    def __len__(self) -> int:
+        return len(self.key_to_event_groups)
+
+    def __iter__(self) -> Iterator[Hashable]:
+        yield from self.key_to_event_groups.keys()
+
+    def __getitem__(self, key: Hashable) -> list[tuple[int, ...]]:
+        return self.key_to_event_groups[key]
+
+    def items(self) -> ItemsView[Hashable, list[tuple[int, ...]]]:
+        return self.key_to_event_groups.items()
+
+    def copy(self) -> Self:
+        return type(self)(
+            {
+                copy.deepcopy(key): copy.deepcopy(groups)
+                for key, groups in self.items()
+            },
+            num_events=self.num_events,
+        )
+
+    @staticmethod
+    def _normalize_event_groups(
+        events: int | Iterable[int] | Iterable[Iterable[int]],
+    ) -> list[tuple[int, ...]]:
+        if isinstance(events, int):
+            return [(events,)]
+
+        events_list = list(events)
+        if not events_list:
+            return []
+
+        # A flat iterable of ints means one parity group.
+        # For example, (0, 1) means m0 XOR m1.
+        if all(isinstance(event, int) for event in events_list):
+            return [tuple(int(event) for event in events_list)]
+
+        # Otherwise interpret as an iterable of parity groups.
+        groups: list[tuple[int, ...]] = []
+        for group in events_list:
+            if isinstance(group, int):
+                groups.append((group,))
+            else:
+                groups.append(tuple(int(event) for event in group))
+
+        return groups
+
+    @staticmethod
+    def _get_groups_and_num_events(
+        record: (
+            Mapping[Hashable, int | Iterable[int] | Iterable[Iterable[int]]]
+            | MeasurementRecord
+            | ParityMeasurementRecord
+        ),
+    ) -> tuple[dict[Hashable, list[tuple[int, ...]]], int]:
+        if isinstance(record, ParityMeasurementRecord):
+            return dict(record.key_to_event_groups), record.num_events
+
+        if isinstance(record, MeasurementRecord):
+            groups = {
+                key: [(event,) for event in events]
+                for key, events in record.items()
+            }
+            return groups, record.num_events
+
+        groups = {
+            key: ParityMeasurementRecord._normalize_event_groups(events)
+            for key, events in record.items()
+        }
+
+        max_event = -1
+        for event_groups in groups.values():
+            for group in event_groups:
+                if group:
+                    max_event = max(max_event, max(group))
+
+        return groups, max_event + 1
+
+    def append(
+        self,
+        record: (
+            Mapping[Hashable, int | Iterable[int] | Iterable[Iterable[int]]]
+            | MeasurementRecord
+            | ParityMeasurementRecord
+        ),
+        repeat: int = 1,
+    ) -> None:
+        """Append a parity record to this one.
+
+        Event indices in the appended record are shifted by the number of raw
+        measurements already in this record.
+        """
+        assert repeat >= 0
+
+        groups, num_events_in_record = self._get_groups_and_num_events(record)
+
+        for key, event_groups in groups.items():
+            self.key_to_event_groups[key].extend(
+                [
+                    tuple(
+                        self.num_events + event + repetition * num_events_in_record
+                        for event in group
+                    )
+                    for repetition in range(repeat)
+                    for group in event_groups
+                ]
+            )
+
+        self.num_events += num_events_in_record * repeat
+
+    def __iadd__(
+        self,
+        other: (
+            Mapping[Hashable, int | Iterable[int] | Iterable[Iterable[int]]]
+            | MeasurementRecord
+            | ParityMeasurementRecord
+        ),
+    ) -> Self:
+        self.append(other)
+        return self
+
+    def __add__(self, other: Self) -> Self:
+        record = self.copy()
+        record.append(other)
+        return record
+
+    def get_event_groups(self, *keys: Hashable) -> list[tuple[int, ...]]:
+        """All parity groups associated with the given keys."""
+        return [
+            group
+            for key in keys
+            for group in self.key_to_event_groups.get(key, [])
+        ]
+
+    def get_target_recs(
+        self,
+        qubit: Hashable,
+        measurement_index: int = -1,
+    ) -> list[stim.GateTarget]:
+        """Retrieve Stim record targets whose parity defines this measurement."""
+        groups = self.get_event_groups(qubit)
+
+        if not -len(groups) <= measurement_index < len(groups):
+            raise ValueError(
+                f"Invalid measurement index {measurement_index} for qubit {qubit} with "
+                f"{len(groups)} parity measurements"
+            )
+
+        group = groups[measurement_index]
+        return [stim.target_rec(event - self.num_events) for event in group]
+
+    def get_target_rec(
+        self,
+        qubit: Hashable,
+        measurement_index: int = -1,
+    ) -> stim.GateTarget:
+        """Retrieve a single measurement record target.
+
+        This exists for compatibility with code paths that genuinely expect a
+        singleton measurement.  It intentionally errors on multi-bit parities.
+        """
+        targets = self.get_target_recs(qubit, measurement_index)
+
+        if len(targets) != 1:
+            raise ValueError(
+                f"Measurement for qubit/check {qubit} is a parity of {len(targets)} "
+                "raw measurements. Use get_target_recs instead."
+            )
+
+        return targets[0]
+    
 
 class DetectorRecord(Record):
     """An organized record of detectors in a Stim circuit."""

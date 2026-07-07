@@ -26,9 +26,11 @@ import stim
 from qldpc import codes
 from qldpc.objects import Pauli
 
-from ..bookkeeping import MeasurementRecord, QubitIDs
+from ..bookkeeping import MeasurementRecord, ParityMeasurementRecord, QubitIDs
+# from ..bookkeeping import MeasurementRecord, QubitIDs
 from ..common import restrict_to_qubits
 
+SyndromeRecord = MeasurementRecord | ParityMeasurementRecord
 
 class SyndromeMeasurementStrategy(abc.ABC):
     """Base class for a syndrome measurement strategy."""
@@ -36,8 +38,10 @@ class SyndromeMeasurementStrategy(abc.ABC):
     @restrict_to_qubits
     @abc.abstractmethod
     def get_circuit(
-        self, code: codes.QuditCode, qubit_ids: QubitIDs | None = None
-    ) -> tuple[stim.Circuit, MeasurementRecord]:
+            self,
+            code: codes.QuditCode,
+            qubit_ids: QubitIDs | None = None,
+    ) -> tuple[stim.Circuit, SyndromeRecord]:
         """Construct a circuit to measure the syndromes of a quantum error-correcting code.
 
         Args:

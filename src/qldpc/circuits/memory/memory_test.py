@@ -110,3 +110,30 @@ def test_errors() -> None:
         circuits.get_observables(codes.SteaneCode(), basis=None, on_measurements=True)
     with pytest.raises(ValueError, match="basis must be"):
         circuits.get_observables(codes.SteaneCode(), basis="test", on_measurements=True)  # type:ignore[arg-type]
+
+
+# def test_memory_experiment_with_parity_syndrome_record() -> None:
+#     """Memory experiments can use syndrome bits that are parities of raw measurements."""
+#     code = codes.SteaneCode()
+#     num_rounds = 3
+#     shots = 10
+
+#     qubit_ids = circuits.QubitIDs.from_code(
+#         code,
+#         num_ancillas=code.num_checks,
+#     )
+
+#     circuit = circuits.get_memory_experiment(
+#         code,
+#         basis=Pauli.Z,
+#         num_rounds=num_rounds,
+#         qubit_ids=qubit_ids,
+#         syndrome_measurement_strategy=BellPairParitySyndrome(),
+#     )
+
+#     sampler = circuit.compile_detector_sampler()
+#     detectors, observables = sampler.sample(shots=shots, separate_observables=True)
+
+#     assert detectors.shape[0] == observables.shape[0] == shots
+#     assert detectors.shape[1] == circuit.num_detectors == code.num_checks_z * (num_rounds + 1)
+#     assert observables.shape[1] == code.dimension
