@@ -10,14 +10,32 @@ from __future__ import annotations
 import numpy as np
 import stim
 
-from qldpc.circuits.bookkeeping import DetectorRecord, MeasurementRecord, QubitIDs
-from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
+from qldpc.circuits.bookkeeping import (
+    DetectorRecord,
+    MeasurementRecord,
+    ParityMeasurementRecord,
+    QubitIDs,
+)
+from qldpc.circuits.memory.syndrome_measurement import (
+    EdgeColoring,
+    SyndromeMeasurementStrategy,
+    SyndromeRecord,
+)
 from qldpc.circuits.noise_model import NoiseModel
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
+
+
+def _get_target_recs(
+    measurement_record: SyndromeRecord,
+    key: object,
+    measurement_index: int = -1,
+) -> list[stim.GateTarget]:
+    """Measurement record targets whose parity defines the requested measurement."""
+    return measurement_record.get_target_recs(key, measurement_index)
 
 
 def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
@@ -346,6 +364,7 @@ def build_single_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | None = None,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
 ) -> stim.Circuit:
     """Cain §III.A single-PPM measurement circuit for `gadget`.
 
@@ -364,6 +383,9 @@ def build_single_ppm_circuit(
 
     ``data_init`` (optional): per-data-qubit init override; see
     ``_surgery_state_prep`` for the character-to-state mapping.
+
+    ``syndrome_measurement_strategy`` (optional): strategy used for each
+    merged-code syndrome extraction round. Defaults to ``EdgeColoring()``.
     """
     merged_code = _gadget_merged_csscode(gadget)
     qubit_ids = QubitIDs.from_code(merged_code)
@@ -385,6 +407,7 @@ def build_single_ppm_circuit(
         merged_code,
         num_rounds=rounds,
         qubit_ids=qubit_ids,
+        syndrome_measurement_strategy=syndrome_measurement_strategy,
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
@@ -666,6 +689,7 @@ def build_joint_ppm_circuit(
     rounds: int,
     noise_model: NoiseModel | None = None,
     data_init: str | tuple[str, ...] | list[str] | None = None,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
 ) -> tuple[stim.Circuit, CSSCode]:
     """Joint-PPM circuit (universal adapter; no U_B in α*).
 
@@ -690,6 +714,9 @@ def build_joint_ppm_circuit(
         length is n_l. See ``_surgery_state_prep`` for the char-to-state mapping.
       * ``tuple[str, str]`` (intercode only) — per-code logical-init spec.
         ``data_init=("0", "+")`` → c_l in |0⟩_L, c_r in |+⟩_L.
+
+    ``syndrome_measurement_strategy`` (optional): strategy used for each
+    merged-code syndrome extraction round. Defaults to ``EdgeColoring()``.
     """
     joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
     qubit_ids = QubitIDs.from_code(joint_code)
@@ -733,6 +760,7 @@ def build_joint_ppm_circuit(
         num_rounds=rounds,
         qubit_ids=qubit_ids,
         intercode=intercode,
+        syndrome_measurement_strategy=syndrome_measurement_strategy,
     )
     circuit += qec_cycle
     circuit += _surgery_detach_and_readout(
@@ -824,10 +852,11 @@ def _surgery_qec_cycle_joint(
     qubit_ids: QubitIDs,
     *,
     intercode: bool,
-) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+) -> tuple[stim.Circuit, SyndromeRecord, DetectorRecord]:
     """Joint-code variant of _surgery_qec_cycle that classifies reliable checks
     across both gadgets + the bridge's new cycle-checks."""
-    strategy = EdgeColoring()
+    strategy = syndrome_measurement_strategy or EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(joint_code, qubit_ids)
     reliable = set(
         _classify_reliable_round1_checks_joint(
@@ -845,7 +874,11 @@ def _surgery_qec_cycle_joint(
     )
 
     circuit = stim.Circuit()
-    measurement_record = MeasurementRecord()
+    measurement_record: SyndromeRecord
+    if isinstance(round_measurement_record, ParityMeasurementRecord):
+        measurement_record = ParityMeasurementRecord()
+    else:
+        measurement_record = MeasurementRecord()
     detector_record = DetectorRecord()
 
     circuit += one_round
@@ -854,7 +887,9 @@ def _surgery_qec_cycle_joint(
         if check_id in reliable:
             lane, idx = lane_idx[check_id]
             circuit.append(
-                "DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0)
+                "DETECTOR",
+                _get_target_recs(measurement_record, check_id),
+                (idx, lane, 0),
             )
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
@@ -867,10 +902,8 @@ def _surgery_qec_cycle_joint(
             lane, idx = lane_idx[check_id]
             repeat_circuit.append(
                 "DETECTOR",
-                [
-                    measurement_record.get_target_rec(check_id, -1),
-                    measurement_record.get_target_rec(check_id, -2),
-                ],
+                _get_target_recs(measurement_record, check_id, -1)
+                + _get_target_recs(measurement_record, check_id, -2),
                 (idx, lane, 0),
             )
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
@@ -890,7 +923,7 @@ def _surgery_final_detectors_joint(
     bridge: Bridge,
     qubit_ids: QubitIDs,
     *,
-    measurement_record: MeasurementRecord,
+    measurement_record: SyndromeRecord,
     intercode: bool,
 ) -> stim.Circuit:
     """Joint-code variant of _surgery_final_detectors.
@@ -915,8 +948,12 @@ def _surgery_final_detectors_joint(
 
     def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
         supp = np.where(stab_row)[0]
-        targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
-        targets.append(measurement_record.get_target_rec(check_id, -1))
+        targets = [
+            target
+            for q in supp
+            for target in _get_target_recs(measurement_record, qubit_ids.data[q])
+        ]
+        targets += _get_target_recs(measurement_record, check_id, -1)
         lane, idx = lane_idx[check_id]
         circuit.append("DETECTOR", targets, (idx, lane, 0))
 
@@ -1033,16 +1070,22 @@ def _surgery_qec_cycle(
     merged_code: CSSCode,
     num_rounds: int,
     qubit_ids: QubitIDs,
-) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
+    *,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+) -> tuple[stim.Circuit, SyndromeRecord, DetectorRecord]:
     """num_rounds of merged-code SE; round-1 detectors only for reliable checks."""
-    strategy = EdgeColoring()
+    strategy = syndrome_measurement_strategy or EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(merged_code, qubit_ids)
     reliable = set(_classify_reliable_round1_checks(gadget, qubit_ids))
     all_check_ids = qubit_ids.check
     lane_idx = _check_lane_index_map(gadget, qubit_ids)
 
     circuit = stim.Circuit()
-    measurement_record = MeasurementRecord()
+    measurement_record: SyndromeRecord
+    if isinstance(round_measurement_record, ParityMeasurementRecord):
+        measurement_record = ParityMeasurementRecord()
+    else:
+        measurement_record = MeasurementRecord()
     detector_record = DetectorRecord()
 
     # Round 1: emit DETECTORs only for reliable checks.
@@ -1052,7 +1095,9 @@ def _surgery_qec_cycle(
         if check_id in reliable:
             lane, idx = lane_idx[check_id]
             circuit.append(
-                "DETECTOR", [measurement_record.get_target_rec(check_id)], (idx, lane, 0)
+                "DETECTOR",
+                _get_target_recs(measurement_record, check_id),
+                (idx, lane, 0),
             )
     reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
     detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
@@ -1065,10 +1110,8 @@ def _surgery_qec_cycle(
             lane, idx = lane_idx[check_id]
             repeat_circuit.append(
                 "DETECTOR",
-                [
-                    measurement_record.get_target_rec(check_id, -1),
-                    measurement_record.get_target_rec(check_id, -2),
-                ],
+                _get_target_recs(measurement_record, check_id, -1)
+                + _get_target_recs(measurement_record, check_id, -2),
                 (idx, lane, 0),
             )
         circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
@@ -1087,7 +1130,7 @@ def _surgery_observable(
     meas_check_ids: tuple[int, ...],
     data_ids: tuple[int, ...],
     support_indices: tuple[int, ...],
-    measurement_record: MeasurementRecord,
+    measurement_record: SyndromeRecord,
 ) -> stim.Circuit:
     """Emit two OBSERVABLE_INCLUDE entries (obs0, obs1) for the surgery PPM.
 
@@ -1118,9 +1161,17 @@ def _surgery_observable(
             f"_surgery_observable expects the QEC cycle to have run first."
         )
     circuit = stim.Circuit()
-    meas_targets = [measurement_record.get_target_rec(cid) for cid in meas_check_ids]
+    meas_targets = [
+        target
+        for cid in meas_check_ids
+        for target in _get_target_recs(measurement_record, cid)
+    ]
     circuit.append("OBSERVABLE_INCLUDE", meas_targets, 0)
-    data_targets = [measurement_record.get_target_rec(data_ids[i]) for i in support_indices]
+    data_targets = [
+        target
+        for i in support_indices
+        for target in _get_target_recs(measurement_record, data_ids[i])
+    ]
     circuit.append("OBSERVABLE_INCLUDE", data_targets, 1)
     return circuit
 
@@ -1130,7 +1181,7 @@ def _surgery_final_detectors(
     merged_code: CSSCode,
     qubit_ids: QubitIDs,
     *,
-    measurement_record: MeasurementRecord,
+    measurement_record: SyndromeRecord,
 ) -> stim.Circuit:
     """Emit DETECTORs for reliable stabs inferable from final readouts.
 
@@ -1148,8 +1199,12 @@ def _surgery_final_detectors(
 
     def _emit_detector(stab_row: np.ndarray, check_id: int) -> None:
         supp = np.where(stab_row)[0]
-        targets = [measurement_record.get_target_rec(qubit_ids.data[q]) for q in supp]
-        targets.append(measurement_record.get_target_rec(check_id, -1))
+        targets = [
+            target
+            for q in supp
+            for target in _get_target_recs(measurement_record, qubit_ids.data[q])
+        ]
+        targets += _get_target_recs(measurement_record, check_id, -1)
         lane, idx = lane_idx[check_id]
         circuit.append("DETECTOR", targets, (idx, lane, 0))
 
@@ -1173,7 +1228,7 @@ def _surgery_detach_and_readout(
     data_ids: tuple[int, ...],
     ancilla_ids: tuple[int, ...],
     bridge_ids: tuple[int, ...],
-    measurement_record: MeasurementRecord,
+    measurement_record: SyndromeRecord,
 ) -> stim.Circuit:
     """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
     circuit = stim.Circuit()

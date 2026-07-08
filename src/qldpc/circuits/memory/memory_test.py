@@ -128,7 +128,7 @@ def test_memory_experiment_with_parity_syndrome_record() -> None:
         basis=Pauli.Z,
         num_rounds=num_rounds,
         qubit_ids=qubit_ids,
-        syndrome_measurement_strategy=circuits.BellPairParitySyndrome(),
+        syndrome_measurement_strategy=circuits.BellPairParitySyndrome(ancilla_offset=0),
     )
 
     sampler = circuit.compile_detector_sampler()
@@ -139,57 +139,28 @@ def test_memory_experiment_with_parity_syndrome_record() -> None:
     assert observables.shape[1] == code.dimension
 
 
-# def test_memory_experiment_with_bell_pair_syndrome_for_non_css_code() -> None:
-#     """BellPairParitySyndrome works for arbitrary qubit stabilizer checks."""
-#     code = codes.FiveQubitCode()
-#     num_rounds = 3
-#     shots = 10
+def test_memory_experiment_with_bell_pair_syndrome_for_non_css_code() -> None:
+    """BellPairParitySyndrome works for arbitrary qubit stabilizer checks."""
+    code = codes.FiveQubitCode()
+    num_rounds = 3
+    shots = 10
 
-#     qubit_ids = circuits.QubitIDs.from_code(
-#         code,
-#         num_ancillas=code.dimension + code.num_checks,
-#     )
+    qubit_ids = circuits.QubitIDs.from_code(
+        code,
+        num_ancillas=code.dimension + code.num_checks,
+    )
 
-#     circuit = circuits.get_memory_experiment(
-#         code,
-#         basis=None,
-#         num_rounds=num_rounds,
-#         qubit_ids=qubit_ids,
-#         syndrome_measurement_strategy=circuits.BellPairParitySyndrome(),
-#     )
+    circuit = circuits.get_memory_experiment(
+        code,
+        basis=None,
+        num_rounds=num_rounds,
+        qubit_ids=qubit_ids,
+        syndrome_measurement_strategy=circuits.BellPairParitySyndrome(),
+    )
 
-#     sampler = circuit.compile_detector_sampler()
-#     detectors, observables = sampler.sample(shots=shots, separate_observables=True)
+    sampler = circuit.compile_detector_sampler()
+    detectors, observables = sampler.sample(shots=shots, separate_observables=True)
 
-#     assert detectors.shape[0] == observables.shape[0] == shots
-#     assert detectors.shape[1] == circuit.num_detectors == code.num_checks * (num_rounds + 1)
-#     assert observables.shape[1] == code.dimension * 2    
-
-
-# def test_memory_experiment_with_bell_pair_syndrome_for_css_fixed_basis() -> None:
-#     """BellPairParitySyndrome also works in fixed-basis CSS memory experiments."""
-#     code = codes.SteaneCode()
-#     num_rounds = 3
-#     shots = 10
-
-#     qubit_ids = circuits.QubitIDs.from_code(
-#         code,
-#         num_ancillas=code.num_checks,
-#     )
-
-#     circuit = circuits.get_memory_experiment(
-#         code,
-#         basis=Pauli.Z,
-#         num_rounds=num_rounds,
-#         qubit_ids=qubit_ids,
-#         syndrome_measurement_strategy=circuits.BellPairParitySyndrome(
-#             ancilla_offset=0,
-#         ),
-#     )
-
-#     sampler = circuit.compile_detector_sampler()
-#     detectors, observables = sampler.sample(shots=shots, separate_observables=True)
-
-#     assert detectors.shape[0] == observables.shape[0] == shots
-#     assert detectors.shape[1] == circuit.num_detectors == code.num_checks_z * (num_rounds + 1)
-#     assert observables.shape[1] == code.dimension
+    assert detectors.shape[0] == observables.shape[0] == shots
+    assert detectors.shape[1] == circuit.num_detectors == code.num_checks * (num_rounds + 1)
+    assert observables.shape[1] == code.dimension * 2

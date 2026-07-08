@@ -66,6 +66,11 @@ def test_syndrome_measurement(pytestconfig: pytest.Config) -> None:
     with pytest.raises(ValueError, match="only supports CSS codes"):
         circuits.EdgeColoringXZ().get_circuit(codes.FiveQubitCode())
 
+    # BellPairParitySyndrome strategy
+    assert syndrome_measurement_is_valid(
+        codes.FiveQubitCode(), circuits.BellPairParitySyndrome(ancilla_offset=0)
+    )
+
 
 def syndrome_measurement_is_valid(
     code: codes.QuditCode, strategy: circuits.SyndromeMeasurementStrategy = circuits.EdgeColoring()
@@ -83,7 +88,7 @@ def syndrome_measurement_is_valid(
     # measure syndromes
     syndrome_extraction, record = strategy.get_circuit(code)
     for check in range(len(code), len(code) + code.num_checks):
-        syndrome_extraction.append("DETECTOR", record.get_target_rec(check))
+        syndrome_extraction.append("DETECTOR", record.get_target_recs(check))
 
     # sample the circuit to obtain a syndrome vector
     circuit = state_prep + error_ops + syndrome_extraction

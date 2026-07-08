@@ -732,6 +732,31 @@ def test_build_joint_ppm_circuit_meas_check_ids_no_UB() -> None:
     assert dets.sum() == 0
 
 
+def test_build_joint_ppm_circuit_accepts_bell_pair_syndrome_strategy() -> None:
+    """Joint PPM can use parity-valued syndrome measurement strategies."""
+    from qldpc import circuits
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    circuit, _ = build_joint_ppm_circuit(
+        g_l,
+        g_r,
+        bridge,
+        rounds=2,
+        syndrome_measurement_strategy=circuits.BellPairParitySyndrome(ancilla_offset=0),
+    )
+
+    detectors, _ = circuit.compile_detector_sampler().sample(8, separate_observables=True)
+    assert detectors.sum() == 0
+
+
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
     """Cross-check obs0 == obs1 per shot across all 4 parity inits.
 
