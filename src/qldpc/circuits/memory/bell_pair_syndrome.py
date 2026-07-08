@@ -92,6 +92,14 @@ def _sorted_factors(factors: set[PauliFactor]) -> list[PauliFactor]:
     return sorted(factors, key=lambda factor: (factor[0], factor[1].name))
 
 
+def _validate_bell_pair_fidelity(bell_pair_fidelity: float) -> float:
+    """Validate and normalize a Bell-pair state fidelity."""
+    fidelity = float(bell_pair_fidelity)
+    if not 0 <= fidelity <= 1:
+        raise ValueError("bell_pair_fidelity must be between 0 and 1 inclusive.")
+    return fidelity
+
+
 def _append_bell_pair_check_measurement(
     circuit: stim.Circuit,
     qubit_ids: QubitIDs,
@@ -101,6 +109,7 @@ def _append_bell_pair_check_measurement(
     left_factors: Sequence[PauliFactor],
     right_factors: Sequence[PauliFactor],
     measurement_index: int,
+    bell_pair_fidelity: float = 1.0,
 ) -> tuple[int, int]:
     """Append Bell-pair measurement of one stabilizer check and return raw event indices."""
     bell_left = check_id
@@ -109,6 +118,13 @@ def _append_bell_pair_check_measurement(
     circuit.append("RZ", [bell_left, bell_right])
     circuit.append("H", [bell_left])
     circuit.append("CX", [bell_left, bell_right])
+    if bell_pair_fidelity < 1:
+        error_probability = (1 - bell_pair_fidelity) / 3
+        circuit.append(
+            "PAULI_CHANNEL_1",
+            [bell_right],
+            (error_probability, error_probability, error_probability),
+        )
     circuit.append("TICK")
 
     # One interaction on each Bell half can be done in the same scheduled layer.
@@ -152,6 +168,7 @@ class BellPairParitySyndrome(SyndromeMeasurementStrategy):
         *,
         split_support: SupportSplit = balanced_split,
         ancilla_offset: int | None = None,
+        bell_pair_fidelity: float = 1.0,
     ) -> None:
         """Initialize the Bell-pair syndrome strategy.
 
@@ -162,9 +179,12 @@ class BellPairParitySyndrome(SyndromeMeasurementStrategy):
                 None, defaults to code.dimension so the first code.dimension ancillas remain
                 available for basis=None memory experiments.  For fixed-basis CSS memory
                 experiments, set ancilla_offset=0 to avoid reserving logical Bell-pair ancillas.
+            bell_pair_fidelity: Fidelity of each prepared Bell pair with |Phi+>.  Values less than
+                one insert a one-half Pauli channel after Bell-pair preparation.
         """
         self.split_support = split_support
         self.ancilla_offset = ancilla_offset
+        self.bell_pair_fidelity = _validate_bell_pair_fidelity(bell_pair_fidelity)
 
     @restrict_to_qubits
     def get_circuit(
@@ -223,6 +243,7 @@ class BellPairParitySyndrome(SyndromeMeasurementStrategy):
                 left_factors=left_factors,
                 right_factors=right_factors,
                 measurement_index=num_measurements,
+                bell_pair_fidelity=self.bell_pair_fidelity,
             )
             num_measurements += 2
 

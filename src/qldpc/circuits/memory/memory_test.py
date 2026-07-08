@@ -164,3 +164,36 @@ def test_memory_experiment_with_bell_pair_syndrome_for_non_css_code() -> None:
     assert detectors.shape[0] == observables.shape[0] == shots
     assert detectors.shape[1] == circuit.num_detectors == code.num_checks * (num_rounds + 1)
     assert observables.shape[1] == code.dimension * 2
+
+
+def test_bell_pair_parity_syndrome_bell_pair_fidelity_noise() -> None:
+    """Bell-pair fidelity adds one Pauli channel per Bell-pair check."""
+    code = codes.FiveQubitCode()
+
+    noiseless_circuit, _ = circuits.BellPairParitySyndrome(
+        ancilla_offset=0,
+    ).get_circuit(code)
+    assert "PAULI_CHANNEL_1" not in str(noiseless_circuit)
+
+    noisy_circuit, _ = circuits.BellPairParitySyndrome(
+        ancilla_offset=0,
+        bell_pair_fidelity=0.7,
+    ).get_circuit(code)
+
+    channels = [
+        instruction
+        for instruction in noisy_circuit
+        if instruction.name == "PAULI_CHANNEL_1"
+    ]
+    assert len(channels) == code.num_checks
+    for channel in channels:
+        assert channel.gate_args_copy() == pytest.approx([0.1, 0.1, 0.1])
+
+
+@pytest.mark.parametrize("bell_pair_fidelity", [-0.1, 1.1])
+def test_bell_pair_parity_syndrome_rejects_invalid_fidelity(
+    bell_pair_fidelity: float,
+) -> None:
+    """Bell-pair fidelity must be a probability."""
+    with pytest.raises(ValueError, match="bell_pair_fidelity"):
+        circuits.BellPairParitySyndrome(bell_pair_fidelity=bell_pair_fidelity)

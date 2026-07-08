@@ -22,6 +22,7 @@ from qldpc.circuits.memory.bell_pair_syndrome import (
     PauliFactor,
     _append_bell_pair_check_measurement,
     _row_to_pauli_factors,
+    _validate_bell_pair_fidelity,
     _validate_factor_split,
 )
 from qldpc.circuits.memory.syndrome_measurement import (
@@ -65,6 +66,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         *,
         adapter_split: tuple[Sequence[int], Sequence[int]] | None = None,
         edge_coloring_strategy: str = "smallest_last",
+        bell_pair_fidelity: float = 1.0,
     ) -> None:
         if g_l.code is g_r.code:
             raise ValueError(
@@ -80,6 +82,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         self.bridge = bridge
         self.adapter_split = self._resolve_adapter_split(adapter_split, width=bridge.width)
         self.edge_coloring_strategy = edge_coloring_strategy
+        self.bell_pair_fidelity = _validate_bell_pair_fidelity(bell_pair_fidelity)
 
     @staticmethod
     def _resolve_adapter_split(
@@ -216,6 +219,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
                 left_factors=left_factors,
                 right_factors=right_factors,
                 measurement_index=num_measurements,
+                bell_pair_fidelity=self.bell_pair_fidelity,
             )
             record[check_id] = (m_left, m_right)
             num_measurements += 2

@@ -826,6 +826,52 @@ def test_joint_selective_bell_pair_syndrome_custom_adapter_split_changes_selecti
     )
 
 
+def test_joint_selective_bell_pair_syndrome_bell_pair_fidelity_noise() -> None:
+    """Selective Bell-pair syndrome adds fidelity noise only to crossing checks."""
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery import JointPPMSelectiveBellPairSyndrome
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    x = np.asarray(code_l.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, x, basis=Pauli.X)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    selected_count = len(
+        JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge).selected_check_indices(
+            joint_code
+        )
+    )
+
+    noiseless_circuit, _ = JointPPMSelectiveBellPairSyndrome(
+        g_l,
+        g_r,
+        bridge,
+    ).get_circuit(joint_code, QubitIDs.from_code(joint_code))
+    assert "PAULI_CHANNEL_1" not in str(noiseless_circuit)
+
+    noisy_circuit, _ = JointPPMSelectiveBellPairSyndrome(
+        g_l,
+        g_r,
+        bridge,
+        bell_pair_fidelity=0.7,
+    ).get_circuit(joint_code, QubitIDs.from_code(joint_code))
+
+    channels = [
+        instruction
+        for instruction in noisy_circuit
+        if instruction.name == "PAULI_CHANNEL_1"
+    ]
+    assert 0 < selected_count < joint_code.num_checks
+    assert len(channels) == selected_count
+    for channel in channels:
+        assert channel.gate_args_copy() == pytest.approx([0.1, 0.1, 0.1])
+
+
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
 def test_build_joint_ppm_circuit_with_selective_bell_pair_syndrome_noiseless(
     basis: PauliXZ,
@@ -878,6 +924,8 @@ def test_joint_selective_bell_pair_syndrome_rejects_invalid_inputs() -> None:
         JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge, adapter_split=((0,), ()))
     with pytest.raises(ValueError, match="disjoint"):
         JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge, adapter_split=((0,), (0, 1, 2)))
+    with pytest.raises(ValueError, match="bell_pair_fidelity"):
+        JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge, bell_pair_fidelity=1.1)
 
 
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
