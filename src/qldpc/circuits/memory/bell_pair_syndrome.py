@@ -92,6 +92,46 @@ def _sorted_factors(factors: set[PauliFactor]) -> list[PauliFactor]:
     return sorted(factors, key=lambda factor: (factor[0], factor[1].name))
 
 
+def _append_bell_pair_check_measurement(
+    circuit: stim.Circuit,
+    qubit_ids: QubitIDs,
+    *,
+    check_id: int,
+    bell_right: int,
+    left_factors: Sequence[PauliFactor],
+    right_factors: Sequence[PauliFactor],
+    measurement_index: int,
+) -> tuple[int, int]:
+    """Append Bell-pair measurement of one stabilizer check and return raw event indices."""
+    bell_left = check_id
+
+    # Prepare |Phi+> = (|00> + |11>) / sqrt(2) on the two Bell halves.
+    circuit.append("RZ", [bell_left, bell_right])
+    circuit.append("H", [bell_left])
+    circuit.append("CX", [bell_left, bell_right])
+    circuit.append("TICK")
+
+    # One interaction on each Bell half can be done in the same scheduled layer.
+    for left_factor, right_factor in itertools.zip_longest(left_factors, right_factors):
+        if left_factor is not None:
+            data_col, pauli = left_factor
+            circuit.append(f"C{pauli}", [bell_left, qubit_ids.data[data_col]])
+
+        if right_factor is not None:
+            data_col, pauli = right_factor
+            circuit.append(f"C{pauli}", [bell_right, qubit_ids.data[data_col]])
+
+        circuit.append("TICK")
+
+    m_left = measurement_index
+    m_right = measurement_index + 1
+
+    circuit.append("MX", [bell_left, bell_right])
+    circuit.append("TICK")
+
+    return m_left, m_right
+
+
 class BellPairParitySyndrome(SyndromeMeasurementStrategy):
     """Syndrome extraction where each check is an XOR of two Bell-half readouts.
 
@@ -167,7 +207,6 @@ class BellPairParitySyndrome(SyndromeMeasurementStrategy):
 
         for check_index, row in enumerate(stabilizer_matrix):
             check_id = qubit_ids.check[check_index]
-            bell_left = check_id
             bell_right = qubit_ids.ancilla[ancilla_offset + check_index]
 
             factors = _row_to_pauli_factors(row, num_data_qubits)
@@ -176,31 +215,17 @@ class BellPairParitySyndrome(SyndromeMeasurementStrategy):
                 *self.split_support(factors, check_index),
             )
 
-            # Prepare |Phi+> = (|00> + |11>) / sqrt(2) on the two Bell halves.
-            circuit.append("RZ", [bell_left, bell_right])
-            circuit.append("H", [bell_left])
-            circuit.append("CX", [bell_left, bell_right])
-            circuit.append("TICK")
-
-            # One interaction on each Bell half can be done in the same scheduled layer.
-            for left_factor, right_factor in itertools.zip_longest(left_factors, right_factors):
-                if left_factor is not None:
-                    data_col, pauli = left_factor
-                    circuit.append(f"C{pauli}", [bell_left, qubit_ids.data[data_col]])
-
-                if right_factor is not None:
-                    data_col, pauli = right_factor
-                    circuit.append(f"C{pauli}", [bell_right, qubit_ids.data[data_col]])
-
-                circuit.append("TICK")
-
-            m_left = num_measurements
-            m_right = num_measurements + 1
-
-            circuit.append("MX", [bell_left, bell_right])
+            m_left, m_right = _append_bell_pair_check_measurement(
+                circuit,
+                qubit_ids,
+                check_id=check_id,
+                bell_right=bell_right,
+                left_factors=left_factors,
+                right_factors=right_factors,
+                measurement_index=num_measurements,
+            )
             num_measurements += 2
 
             record[check_id] = (m_left, m_right)
-            circuit.append("TICK")
 
         return circuit, ParityMeasurementRecord(record, num_events=num_measurements)

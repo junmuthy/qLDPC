@@ -757,6 +757,129 @@ def test_build_joint_ppm_circuit_accepts_bell_pair_syndrome_strategy() -> None:
     assert detectors.sum() == 0
 
 
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_joint_selective_bell_pair_syndrome_classifies_crossing_checks(
+    basis: PauliXZ,
+) -> None:
+    """Selective Bell-pair syndrome uses Bell pairs only for left/right-crossing rows."""
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery import JointPPMSelectiveBellPairSyndrome
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    op = np.asarray(code_l.get_logical_ops(basis)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, op, basis=basis)
+    g_r = build_gadget(code_r, op, basis=basis)
+    bridge = build_bridge(g_l, g_r)
+    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    qubit_ids = QubitIDs.from_code(joint_code)
+
+    strategy = JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge)
+    _, record = strategy.get_circuit(joint_code, qubit_ids)
+    selected = set(strategy.selected_check_indices(joint_code))
+
+    m_x_l = g_l.code.matrix_x.shape[0]
+    m_x_r = g_r.code.matrix_x.shape[0]
+    m_z_l = g_l.code.matrix_z.shape[0]
+    m_z_r = g_r.code.matrix_z.shape[0]
+    original_check_rows = set(range(m_x_l + m_x_r))
+    original_check_rows.update(
+        range(joint_code.num_checks_x, joint_code.num_checks_x + m_z_l + m_z_r)
+    )
+
+    assert selected
+    assert not selected & original_check_rows
+    for check_index, check_id in enumerate(qubit_ids.check):
+        event_group = record[check_id][0]
+        expected_group_size = 2 if check_index in selected else 1
+        assert len(event_group) == expected_group_size
+
+
+def test_joint_selective_bell_pair_syndrome_custom_adapter_split_changes_selection() -> None:
+    """User-provided adapter splits change which adapter-touching rows are crossing."""
+    from qldpc.circuits.surgery import JointPPMSelectiveBellPairSyndrome
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import _stitch_to_joint_csscode
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    x = np.asarray(code_l.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, x, basis=Pauli.X)
+    g_r = build_gadget(code_r, x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+
+    default_strategy = JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge)
+    custom_strategy = JointPPMSelectiveBellPairSyndrome(
+        g_l,
+        g_r,
+        bridge,
+        adapter_split=(tuple(range(bridge.width)), ()),
+    )
+
+    assert default_strategy.selected_check_indices(joint_code) != (
+        custom_strategy.selected_check_indices(joint_code)
+    )
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_build_joint_ppm_circuit_with_selective_bell_pair_syndrome_noiseless(
+    basis: PauliXZ,
+) -> None:
+    """Selective Bell-pair syndrome works in a noiseless intercode joint PPM circuit."""
+    from qldpc.circuits.surgery import JointPPMSelectiveBellPairSyndrome
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.circuit import build_joint_ppm_circuit
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code_l = codes.SteaneCode()
+    code_r = codes.SteaneCode()
+    op = np.asarray(code_l.get_logical_ops(basis)[0]).astype(np.uint8)
+    g_l = build_gadget(code_l, op, basis=basis)
+    g_r = build_gadget(code_r, op, basis=basis)
+    bridge = build_bridge(g_l, g_r)
+    strategy = JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge)
+
+    circuit, _ = build_joint_ppm_circuit(
+        g_l,
+        g_r,
+        bridge,
+        rounds=2,
+        syndrome_measurement_strategy=strategy,
+    )
+
+    detectors, _ = circuit.compile_detector_sampler().sample(8, separate_observables=True)
+    assert detectors.sum() == 0
+
+
+def test_joint_selective_bell_pair_syndrome_rejects_invalid_inputs() -> None:
+    """Selective Bell-pair syndrome validates intracode usage and adapter splits."""
+    from qldpc.circuits.surgery import JointPPMSelectiveBellPairSyndrome
+    from qldpc.circuits.surgery.bridge import build_bridge
+    from qldpc.circuits.surgery.gadget import build_gadget
+
+    code = codes.SteaneCode()
+    x = np.asarray(code.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    g_l = build_gadget(code, x, basis=Pauli.X)
+    g_r_intracode = build_gadget(code, x, basis=Pauli.X)
+    bridge_intracode = build_bridge(g_l, g_r_intracode)
+
+    with pytest.raises(ValueError, match="intercode"):
+        JointPPMSelectiveBellPairSyndrome(g_l, g_r_intracode, bridge_intracode)
+
+    g_r = build_gadget(codes.SteaneCode(), x, basis=Pauli.X)
+    bridge = build_bridge(g_l, g_r)
+
+    with pytest.raises(ValueError, match="cover"):
+        JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge, adapter_split=((0,), ()))
+    with pytest.raises(ValueError, match="disjoint"):
+        JointPPMSelectiveBellPairSyndrome(g_l, g_r, bridge, adapter_split=((0,), (0, 1, 2)))
+
+
 def test_build_joint_ppm_circuit_intercode_noiseless_observables_zero() -> None:
     """Cross-check obs0 == obs1 per shot across all 4 parity inits.
 

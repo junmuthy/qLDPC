@@ -7,6 +7,8 @@ References:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import stim
 
@@ -16,13 +18,19 @@ from qldpc.circuits.bookkeeping import (
     ParityMeasurementRecord,
     QubitIDs,
 )
+from qldpc.circuits.memory.bell_pair_syndrome import (
+    PauliFactor,
+    _append_bell_pair_check_measurement,
+    _row_to_pauli_factors,
+    _validate_factor_split,
+)
 from qldpc.circuits.memory.syndrome_measurement import (
     EdgeColoring,
     SyndromeMeasurementStrategy,
     SyndromeRecord,
 )
 from qldpc.circuits.noise_model import NoiseModel
-from qldpc.codes.common import CSSCode
+from qldpc.codes.common import CSSCode, QuditCode
 from qldpc.objects import Pauli
 
 from .bridge import Bridge
@@ -44,6 +52,175 @@ def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
         g.HZ_merged.astype(np.int_),
         is_subsystem_code=False,
     )
+
+
+class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
+    """Hybrid joint-PPM syndrome strategy with Bell pairs only on crossing checks."""
+
+    def __init__(
+        self,
+        g_l: GadgetLayout,
+        g_r: GadgetLayout,
+        bridge: Bridge,
+        *,
+        adapter_split: tuple[Sequence[int], Sequence[int]] | None = None,
+        edge_coloring_strategy: str = "smallest_last",
+    ) -> None:
+        if g_l.code is g_r.code:
+            raise ValueError(
+                "JointPPMSelectiveBellPairSyndrome only supports intercode joint PPM."
+            )
+        if bridge.basis is not g_l.basis or bridge.basis is not g_r.basis:
+            raise ValueError(
+                "JointPPMSelectiveBellPairSyndrome requires matching bridge/gadget bases."
+            )
+
+        self.g_l = g_l
+        self.g_r = g_r
+        self.bridge = bridge
+        self.adapter_split = self._resolve_adapter_split(adapter_split, width=bridge.width)
+        self.edge_coloring_strategy = edge_coloring_strategy
+
+    @staticmethod
+    def _resolve_adapter_split(
+        adapter_split: tuple[Sequence[int], Sequence[int]] | None,
+        *,
+        width: int,
+    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        midpoint = (width + 1) // 2
+        default_split = (tuple(range(midpoint)), tuple(range(midpoint, width)))
+        left, right = default_split if adapter_split is None else adapter_split
+
+        left_tuple = tuple(int(index) for index in left)
+        right_tuple = tuple(int(index) for index in right)
+        expected = set(range(width))
+        actual_left = set(left_tuple)
+        actual_right = set(right_tuple)
+
+        if actual_left & actual_right:
+            raise ValueError("adapter_split entries must be disjoint.")
+        if actual_left | actual_right != expected:
+            raise ValueError(
+                "adapter_split must cover every adapter index exactly once. "
+                f"Expected {sorted(expected)}, got {sorted(actual_left | actual_right)}."
+            )
+        if len(actual_left) != len(left_tuple) or len(actual_right) != len(right_tuple):
+            raise ValueError("adapter_split must not contain duplicate adapter indices.")
+
+        return left_tuple, right_tuple
+
+    def _column_partition(self) -> tuple[set[int], set[int], int]:
+        n_l = self.g_l.code.num_qudits
+        n_r = self.g_r.code.num_qudits
+        k_l = self.bridge.g_l_aug.incidence.shape[0]
+        k_r = self.bridge.g_r_aug.incidence.shape[0]
+        adapter_start = n_l + n_r + k_l + k_r
+
+        adapter_left, adapter_right = self.adapter_split
+        left_cols = set(range(n_l))
+        left_cols.update(range(n_l + n_r, n_l + n_r + k_l))
+        left_cols.update(adapter_start + index for index in adapter_left)
+
+        right_cols = set(range(n_l, n_l + n_r))
+        right_cols.update(range(n_l + n_r + k_l, n_l + n_r + k_l + k_r))
+        right_cols.update(adapter_start + index for index in adapter_right)
+
+        return left_cols, right_cols, adapter_start + self.bridge.width
+
+    def selected_check_indices(self, code: CSSCode) -> tuple[int, ...]:
+        """Global check-row indices selected for Bell-pair measurement."""
+        left_cols, right_cols, expected_num_qubits = self._column_partition()
+        if len(code) != expected_num_qubits:
+            raise ValueError(
+                "JointPPMSelectiveBellPairSyndrome got a code with incompatible size. "
+                f"Expected {expected_num_qubits} data qubits, got {len(code)}."
+            )
+
+        selected: list[int] = []
+        matrix = np.asarray(code.matrix, dtype=np.uint8) % 2
+        for check_index, row in enumerate(matrix):
+            factors = _row_to_pauli_factors(row, len(code))
+            support = {col for col, _ in factors}
+            if support & left_cols and support & right_cols:
+                selected.append(check_index)
+        return tuple(selected)
+
+    def _split_factors(
+        self,
+        factors: tuple[PauliFactor, ...],
+    ) -> tuple[tuple[PauliFactor, ...], tuple[PauliFactor, ...]]:
+        left_cols, right_cols, _ = self._column_partition()
+        left_factors = tuple(factor for factor in factors if factor[0] in left_cols)
+        right_factors = tuple(factor for factor in factors if factor[0] in right_cols)
+        return _validate_factor_split(factors, left_factors, right_factors)
+
+    def get_circuit(
+        self,
+        code: QuditCode,
+        qubit_ids: QubitIDs | None = None,
+    ) -> tuple[stim.Circuit, ParityMeasurementRecord]:
+        if not isinstance(code, CSSCode):
+            raise ValueError("JointPPMSelectiveBellPairSyndrome only supports CSS codes.")
+        if getattr(code.field, "order", None) != 2:
+            raise ValueError("JointPPMSelectiveBellPairSyndrome only supports qubit codes.")
+
+        qubit_ids = qubit_ids or QubitIDs.from_code(code)
+        qubit_ids = QubitIDs.validated(qubit_ids, code)
+
+        selected_indices = set(self.selected_check_indices(code))
+        qubit_ids.add_ancillas(len(selected_indices) - len(qubit_ids.ancilla))
+
+        circuit = stim.Circuit()
+        record: dict[int, tuple[int, ...]] = {}
+        num_measurements = 0
+
+        nonselected_indices = [
+            check_index
+            for check_index in range(code.num_checks)
+            if check_index not in selected_indices
+        ]
+        nonselected_ids = [qubit_ids.check[check_index] for check_index in nonselected_indices]
+
+        if nonselected_ids:
+            circuit.append("RX", nonselected_ids)
+            nonselected_set = set(nonselected_indices)
+            for subgraph in code.get_syndrome_subgraphs():
+                edges = [
+                    edge
+                    for edge in subgraph.edges
+                    if (edge[0] if not edge[0].is_data else edge[1]).index in nonselected_set
+                ]
+                if edges:
+                    circuit += EdgeColoring.graph_to_circuit(
+                        subgraph.edge_subgraph(edges).copy(),
+                        qubit_ids,
+                        self.edge_coloring_strategy,
+                    )
+            circuit.append("MX", nonselected_ids)
+
+            for offset, check_index in enumerate(nonselected_indices):
+                record[qubit_ids.check[check_index]] = (num_measurements + offset,)
+            num_measurements += len(nonselected_indices)
+
+        matrix = np.asarray(code.matrix, dtype=np.uint8) % 2
+        for bell_index, check_index in enumerate(sorted(selected_indices)):
+            check_id = qubit_ids.check[check_index]
+            bell_right = qubit_ids.ancilla[bell_index]
+            factors = _row_to_pauli_factors(matrix[check_index], len(code))
+            left_factors, right_factors = self._split_factors(factors)
+            m_left, m_right = _append_bell_pair_check_measurement(
+                circuit,
+                qubit_ids,
+                check_id=check_id,
+                bell_right=bell_right,
+                left_factors=left_factors,
+                right_factors=right_factors,
+                measurement_index=num_measurements,
+            )
+            record[check_id] = (m_left, m_right)
+            num_measurements += 2
+
+        return circuit, ParityMeasurementRecord(record, num_events=num_measurements)
 
 
 def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
