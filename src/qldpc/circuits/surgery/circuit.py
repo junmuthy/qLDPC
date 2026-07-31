@@ -7,11 +7,13 @@ References:
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import stim
 
 from qldpc.circuits.bookkeeping import DetectorRecord, MeasurementRecord, QubitIDs
-from qldpc.circuits.memory.syndrome_measurement import EdgeColoring
+from qldpc.circuits.memory.syndrome_measurement import EdgeColoring, SyndromeMeasurementStrategy
 from qldpc.circuits.noise_model import NoiseModel
 from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
@@ -26,6 +28,25 @@ def _gadget_merged_csscode(g: GadgetLayout) -> CSSCode:
         g.HZ_merged.astype(np.int_),
         is_subsystem_code=False,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class JointPPMResourceCircuit:
+    """Costing-oriented joint-PPM circuit with preserved code data.
+
+    The circuit prepares and measures only temporary gadget and bridge data.
+    It ends with one syndrome-extraction round on the original separate code
+    blocks so callers can cost the transition back out of the joint code.
+    Detector transitions and measurement-dependent Pauli-frame updates are
+    intentionally outside this resource-only representation.
+    """
+
+    circuit: stim.Circuit
+    joint_code: CSSCode
+    left_data_ids: tuple[int, ...]
+    right_data_ids: tuple[int, ...]
+    temporary_ids: tuple[int, ...]
+    parity_observable_index: int = 0
 
 
 def keep_only_observable(circuit: stim.Circuit, keep_idx: int) -> stim.Circuit:
@@ -783,6 +804,118 @@ def build_joint_ppm_circuit(
     return circuit, joint_code
 
 
+def build_joint_ppm_resource_circuit(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+    *,
+    rounds: int,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+    separate_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+) -> JointPPMResourceCircuit:
+    """Build a cost-only joint-PPM circuit that preserves both code blocks.
+
+    Unlike :func:`build_joint_ppm_circuit`, this circuit does not initialize or
+    measure the input code data. It initializes the temporary gadget and bridge
+    qubits, runs the requested joint-code syndrome rounds, records the physical
+    parity observable, detaches the temporary qubits, and performs one ordinary
+    syndrome-extraction round on the original separate code blocks.
+
+    Measurement-conditioned Pauli corrections are represented by the caller's
+    correction-cost policy and are not materialized in this static circuit.
+    """
+    if rounds < 1:
+        raise ValueError(f"rounds must be positive, got {rounds}")
+
+    joint_code = _stitch_to_joint_csscode(g_l, g_r, bridge)
+    qubit_ids = QubitIDs.from_code(joint_code)
+    intercode = g_l.code is not g_r.code
+
+    n_l = g_l.code.num_qudits
+    n_r = g_r.code.num_qudits if intercode else 0
+    k_l = bridge.g_l_aug.incidence.shape[0]
+    k_r = bridge.g_r_aug.incidence.shape[0]
+
+    data_ids = qubit_ids.data[: n_l + n_r]
+    left_data_ids = tuple(data_ids[:n_l])
+    right_data_ids = tuple(data_ids[n_l:]) if intercode else left_data_ids
+    ancilla_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
+    bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
+    temporary_ids = tuple(ancilla_ids) + tuple(bridge_ids)
+
+    circuit = _surgery_qubit_coordinates(
+        g_l,
+        qubit_ids,
+        joint=(g_r, bridge, intercode),
+    )
+    circuit += _surgery_temporary_prep(g_l, ancilla_ids, bridge_ids)
+
+    qec_cycle, measurement_record, _ = _surgery_qec_cycle_joint(
+        g_l,
+        g_r,
+        joint_code,
+        bridge,
+        num_rounds=rounds,
+        qubit_ids=qubit_ids,
+        intercode=intercode,
+        syndrome_measurement_strategy=syndrome_measurement_strategy,
+    )
+    circuit += qec_cycle
+
+    if bridge.basis is Pauli.X:
+        check_ids = qubit_ids.checks_x
+        m_l = g_l.code.matrix_x.shape[0]
+        m_r = g_r.code.matrix_x.shape[0] if intercode else 0
+    else:
+        check_ids = qubit_ids.checks_z
+        m_l = g_l.code.matrix_z.shape[0]
+        m_r = g_r.code.matrix_z.shape[0] if intercode else 0
+    n_V_l = len(g_l.support)
+    n_V_r = len(g_r.support)
+    meas_l_offset = m_l + m_r
+    meas_r_offset = meas_l_offset + n_V_l
+    meas_check_ids = tuple(check_ids[meas_l_offset : meas_l_offset + n_V_l]) + tuple(
+        check_ids[meas_r_offset : meas_r_offset + n_V_r]
+    )
+    parity_targets = [measurement_record.get_target_rec(check_id) for check_id in meas_check_ids]
+    circuit.append("OBSERVABLE_INCLUDE", parity_targets, 0)
+
+    circuit += _surgery_detach(
+        g_l,
+        ancilla_ids=ancilla_ids,
+        bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
+    circuit.append("SHIFT_COORDS", [], (0, 0, 1))
+    circuit.append("TICK")
+
+    m_X_l = g_l.code.matrix_x.shape[0]
+    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
+    m_Z_l = g_l.code.matrix_z.shape[0]
+    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
+    original_check_ids = tuple(qubit_ids.checks_x[: m_X_l + m_X_r]) + tuple(
+        qubit_ids.checks_z[: m_Z_l + m_Z_r]
+    )
+    separated_code = (
+        CSSCode.stack((g_l.code, g_r.code), inherit_logicals=False) if intercode else g_l.code
+    )
+    separated_qubit_ids = QubitIDs.validated(
+        QubitIDs(data_ids, original_check_ids),
+        separated_code,
+    )
+    separate_strategy = separate_syndrome_measurement_strategy or EdgeColoring()
+    separate_round, _ = separate_strategy.get_circuit(separated_code, separated_qubit_ids)
+    circuit += separate_round
+
+    return JointPPMResourceCircuit(
+        circuit=circuit,
+        joint_code=joint_code,
+        left_data_ids=left_data_ids,
+        right_data_ids=right_data_ids,
+        temporary_ids=temporary_ids,
+    )
+
+
 def _classify_reliable_round1_checks_joint(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -824,10 +957,11 @@ def _surgery_qec_cycle_joint(
     qubit_ids: QubitIDs,
     *,
     intercode: bool,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
 ) -> tuple[stim.Circuit, MeasurementRecord, DetectorRecord]:
     """Joint-code variant of _surgery_qec_cycle that classifies reliable checks
     across both gadgets + the bridge's new cycle-checks."""
-    strategy = EdgeColoring()
+    strategy = syndrome_measurement_strategy or EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(joint_code, qubit_ids)
     reliable = set(
         _classify_reliable_round1_checks_joint(
@@ -950,6 +1084,20 @@ def _classify_reliable_round1_checks(
     return tuple(reliable_x) + tuple(reliable_z)
 
 
+def _surgery_temporary_prep(
+    gadget: GadgetLayout,
+    ancilla_ids: tuple[int, ...],
+    bridge_ids: tuple[int, ...] = (),
+) -> stim.Circuit:
+    """Initialize only the temporary gadget and bridge data qubits."""
+    temporary_ids = tuple(ancilla_ids) + tuple(bridge_ids)
+    circuit = stim.Circuit()
+    if temporary_ids:
+        init_op = "R" if gadget.basis is Pauli.X else "RX"
+        circuit.append(init_op, temporary_ids)
+    return circuit
+
+
 def _surgery_state_prep(
     gadget: GadgetLayout,
     data_ids: tuple[int, ...],
@@ -1020,11 +1168,7 @@ def _surgery_state_prep(
     if z_after:
         circuit.append("Z", z_after)
 
-    anc_ids = list(ancilla_ids) + (list(bridge_ids) if bridge_ids else [])
-    if anc_ids:
-        anc_init = "R" if gadget.basis is Pauli.X else "RX"
-        circuit.append(anc_init, anc_ids)
-
+    circuit += _surgery_temporary_prep(gadget, ancilla_ids, bridge_ids)
     return circuit
 
 
@@ -1167,6 +1311,23 @@ def _surgery_final_detectors(
     return circuit
 
 
+def _surgery_detach(
+    gadget: GadgetLayout,
+    *,
+    ancilla_ids: tuple[int, ...],
+    bridge_ids: tuple[int, ...],
+    measurement_record: MeasurementRecord,
+) -> stim.Circuit:
+    """Measure temporary gadget and bridge data without measuring code data."""
+    circuit = stim.Circuit()
+    detach_qubits = tuple(ancilla_ids) + tuple(bridge_ids)
+    if detach_qubits:
+        ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
+        circuit.append(ancilla_op, detach_qubits)
+        measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
+    return circuit
+
+
 def _surgery_detach_and_readout(
     gadget: GadgetLayout,
     *,
@@ -1176,12 +1337,13 @@ def _surgery_detach_and_readout(
     measurement_record: MeasurementRecord,
 ) -> stim.Circuit:
     """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
-    circuit = stim.Circuit()
-    detach_qubits = list(ancilla_ids) + list(bridge_ids)
-    ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
+    circuit = _surgery_detach(
+        gadget,
+        ancilla_ids=ancilla_ids,
+        bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
     data_op = "MX" if gadget.basis is Pauli.X else "M"
-    circuit.append(ancilla_op, detach_qubits)
-    measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append(data_op, list(data_ids))
     measurement_record.append({q: i for i, q in enumerate(data_ids)})

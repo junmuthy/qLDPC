@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import numpy as np
 import pytest
 import stim
@@ -56,6 +58,96 @@ def test_build_single_ppm_circuit_with_noise_detectors_fire() -> None:
     )
     samples = circuit.compile_detector_sampler().sample(shots=200)
     assert samples.any()  # at least one detector fires under noise
+
+
+@pytest.mark.parametrize(
+    ("basis", "temporary_init", "temporary_measure"),
+    [
+        (Pauli.X, "R", "M"),
+        (Pauli.Z, "RX", "MX"),
+    ],
+)
+def test_build_joint_ppm_resource_circuit_preserves_data(
+    basis: PauliXZ,
+    temporary_init: str,
+    temporary_measure: str,
+) -> None:
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery import (
+        build_bridge,
+        build_gadget,
+        build_joint_ppm_resource_circuit,
+    )
+
+    code_l = codes.SurfaceCode(3)
+    code_r = codes.SurfaceCode(3)
+    logical_l = np.asarray(code_l.get_logical_ops(basis)[0]).astype(np.uint8)
+    logical_r = np.asarray(code_r.get_logical_ops(basis)[0]).astype(np.uint8)
+    gadget_l = build_gadget(code_l, logical_l, basis=basis)
+    gadget_r = build_gadget(code_r, logical_r, basis=basis)
+    bridge = build_bridge(gadget_l, gadget_r)
+    rounds = 3
+
+    resource = build_joint_ppm_resource_circuit(
+        gadget_l,
+        gadget_r,
+        bridge,
+        rounds=rounds,
+    )
+    circuit = resource.circuit.flattened()
+    data_ids = set(resource.left_data_ids) | set(resource.right_data_ids)
+    temporary_ids = set(resource.temporary_ids)
+
+    targets_by_instruction: dict[str, set[int]] = {}
+    for instruction in circuit:
+        targets_by_instruction.setdefault(instruction.name, set()).update(
+            target.value for target in instruction.targets_copy() if target.is_qubit_target
+        )
+
+    for destructive_instruction in ("R", "RX", "M", "MX"):
+        assert not data_ids & targets_by_instruction.get(destructive_instruction, set())
+    assert temporary_ids <= targets_by_instruction[temporary_init]
+    assert temporary_ids <= targets_by_instruction[temporary_measure]
+
+    joint_qubit_ids = QubitIDs.from_code(resource.joint_code)
+    original_x_checks = code_l.matrix_x.shape[0] + code_r.matrix_x.shape[0]
+    original_z_checks = code_l.matrix_z.shape[0] + code_r.matrix_z.shape[0]
+    original_check_ids = tuple(joint_qubit_ids.checks_x[:original_x_checks]) + tuple(
+        joint_qubit_ids.checks_z[:original_z_checks]
+    )
+    reset_counts = Counter(
+        target.value
+        for instruction in circuit
+        if instruction.name == "RX"
+        for target in instruction.targets_copy()
+        if target.is_qubit_target
+    )
+    assert all(reset_counts[check_id] == rounds + 1 for check_id in original_check_ids)
+
+    observables = [
+        instruction for instruction in circuit if instruction.name == "OBSERVABLE_INCLUDE"
+    ]
+    assert len(observables) == 1
+    assert observables[0].gate_args_copy() == [0.0]
+
+
+def test_build_joint_ppm_resource_circuit_rejects_nonpositive_rounds() -> None:
+    from qldpc.circuits.surgery import (
+        build_bridge,
+        build_gadget,
+        build_joint_ppm_resource_circuit,
+    )
+
+    code_l = codes.SurfaceCode(3)
+    code_r = codes.SurfaceCode(3)
+    logical_l = np.asarray(code_l.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    logical_r = np.asarray(code_r.get_logical_ops(Pauli.X)[0]).astype(np.uint8)
+    gadget_l = build_gadget(code_l, logical_l, basis=Pauli.X)
+    gadget_r = build_gadget(code_r, logical_r, basis=Pauli.X)
+    bridge = build_bridge(gadget_l, gadget_r)
+
+    with pytest.raises(ValueError, match="rounds must be positive"):
+        build_joint_ppm_resource_circuit(gadget_l, gadget_r, bridge, rounds=0)
 
 
 def test_classify_reliable_round1_checks_basis_x() -> None:
