@@ -122,7 +122,7 @@ def test_build_joint_ppm_resource_circuit_preserves_data(
         for target in instruction.targets_copy()
         if target.is_qubit_target
     )
-    assert all(reset_counts[check_id] == rounds + 1 for check_id in original_check_ids)
+    assert all(reset_counts[check_id] == rounds for check_id in original_check_ids)
 
     observables = [
         instruction for instruction in circuit if instruction.name == "OBSERVABLE_INCLUDE"

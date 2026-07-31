@@ -35,9 +35,8 @@ class JointPPMResourceCircuit:
     """Costing-oriented joint-PPM circuit with preserved code data.
 
     The circuit prepares and measures only temporary gadget and bridge data.
-    It ends with one syndrome-extraction round on the original separate code
-    blocks so callers can cost the transition back out of the joint code.
-    Detector transitions and measurement-dependent Pauli-frame updates are
+    Syndrome extraction on the original separate code blocks, detector
+    transitions, and measurement-dependent Pauli-frame updates are
     intentionally outside this resource-only representation.
     """
 
@@ -811,15 +810,14 @@ def build_joint_ppm_resource_circuit(
     *,
     rounds: int,
     syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
-    separate_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
 ) -> JointPPMResourceCircuit:
     """Build a cost-only joint-PPM circuit that preserves both code blocks.
 
     Unlike :func:`build_joint_ppm_circuit`, this circuit does not initialize or
     measure the input code data. It initializes the temporary gadget and bridge
     qubits, runs the requested joint-code syndrome rounds, records the physical
-    parity observable, detaches the temporary qubits, and performs one ordinary
-    syndrome-extraction round on the original separate code blocks.
+    parity observable, and detaches the temporary qubits. Ordinary syndrome
+    extraction on the separate code blocks is the caller's responsibility.
 
     Measurement-conditioned Pauli corrections are represented by the caller's
     correction-cost policy and are not materialized in this static circuit.
@@ -888,24 +886,6 @@ def build_joint_ppm_resource_circuit(
     )
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append("TICK")
-
-    m_X_l = g_l.code.matrix_x.shape[0]
-    m_X_r = g_r.code.matrix_x.shape[0] if intercode else 0
-    m_Z_l = g_l.code.matrix_z.shape[0]
-    m_Z_r = g_r.code.matrix_z.shape[0] if intercode else 0
-    original_check_ids = tuple(qubit_ids.checks_x[: m_X_l + m_X_r]) + tuple(
-        qubit_ids.checks_z[: m_Z_l + m_Z_r]
-    )
-    separated_code = (
-        CSSCode.stack((g_l.code, g_r.code), inherit_logicals=False) if intercode else g_l.code
-    )
-    separated_qubit_ids = QubitIDs.validated(
-        QubitIDs(data_ids, original_check_ids),
-        separated_code,
-    )
-    separate_strategy = separate_syndrome_measurement_strategy or EdgeColoring()
-    separate_round, _ = separate_strategy.get_circuit(separated_code, separated_qubit_ids)
-    circuit += separate_round
 
     return JointPPMResourceCircuit(
         circuit=circuit,
