@@ -2117,3 +2117,198 @@ def test_single_ppm_dem_ok_bb_36_8_with_boost() -> None:
     stripped = keep_only_observable(circuit, keep_idx=0)
     dem = stripped.detector_error_model(approximate_disjoint_errors=True)
     assert dem.num_detectors > 0
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_preinitialized_joint_ppm_arbitrary_css_pair_noiseless(basis: PauliXZ) -> None:
+    """Independent Surface/Steane inputs join without a detector gap."""
+    from qldpc.circuits.surgery import (
+        JointPPMSelectiveBellPairSyndrome,
+        build_bridge,
+        build_gadget,
+        build_preinitialized_joint_ppm_circuit,
+        keep_only_observable,
+    )
+
+    code_l = codes.SurfaceCode(3)
+    code_r = codes.SteaneCode()
+    logical_l = np.asarray(code_l.get_logical_ops(basis)[0], dtype=np.uint8)
+    logical_r = np.asarray(code_r.get_logical_ops(basis)[0], dtype=np.uint8)
+    gadget_l = build_gadget(code_l, logical_l, basis=basis)
+    gadget_r = build_gadget(code_r, logical_r, basis=basis)
+    bridge = build_bridge(gadget_l, gadget_r)
+    strategy = JointPPMSelectiveBellPairSyndrome(gadget_l, gadget_r, bridge)
+
+    circuit, _ = build_preinitialized_joint_ppm_circuit(
+        gadget_l,
+        gadget_r,
+        bridge,
+        preparation_rounds=2,
+        surgery_rounds=2,
+        surgery_syndrome_measurement_strategy=strategy,
+    )
+    circuit = keep_only_observable(circuit, keep_idx=0)
+    detectors, observables = circuit.compile_detector_sampler().sample(
+        shots=16,
+        separate_observables=True,
+    )
+    assert detectors.sum() == 0
+    assert observables.sum() == 0
+    assert circuit.detector_error_model().num_detectors == circuit.num_detectors
+
+
+def test_preinitialized_joint_ppm_same_css_object_is_two_blocks() -> None:
+    """Physical block separation is explicit and does not depend on object identity."""
+    from qldpc.circuits.surgery import (
+        JointPPMSelectiveBellPairSyndrome,
+        build_bridge,
+        build_gadget,
+        build_preinitialized_joint_ppm_circuit,
+    )
+
+    code = codes.SteaneCode()
+    logical = np.asarray(code.get_logical_ops(Pauli.X)[0], dtype=np.uint8)
+    gadget_l = build_gadget(code, logical, basis=Pauli.X)
+    gadget_r = build_gadget(code, logical, basis=Pauli.X)
+    bridge = build_bridge(gadget_l, gadget_r)
+    strategy = JointPPMSelectiveBellPairSyndrome(
+        gadget_l,
+        gadget_r,
+        bridge,
+        independent_blocks=True,
+    )
+
+    circuit, joint_code = build_preinitialized_joint_ppm_circuit(
+        gadget_l,
+        gadget_r,
+        bridge,
+        preparation_rounds=2,
+        surgery_rounds=2,
+        surgery_syndrome_measurement_strategy=strategy,
+    )
+    assert len(joint_code) >= 2 * code.num_qudits
+    detectors, _ = circuit.compile_detector_sampler().sample(
+        shots=8,
+        separate_observables=True,
+    )
+    assert detectors.sum() == 0
+
+
+def test_preinitialized_joint_ppm_intrinsic_noise_window() -> None:
+    """Intrinsic noise starts after preparation and stops before diagnostic readout."""
+    from qldpc.circuits.noise_model import DepolarizingNoiseModel
+    from qldpc.circuits.surgery import (
+        JointPPMSelectiveBellPairSyndrome,
+        build_bridge,
+        build_gadget,
+        build_preinitialized_joint_ppm_circuit,
+        keep_only_observable,
+    )
+
+    code_l = codes.SurfaceCode(3)
+    code_r = codes.SteaneCode()
+    logical_l = np.asarray(code_l.get_logical_ops(Pauli.X)[0], dtype=np.uint8)
+    logical_r = np.asarray(code_r.get_logical_ops(Pauli.X)[0], dtype=np.uint8)
+    gadget_l = build_gadget(code_l, logical_l, basis=Pauli.X)
+    gadget_r = build_gadget(code_r, logical_r, basis=Pauli.X)
+    bridge = build_bridge(gadget_l, gadget_r)
+    strategy = JointPPMSelectiveBellPairSyndrome(gadget_l, gadget_r, bridge)
+    noise = DepolarizingNoiseModel(1e-3)
+
+    circuit, _ = build_preinitialized_joint_ppm_circuit(
+        gadget_l,
+        gadget_r,
+        bridge,
+        preparation_rounds=2,
+        surgery_rounds=2,
+        adapter_noise_model=noise,
+        surgery_syndrome_measurement_strategy=strategy,
+    )
+    circuit = keep_only_observable(circuit, keep_idx=0)
+    flattened = list(circuit.flattened())
+    noise_names = {
+        "DEPOLARIZE1",
+        "DEPOLARIZE2",
+        "X_ERROR",
+        "Y_ERROR",
+        "Z_ERROR",
+        "PAULI_CHANNEL_1",
+        "PAULI_CHANNEL_2",
+    }
+    measurements_before_first_noise = 0
+    for instruction in flattened:
+        if instruction.name in noise_names:
+            break
+        measurements_before_first_noise += instruction.num_measurements
+    expected_preparation_measurements = 2 * (code_l.num_checks + code_r.num_checks)
+    assert measurements_before_first_noise == expected_preparation_measurements
+
+    measurements_seen = 0
+    original_data = set(range(code_l.num_qudits + code_r.num_qudits))
+    for instruction in flattened:
+        if measurements_seen >= expected_preparation_measurements and instruction.name in {
+            "R",
+            "RX",
+        }:
+            reset_targets = {
+                target.qubit_value
+                for target in instruction.targets_copy()
+                if target.qubit_value is not None
+            }
+            assert reset_targets.isdisjoint(original_data)
+        measurements_seen += instruction.num_measurements
+
+    terminal_measurement = next(
+        instruction for instruction in reversed(flattened) if instruction.name in {"M", "MX"}
+    )
+    assert terminal_measurement.gate_args_copy() == []
+    dem = circuit.detector_error_model()
+    assert dem.num_errors > 0
+    assert dem.num_detectors == circuit.num_detectors
+
+
+def test_preinitialized_joint_ppm_detector_count_includes_merge_boundary() -> None:
+    """Every original stabilizer is constrained across the independent-to-joint merge."""
+    from qldpc.circuits.bookkeeping import QubitIDs
+    from qldpc.circuits.surgery import build_bridge, build_gadget
+    from qldpc.circuits.surgery.circuit import (
+        _classify_reliable_round1_checks_joint,
+        build_preinitialized_joint_ppm_circuit,
+    )
+
+    preparation_rounds = 3
+    surgery_rounds = 2
+    code_l = codes.SurfaceCode(3)
+    code_r = codes.SteaneCode()
+    logical_l = np.asarray(code_l.get_logical_ops(Pauli.X)[0], dtype=np.uint8)
+    logical_r = np.asarray(code_r.get_logical_ops(Pauli.X)[0], dtype=np.uint8)
+    gadget_l = build_gadget(code_l, logical_l, basis=Pauli.X)
+    gadget_r = build_gadget(code_r, logical_r, basis=Pauli.X)
+    bridge = build_bridge(gadget_l, gadget_r)
+    circuit, joint_code = build_preinitialized_joint_ppm_circuit(
+        gadget_l,
+        gadget_r,
+        bridge,
+        preparation_rounds=preparation_rounds,
+        surgery_rounds=surgery_rounds,
+    )
+
+    qubit_ids = QubitIDs.from_code(joint_code)
+    reliable_joint = _classify_reliable_round1_checks_joint(
+        gadget_l,
+        gadget_r,
+        qubit_ids,
+        intercode=True,
+    )
+    original_basis_checks = code_l.num_checks_x + code_r.num_checks_x
+    original_checks = code_l.num_checks + code_r.num_checks
+    new_reliable_checks = len(reliable_joint) - original_basis_checks
+    expected_detectors = (
+        original_basis_checks
+        + (preparation_rounds - 1) * original_checks
+        + original_checks
+        + new_reliable_checks
+        + (surgery_rounds - 1) * joint_code.num_checks
+        + len(reliable_joint)
+    )
+    assert circuit.num_detectors == expected_detectors

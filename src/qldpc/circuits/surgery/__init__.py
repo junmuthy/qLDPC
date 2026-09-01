@@ -4,6 +4,7 @@ docs/superpowers/specs/2026-06-07-surgery-simplification-design.md).
 Public API:
     build_gadget, build_bridge,
     build_single_ppm_circuit, build_joint_ppm_circuit,
+    build_preinitialized_joint_ppm_circuit,
     JointPPMSelectiveBellPairSyndrome,
     keep_only_observable,
     boost_gadget, cheeger_constant
@@ -16,6 +17,7 @@ from .cheeger import boost_gadget, cheeger_constant
 from .circuit import (
     JointPPMSelectiveBellPairSyndrome,
     build_joint_ppm_circuit,
+    build_preinitialized_joint_ppm_circuit,
     build_single_ppm_circuit,
     keep_only_observable,
     logical_state_init,
@@ -30,6 +32,7 @@ __all__ = [
     "JointPPMSelectiveBellPairSyndrome",
     "build_single_ppm_circuit",
     "build_joint_ppm_circuit",
+    "build_preinitialized_joint_ppm_circuit",
     "keep_only_observable",
     "logical_state_init",
     "boost_gadget",

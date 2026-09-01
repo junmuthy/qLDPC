@@ -7,7 +7,7 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 import numpy as np
 import stim
@@ -64,13 +64,17 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         g_r: GadgetLayout,
         bridge: Bridge,
         *,
+        independent_blocks: bool = False,
         adapter_split: tuple[Sequence[int], Sequence[int]] | None = None,
         edge_coloring_strategy: str = "smallest_last",
         bell_pair_fidelity: float = 1.0,
     ) -> None:
-        if g_l.code is g_r.code:
+        if g_l.code is g_r.code and not independent_blocks:
             raise ValueError(
-                "JointPPMSelectiveBellPairSyndrome only supports intercode joint PPM."
+                "JointPPMSelectiveBellPairSyndrome only supports intercode/independent "
+                "code blocks. "
+                "Pass independent_blocks=True when two physical blocks intentionally use "
+                "the same CSSCode object."
             )
         if bridge.basis is not g_l.basis or bridge.basis is not g_r.basis:
             raise ValueError(
@@ -80,6 +84,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         self.g_l = g_l
         self.g_r = g_r
         self.bridge = bridge
+        self.independent_blocks = independent_blocks or g_l.code is not g_r.code
         self.adapter_split = self._resolve_adapter_split(adapter_split, width=bridge.width)
         self.edge_coloring_strategy = edge_coloring_strategy
         self.bell_pair_fidelity = _validate_bell_pair_fidelity(bell_pair_fidelity)
@@ -631,7 +636,6 @@ def build_single_ppm_circuit(
 
 def _stitch_intercode(g_l: GadgetLayout, g_r: GadgetLayout, bridge: Bridge) -> CSSCode:
     """Inter-code joint stitch (g_l.code is not g_r.code). Handles both bases."""
-    assert g_l.code is not g_r.code
     field = g_l.code.field
     g_l_aug, g_r_aug = bridge.g_l_aug, bridge.g_r_aug
 
@@ -862,6 +866,115 @@ def _expand_joint_data_init(
     return spec_l + spec_r
 
 
+def _direct_sum_css_codes(code_l: CSSCode, code_r: CSSCode) -> CSSCode:
+    """Direct sum of two binary CSS codes, with left rows before right rows."""
+    if getattr(code_l.field, "order", None) != 2 or getattr(code_r.field, "order", None) != 2:
+        raise ValueError("Preinitialized joint PPM only supports binary CSS codes.")
+    if code_l.is_subsystem_code or code_r.is_subsystem_code:
+        raise ValueError("Preinitialized joint PPM only supports stabilizer CSS codes.")
+
+    hx_l = np.asarray(code_l.matrix_x, dtype=np.uint8) % 2
+    hx_r = np.asarray(code_r.matrix_x, dtype=np.uint8) % 2
+    hz_l = np.asarray(code_l.matrix_z, dtype=np.uint8) % 2
+    hz_r = np.asarray(code_r.matrix_z, dtype=np.uint8) % 2
+    n_l = code_l.num_qudits
+    n_r = code_r.num_qudits
+
+    hx = np.zeros((hx_l.shape[0] + hx_r.shape[0], n_l + n_r), dtype=np.int_)
+    hz = np.zeros((hz_l.shape[0] + hz_r.shape[0], n_l + n_r), dtype=np.int_)
+    hx[: hx_l.shape[0], :n_l] = hx_l
+    hx[hx_l.shape[0] :, n_l:] = hx_r
+    hz[: hz_l.shape[0], :n_l] = hz_l
+    hz[hz_l.shape[0] :, n_l:] = hz_r
+    return CSSCode(hx, hz, is_subsystem_code=False)
+
+
+def _independent_block_qubit_ids(
+    code_l: CSSCode,
+    code_r: CSSCode,
+    joint_qubit_ids: QubitIDs,
+) -> QubitIDs:
+    """Map independent-block checks onto the surviving rows of the joint code."""
+    n_l = code_l.num_qudits
+    n_r = code_r.num_qudits
+    m_x = code_l.num_checks_x + code_r.num_checks_x
+    m_z = code_l.num_checks_z + code_r.num_checks_z
+    data_ids = joint_qubit_ids.data[: n_l + n_r]
+    check_ids = joint_qubit_ids.checks_x[:m_x] + joint_qubit_ids.checks_z[:m_z]
+    qubit_ids = QubitIDs(data_ids, check_ids)
+    qubit_ids.checks_x = check_ids[:m_x]
+    qubit_ids.checks_z = check_ids[m_x:]
+    return qubit_ids
+
+
+def _independent_block_qec_cycle(
+    prep_code: CSSCode,
+    *,
+    basis: Pauli,
+    num_rounds: int,
+    qubit_ids: QubitIDs,
+    syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+    lane_index: dict[int, tuple[int, int]],
+) -> tuple[stim.Circuit, SyndromeRecord, DetectorRecord]:
+    """Prepare two independent blocks while retaining every final syndrome.
+
+    The product-state reset fixes only basis-type stabilizers in the first round.
+    From the second preparation round onward, every stabilizer is compared with
+    its preceding value.  This differs from a fixed-basis memory experiment,
+    which does not need to retain complementary-basis detector history.
+    """
+    if num_rounds < 1:
+        raise ValueError(f"preparation_rounds must be positive, got {num_rounds}")
+
+    strategy = syndrome_measurement_strategy or EdgeColoring()
+    one_round, round_measurement_record = strategy.get_circuit(prep_code, qubit_ids)
+    known_first = set(qubit_ids.checks_x) if basis is Pauli.X else set(qubit_ids.checks_z)
+    all_check_ids = qubit_ids.check
+
+    circuit = stim.Circuit()
+    measurement_record: SyndromeRecord
+    if isinstance(round_measurement_record, ParityMeasurementRecord):
+        measurement_record = ParityMeasurementRecord()
+    else:
+        measurement_record = MeasurementRecord()
+    detector_record = DetectorRecord()
+
+    circuit += one_round
+    measurement_record.append(round_measurement_record)
+    reliable_in_order = [check_id for check_id in all_check_ids if check_id in known_first]
+    for check_id in reliable_in_order:
+        lane, idx = lane_index[check_id]
+        circuit.append(
+            "DETECTOR",
+            _get_target_recs(measurement_record, check_id),
+            (idx, lane, 0),
+        )
+    detector_record.append(
+        {check_id: detector for detector, check_id in enumerate(reliable_in_order)}
+    )
+
+    if num_rounds > 1:
+        repeat_circuit = one_round.copy()
+        measurement_record.append(round_measurement_record)
+        repeat_circuit.append("SHIFT_COORDS", [], (0, 0, 1))
+        for check_id in all_check_ids:
+            lane, idx = lane_index[check_id]
+            repeat_circuit.append(
+                "DETECTOR",
+                _get_target_recs(measurement_record, check_id, -1)
+                + _get_target_recs(measurement_record, check_id, -2),
+                (idx, lane, 0),
+            )
+        circuit.append(stim.CircuitRepeatBlock(num_rounds - 1, repeat_circuit))
+        measurement_record.append(round_measurement_record, repeat=num_rounds - 2)
+        detector_record.append(
+            {check_id: detector for detector, check_id in enumerate(all_check_ids)},
+            repeat=num_rounds - 1,
+        )
+
+    return circuit, measurement_record, detector_record
+
+
 def build_joint_ppm_circuit(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -992,6 +1105,185 @@ def build_joint_ppm_circuit(
     return circuit, joint_code
 
 
+def build_preinitialized_joint_ppm_circuit(
+    g_l: GadgetLayout,
+    g_r: GadgetLayout,
+    bridge: Bridge,
+    *,
+    preparation_rounds: int,
+    surgery_rounds: int,
+    adapter_noise_model: NoiseModel | None = None,
+    preparation_noise_model: NoiseModel | None = None,
+    closure_noise_model: NoiseModel | None = None,
+    data_init: str | tuple[str, ...] | list[str] | None = None,
+    preparation_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+    surgery_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+) -> tuple[stim.Circuit, CSSCode]:
+    """Joint PPM between independently prepared binary CSS code blocks.
+
+    The original blocks are reset and stabilized before any gadget or bridge data
+    is initialized.  Noise models are accepted per phase so an intrinsic adapter
+    experiment can keep input preparation and diagnostic closure ideal while
+    applying noise to adapter initialization, merged QEC, and detachment.
+
+    The two gadgets always represent separate physical blocks, even if both were
+    constructed from the same ``CSSCode`` object.  Shared-data/intracode surgery
+    remains available through ``build_joint_ppm_circuit``.
+    """
+    if preparation_rounds < 1:
+        raise ValueError(f"preparation_rounds must be positive, got {preparation_rounds}")
+    if surgery_rounds < 1:
+        raise ValueError(f"surgery_rounds must be positive, got {surgery_rounds}")
+    if g_l.basis is not g_r.basis or bridge.basis is not g_l.basis:
+        raise ValueError("Preinitialized joint PPM requires matching gadget/bridge bases.")
+
+    code_l = g_l.code
+    code_r = g_r.code
+    prep_code = _direct_sum_css_codes(code_l, code_r)
+    joint_code = _stitch_intercode(g_l, g_r, bridge)
+    qubit_ids = QubitIDs.from_code(joint_code)
+    prep_qubit_ids = _independent_block_qubit_ids(code_l, code_r, qubit_ids)
+
+    n_l = code_l.num_qudits
+    n_r = code_r.num_qudits
+    k_l = bridge.g_l_aug.incidence.shape[0]
+    k_r = bridge.g_r_aug.incidence.shape[0]
+    data_ids = qubit_ids.data[: n_l + n_r]
+    ancilla_ids = qubit_ids.data[n_l + n_r : n_l + n_r + k_l + k_r]
+    bridge_ids = qubit_ids.data[n_l + n_r + k_l + k_r :]
+    if len(bridge_ids) != bridge.width:
+        raise ValueError(
+            f"Joint-code bridge width mismatch: expected {bridge.width}, "
+            f"got {len(bridge_ids)} data qubits."
+        )
+
+    coordinates = _surgery_qubit_coordinates(
+        g_l,
+        qubit_ids,
+        joint=(g_r, bridge, True),
+    )
+    lane_index = _check_lane_index_map(
+        g_l,
+        qubit_ids,
+        joint=(g_r, bridge, True),
+    )
+
+    expanded_data_init = _expand_joint_data_init(data_init, n_l, n_r, True)
+    preparation = _surgery_state_prep(
+        g_l,
+        data_ids,
+        (),
+        (),
+        data_init=expanded_data_init,
+    )
+    preparation_qec, preparation_record, _ = _independent_block_qec_cycle(
+        prep_code,
+        basis=g_l.basis,
+        num_rounds=preparation_rounds,
+        qubit_ids=prep_qubit_ids,
+        syndrome_measurement_strategy=preparation_syndrome_measurement_strategy,
+        lane_index=lane_index,
+    )
+    preparation += preparation_qec
+
+    adapter_initialization = _surgery_state_prep(
+        g_l,
+        (),
+        ancilla_ids,
+        bridge_ids,
+    )
+    adapter_initialization.append("SHIFT_COORDS", [], (0, 0, 1))
+
+    surgery, measurement_record, _ = _surgery_qec_cycle_joint(
+        g_l,
+        g_r,
+        joint_code,
+        bridge,
+        num_rounds=surgery_rounds,
+        qubit_ids=qubit_ids,
+        intercode=True,
+        syndrome_measurement_strategy=surgery_syndrome_measurement_strategy,
+        initial_measurement_record=preparation_record,
+        transition_check_ids=prep_qubit_ids.check,
+    )
+
+    detachment = _surgery_detach(
+        g_l,
+        ancilla_ids=ancilla_ids,
+        bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    )
+    closure = _surgery_terminal_readout(
+        g_l,
+        data_ids=data_ids,
+        measurement_record=measurement_record,
+    )
+    closure += _surgery_final_detectors_joint(
+        g_l,
+        g_r,
+        joint_code,
+        bridge,
+        qubit_ids,
+        measurement_record=measurement_record,
+        intercode=True,
+    )
+
+    if bridge.basis is Pauli.X:
+        check_ids = qubit_ids.checks_x
+        original_check_count = code_l.num_checks_x + code_r.num_checks_x
+    else:
+        check_ids = qubit_ids.checks_z
+        original_check_count = code_l.num_checks_z + code_r.num_checks_z
+    meas_l_ids = tuple(check_ids[original_check_count : original_check_count + len(g_l.support)])
+    meas_r_start = original_check_count + len(g_l.support)
+    meas_r_ids = tuple(check_ids[meas_r_start : meas_r_start + len(g_r.support)])
+    support_combined = tuple(g_l.support) + tuple(n_l + index for index in g_r.support)
+    observables = _surgery_observable(
+        g_l,
+        meas_check_ids=meas_l_ids + meas_r_ids,
+        data_ids=data_ids,
+        support_indices=support_combined,
+        measurement_record=measurement_record,
+    )
+
+    preparation_system = set(prep_qubit_ids.all_qubits)
+    adapter_data_system = set(data_ids + ancilla_ids + bridge_ids)
+    if preparation_noise_model is not None:
+        preparation = preparation_noise_model.noisy_circuit(
+            preparation,
+            system_qubits=preparation_system,
+        )
+    if adapter_noise_model is not None:
+        adapter_initialization = adapter_noise_model.noisy_circuit(
+            adapter_initialization,
+            system_qubits=adapter_data_system,
+        )
+        surgery = adapter_noise_model.noisy_circuit(
+            surgery,
+            system_qubits=set(qubit_ids.all_qubits),
+        )
+        detachment = adapter_noise_model.noisy_circuit(
+            detachment,
+            system_qubits=adapter_data_system,
+        )
+    if closure_noise_model is not None:
+        closure = closure_noise_model.noisy_circuit(
+            closure,
+            system_qubits=set(data_ids),
+        )
+
+    return (
+        coordinates
+        + preparation
+        + adapter_initialization
+        + surgery
+        + detachment
+        + closure
+        + observables,
+        joint_code,
+    )
+
+
 def _classify_reliable_round1_checks_joint(
     g_l: GadgetLayout,
     g_r: GadgetLayout,
@@ -1034,9 +1326,16 @@ def _surgery_qec_cycle_joint(
     *,
     intercode: bool,
     syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
+    initial_measurement_record: SyndromeRecord | None = None,
+    transition_check_ids: Collection[int] = (),
 ) -> tuple[stim.Circuit, SyndromeRecord, DetectorRecord]:
     """Joint-code variant of _surgery_qec_cycle that classifies reliable checks
-    across both gadgets + the bridge's new cycle-checks."""
+    across both gadgets + the bridge's new cycle-checks.
+
+    If ``initial_measurement_record`` is supplied, checks in
+    ``transition_check_ids`` survive from an independently prepared code block.
+    Their first merged measurement is compared with the last pre-merge value.
+    """
     strategy = syndrome_measurement_strategy or EdgeColoring()
     one_round, round_measurement_record = strategy.get_circuit(joint_code, qubit_ids)
     reliable = set(
@@ -1056,24 +1355,56 @@ def _surgery_qec_cycle_joint(
 
     circuit = stim.Circuit()
     measurement_record: SyndromeRecord
-    if isinstance(round_measurement_record, ParityMeasurementRecord):
+    if isinstance(round_measurement_record, ParityMeasurementRecord) or isinstance(
+        initial_measurement_record, ParityMeasurementRecord
+    ):
         measurement_record = ParityMeasurementRecord()
     else:
         measurement_record = MeasurementRecord()
+    if initial_measurement_record is not None:
+        if isinstance(measurement_record, ParityMeasurementRecord):
+            measurement_record.append(initial_measurement_record)
+        else:
+            assert isinstance(initial_measurement_record, MeasurementRecord)
+            measurement_record.append(initial_measurement_record)
     detector_record = DetectorRecord()
+
+    transition = set(transition_check_ids)
+    unknown_transition = transition - set(all_check_ids)
+    if unknown_transition:
+        raise ValueError(
+            "transition_check_ids contains checks absent from the joint code: "
+            f"{sorted(unknown_transition)}"
+        )
 
     circuit += one_round
     measurement_record.append(round_measurement_record)
     for check_id in all_check_ids:
-        if check_id in reliable:
+        if check_id in transition:
+            if len(measurement_record[check_id]) < 2:
+                raise ValueError(
+                    f"Transition check {check_id} has no pre-merge syndrome measurement."
+                )
+            lane, idx = lane_idx[check_id]
+            circuit.append(
+                "DETECTOR",
+                _get_target_recs(measurement_record, check_id, -1)
+                + _get_target_recs(measurement_record, check_id, -2),
+                (idx, lane, 0),
+            )
+        elif check_id in reliable:
             lane, idx = lane_idx[check_id]
             circuit.append(
                 "DETECTOR",
                 _get_target_recs(measurement_record, check_id),
                 (idx, lane, 0),
             )
-    reliable_in_order = [cid for cid in all_check_ids if cid in reliable]
-    detector_record.append({cid: dd for dd, cid in enumerate(reliable_in_order)})
+    first_round_checks = [
+        check_id for check_id in all_check_ids if check_id in transition or check_id in reliable
+    ]
+    detector_record.append(
+        {check_id: detector for detector, check_id in enumerate(first_round_checks)}
+    )
 
     if num_rounds > 1:
         repeat_circuit = one_round.copy()
@@ -1412,12 +1743,43 @@ def _surgery_detach_and_readout(
     measurement_record: SyndromeRecord,
 ) -> stim.Circuit:
     """Cain step 3 + final data measure. Mκ then SHIFT_COORDS then Mdata."""
+    return _surgery_detach(
+        gadget,
+        ancilla_ids=ancilla_ids,
+        bridge_ids=bridge_ids,
+        measurement_record=measurement_record,
+    ) + _surgery_terminal_readout(
+        gadget,
+        data_ids=data_ids,
+        measurement_record=measurement_record,
+    )
+
+
+def _surgery_detach(
+    gadget: GadgetLayout,
+    *,
+    ancilla_ids: tuple[int, ...],
+    bridge_ids: tuple[int, ...],
+    measurement_record: SyndromeRecord,
+) -> stim.Circuit:
+    """Measure adapter data while leaving the original code blocks alive."""
     circuit = stim.Circuit()
     detach_qubits = list(ancilla_ids) + list(bridge_ids)
     ancilla_op = "M" if gadget.basis is Pauli.X else "MX"
-    data_op = "MX" if gadget.basis is Pauli.X else "M"
     circuit.append(ancilla_op, detach_qubits)
     measurement_record.append({q: i for i, q in enumerate(detach_qubits)})
+    return circuit
+
+
+def _surgery_terminal_readout(
+    gadget: GadgetLayout,
+    *,
+    data_ids: tuple[int, ...],
+    measurement_record: SyndromeRecord,
+) -> stim.Circuit:
+    """Diagnostic destructive readout used to close the detector boundary."""
+    circuit = stim.Circuit()
+    data_op = "MX" if gadget.basis is Pauli.X else "M"
     circuit.append("SHIFT_COORDS", [], (0, 0, 1))
     circuit.append(data_op, list(data_ids))
     measurement_record.append({q: i for i, q in enumerate(data_ids)})
