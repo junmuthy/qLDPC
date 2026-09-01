@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from qldpc import codes
+from qldpc.codes.common import CSSCode
 from qldpc.objects import Pauli
 
 from .run_experiment import (
@@ -18,14 +19,14 @@ from .run_experiment import (
 @pytest.mark.parametrize(
     ("basis", "rounds", "expected_params", "expected_qubits"),
     [
-        (Pauli.X, 3, (24, 1, 3), 52),
-        (Pauli.Z, 3, (23, 1, 3), 50),
+        (Pauli.X, 3, (24, 1, None), 52),
+        (Pauli.Z, 3, (23, 1, None), 50),
     ],
 )
 def test_build_experiment(
     basis: Pauli,
     rounds: int,
-    expected_params: tuple[int, int, int],
+    expected_params: tuple[int, int, int | None],
     expected_qubits: int,
 ) -> None:
     experiment = build_experiment(basis=basis, rounds=rounds)
@@ -37,9 +38,34 @@ def test_build_experiment(
     assert experiment.metadata["preparation_rounds"] == 3
     assert experiment.metadata["surgery_rounds"] == rounds
     assert experiment.metadata["noise_scope"] == "intrinsic"
+    assert experiment.metadata["left_code_distance_status"] == "known"
+    assert experiment.metadata["right_code_distance_status"] == "known"
+    assert experiment.metadata["joint_code_distance_status"] == "not_computed"
     assert experiment.detector_error_model.num_detectors == experiment.circuit.num_detectors
     assert experiment.detector_error_model.num_errors > 0
     assert "PAULI_CHANNEL_1" not in str(experiment.circuit)
+
+
+def test_exact_distance_metadata_is_explicitly_opt_in() -> None:
+    experiment = build_experiment(
+        basis=Pauli.X,
+        rounds=2,
+        compute_exact_distances=True,
+    )
+
+    assert experiment.metadata["joint_code_parameters"] == [24, 1, 3]
+    assert experiment.metadata["joint_code_distance_status"] == "exact"
+
+
+def test_default_metadata_does_not_search_for_distance(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_if_called(*args: Any, **kwargs: Any) -> int:
+        raise AssertionError("exact distance search should be opt-in")
+
+    monkeypatch.setattr(CSSCode, "get_distance", fail_if_called)
+    experiment = build_experiment(basis=Pauli.X, rounds=2)
+
+    assert experiment.metadata["joint_code_parameters"] == [24, 1, None]
+    assert experiment.metadata["joint_code_distance_status"] == "not_computed"
 
 
 def test_requested_matrix_contains_both_bases_and_round_counts() -> None:
@@ -79,7 +105,11 @@ def test_build_experiment_for_multi_logical_css_code() -> None:
 
     assert experiment.metadata["left_code"] == "iceberg_4"
     assert experiment.metadata["left_logical_index"] == 1
-    assert experiment.metadata["left_code_parameters"] == list(left_code.get_code_params())
+    assert experiment.metadata["left_code_parameters"] == [
+        len(left_code),
+        left_code.dimension,
+        left_code.get_distance_if_known(),
+    ]
     assert experiment.metadata["num_observables"] == 1
     assert experiment.detector_error_model.num_errors > 0
 
@@ -95,6 +125,25 @@ def test_build_experiment_for_same_css_object_uses_independent_blocks() -> None:
     )
 
     assert experiment.metadata["joint_code_parameters"][0] >= 2 * code.num_qudits
+
+
+def test_large_hgp_adapter_does_not_compute_unknown_distances() -> None:
+    hgp_code = codes.HGPCode(codes.SimplexCode(3))
+    surface_code = codes.SurfaceCode(4, rotated=False)
+    experiment = build_experiment_for_codes(
+        left_code=hgp_code,
+        right_code=surface_code,
+        basis=Pauli.X,
+        preparation_rounds=1,
+        surgery_rounds=1,
+    )
+
+    assert experiment.metadata["left_code_parameters"] == [98, 18, None]
+    assert experiment.metadata["left_code_distance_status"] == "not_computed"
+    assert experiment.metadata["right_code_parameters"] == [25, 1, 4]
+    assert experiment.metadata["right_code_distance_status"] == "known"
+    assert experiment.metadata["joint_code_parameters"] == [136, 18, None]
+    assert experiment.metadata["joint_code_distance_status"] == "not_computed"
 
 
 def test_build_experiment_rejects_bad_scope_and_logical_index() -> None:

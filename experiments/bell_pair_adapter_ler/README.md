@@ -63,6 +63,23 @@ experiment = build_experiment_for_codes(
 The inputs must be binary, non-subsystem CSS codes. The two arguments always describe separate
 physical blocks, even when they reference the same `CSSCode` object.
 
+## Distance metadata
+
+Exact code distance is not needed to build the circuit or detector error model, decode samples, or
+estimate the LER. By default, manifests therefore record cached or analytically known distances and
+use `null` for unknown distances:
+
+```json
+{
+  "joint_code_parameters": [136, 18, null],
+  "joint_code_distance_status": "not_computed"
+}
+```
+
+Pass `compute_exact_distances=True` to the Python builders, or
+`--compute-exact-distances` to the CLI, only when exact distances are explicitly required. This can
+be exponentially more expensive than building and sampling the experiment for large codes.
+
 ## Surface-3/Steane preset
 
 Build the default `XX`/`ZZ`, three-/five-surgery-round matrix without sampling:

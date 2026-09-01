@@ -34,6 +34,7 @@ DEFAULT_ROUNDS = (3, 5)
 DEFAULT_PREPARATION_ROUNDS = 3
 DEFAULT_BASES = (Pauli.X, Pauli.Z)
 NoiseScope = Literal["intrinsic", "operational", "end-to-end"]
+DistanceStatus = Literal["known", "exact", "not_computed"]
 DEFAULT_NOISE_SCOPE: NoiseScope = "intrinsic"
 
 
@@ -75,6 +76,22 @@ def _validate_css_input(code: CSSCode, logical_index: int, name: str) -> None:
         raise IndexError(f"{name} logical index {logical_index} is outside [0, {code.dimension})")
 
 
+def _code_parameters_for_metadata(
+    code: CSSCode,
+    *,
+    compute_exact_distance: bool,
+) -> tuple[list[int | float | None], DistanceStatus]:
+    """Return ``[n, k, d]`` without searching for distance unless explicitly requested."""
+    distance = code.get_distance_if_known()
+    status: DistanceStatus = "known" if distance is not None else "not_computed"
+    if distance is None and compute_exact_distance:
+        distance = code.get_distance()
+        status = "exact"
+    if isinstance(distance, np.generic):
+        distance = distance.item()
+    return [len(code), int(code.dimension), distance], status
+
+
 def build_experiment_for_codes(
     *,
     left_code: CSSCode,
@@ -90,8 +107,13 @@ def build_experiment_for_codes(
     bell_pair_infidelity: float = DEFAULT_BELL_PAIR_INFIDELITY,
     include_idling_error: bool = False,
     noise_scope: NoiseScope = DEFAULT_NOISE_SCOPE,
+    compute_exact_distances: bool = False,
 ) -> BuiltExperiment:
-    """Build a phased joint-PPM experiment for any two binary stabilizer CSS codes."""
+    """Build a phased joint-PPM experiment for any two binary stabilizer CSS codes.
+
+    Exact code distances are metadata only and are not computed by default.  Set
+    ``compute_exact_distances`` to opt into potentially expensive distance searches.
+    """
     if basis not in (Pauli.X, Pauli.Z):
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
     if preparation_rounds < 1:
@@ -150,6 +172,18 @@ def build_experiment_for_codes(
     circuit = keep_only_observable(circuit, keep_idx=0)
     detector_error_model = circuit.detector_error_model()
     selected_checks = syndrome_strategy.selected_check_indices(joint_code)
+    left_parameters, left_distance_status = _code_parameters_for_metadata(
+        left_code,
+        compute_exact_distance=compute_exact_distances,
+    )
+    right_parameters, right_distance_status = _code_parameters_for_metadata(
+        right_code,
+        compute_exact_distance=compute_exact_distances,
+    )
+    joint_parameters, joint_distance_status = _code_parameters_for_metadata(
+        joint_code,
+        compute_exact_distance=compute_exact_distances,
+    )
 
     left_label = left_code_name or type(left_code).__name__
     right_label = right_code_name or type(right_code).__name__
@@ -164,8 +198,10 @@ def build_experiment_for_codes(
         "name": name,
         "left_code": left_label,
         "right_code": right_label,
-        "left_code_parameters": list(left_code.get_code_params()),
-        "right_code_parameters": list(right_code.get_code_params()),
+        "left_code_parameters": left_parameters,
+        "right_code_parameters": right_parameters,
+        "left_code_distance_status": left_distance_status,
+        "right_code_distance_status": right_distance_status,
         "left_logical_index": left_logical_index,
         "right_logical_index": right_logical_index,
         "logical_basis": basis.name,
@@ -178,7 +214,8 @@ def build_experiment_for_codes(
         "bell_pair_fidelity": 1 - bell_pair_infidelity,
         "include_idling_error": include_idling_error,
         "decoder": "qldpc_bp_osd",
-        "joint_code_parameters": list(joint_code.get_code_params()),
+        "joint_code_parameters": joint_parameters,
+        "joint_code_distance_status": joint_distance_status,
         "num_qubits": circuit.num_qubits,
         "num_detectors": circuit.num_detectors,
         "num_observables": circuit.num_observables,
@@ -197,6 +234,7 @@ def build_experiment(
     include_idling_error: bool = False,
     preparation_rounds: int = DEFAULT_PREPARATION_ROUNDS,
     noise_scope: NoiseScope = DEFAULT_NOISE_SCOPE,
+    compute_exact_distances: bool = False,
 ) -> BuiltExperiment:
     """Surface-3/Steane preset for the generic CSS adapter experiment.
 
@@ -216,6 +254,7 @@ def build_experiment(
         bell_pair_infidelity=bell_pair_infidelity,
         include_idling_error=include_idling_error,
         noise_scope=noise_scope,
+        compute_exact_distances=compute_exact_distances,
     )
 
 
@@ -228,6 +267,7 @@ def build_experiment_matrix(
     include_idling_error: bool = False,
     preparation_rounds: int = DEFAULT_PREPARATION_ROUNDS,
     noise_scope: NoiseScope = DEFAULT_NOISE_SCOPE,
+    compute_exact_distances: bool = False,
 ) -> list[BuiltExperiment]:
     """Build every requested basis/round combination."""
     return [
@@ -239,6 +279,7 @@ def build_experiment_matrix(
             include_idling_error=include_idling_error,
             preparation_rounds=preparation_rounds,
             noise_scope=noise_scope,
+            compute_exact_distances=compute_exact_distances,
         )
         for basis in bases
         for num_rounds in rounds
@@ -389,6 +430,14 @@ def _parse_args() -> argparse.Namespace:
         choices=("intrinsic", "operational", "end-to-end"),
         default=DEFAULT_NOISE_SCOPE,
     )
+    parser.add_argument(
+        "--compute-exact-distances",
+        action="store_true",
+        help=(
+            "compute exact input and joint-code distances for metadata; potentially very "
+            "expensive and not required for circuit building, decoding, or LER estimation"
+        ),
+    )
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--max-shots", type=int, default=100_000)
     parser.add_argument("--max-errors", type=int, default=200)
@@ -412,6 +461,7 @@ def main() -> None:
         include_idling_error=args.include_idling_error,
         preparation_rounds=args.preparation_rounds,
         noise_scope=args.noise_scope,
+        compute_exact_distances=args.compute_exact_distances,
     )
     write_artifacts(experiments, args.output_dir)
 
