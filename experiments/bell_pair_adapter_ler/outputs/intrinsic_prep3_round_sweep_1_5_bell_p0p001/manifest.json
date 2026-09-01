@@ -1,0 +1,392 @@
+[
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_x_prep3_surg1_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_x_prep3_surg1_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      24,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "rotated_surface_d3_steane_d3_joint_x_prep3_surg1_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 262,
+    "num_detectors": 62,
+    "num_observables": 1,
+    "num_qubits": 52,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 1,
+    "surgery_rounds": 1
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_x_prep3_surg2_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_x_prep3_surg2_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      24,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "rotated_surface_d3_steane_d3_joint_x_prep3_surg2_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 731,
+    "num_detectors": 85,
+    "num_observables": 1,
+    "num_qubits": 52,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 2,
+    "surgery_rounds": 2
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_x_prep3_surg3_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_x_prep3_surg3_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      24,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "rotated_surface_d3_steane_d3_joint_x_prep3_surg3_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 1202,
+    "num_detectors": 108,
+    "num_observables": 1,
+    "num_qubits": 52,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 3,
+    "surgery_rounds": 3
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_x_prep3_surg4_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_x_prep3_surg4_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      24,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "rotated_surface_d3_steane_d3_joint_x_prep3_surg4_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 1883,
+    "num_detectors": 131,
+    "num_observables": 1,
+    "num_qubits": 52,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 4,
+    "surgery_rounds": 4
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_x_prep3_surg5_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_x_prep3_surg5_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      24,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "rotated_surface_d3_steane_d3_joint_x_prep3_surg5_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 2424,
+    "num_detectors": 154,
+    "num_observables": 1,
+    "num_qubits": 52,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 5,
+    "surgery_rounds": 5
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_z_prep3_surg1_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_z_prep3_surg1_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      23,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "rotated_surface_d3_steane_d3_joint_z_prep3_surg1_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 145,
+    "num_detectors": 60,
+    "num_observables": 1,
+    "num_qubits": 50,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 1,
+    "surgery_rounds": 1
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_z_prep3_surg2_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_z_prep3_surg2_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      23,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "rotated_surface_d3_steane_d3_joint_z_prep3_surg2_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 538,
+    "num_detectors": 82,
+    "num_observables": 1,
+    "num_qubits": 50,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 2,
+    "surgery_rounds": 2
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_z_prep3_surg3_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_z_prep3_surg3_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      23,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "rotated_surface_d3_steane_d3_joint_z_prep3_surg3_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 961,
+    "num_detectors": 104,
+    "num_observables": 1,
+    "num_qubits": 50,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 3,
+    "surgery_rounds": 3
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_z_prep3_surg4_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_z_prep3_surg4_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      23,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "rotated_surface_d3_steane_d3_joint_z_prep3_surg4_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 1585,
+    "num_detectors": 126,
+    "num_observables": 1,
+    "num_qubits": 50,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 4,
+    "surgery_rounds": 4
+  },
+  {
+    "bell_pair_fidelity": 0.999,
+    "bell_pair_infidelity": 0.001,
+    "circuit_path": "circuits/rotated_surface_d3_steane_d3_joint_z_prep3_surg5_intrinsic_p0p001_bell0p001.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/rotated_surface_d3_steane_d3_joint_z_prep3_surg5_intrinsic_p0p001_bell0p001.dem",
+    "include_idling_error": false,
+    "joint_code_parameters": [
+      23,
+      1,
+      3
+    ],
+    "left_code": "rotated_surface_d3",
+    "left_code_parameters": [
+      9,
+      1,
+      3
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "rotated_surface_d3_steane_d3_joint_z_prep3_surg5_intrinsic_p0p001_bell0p001",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 5,
+    "num_dem_errors": 2073,
+    "num_detectors": 148,
+    "num_observables": 1,
+    "num_qubits": 50,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 3,
+    "right_code": "steane_d3",
+    "right_code_parameters": [
+      7,
+      1,
+      3
+    ],
+    "right_logical_index": 0,
+    "rounds": 5,
+    "surgery_rounds": 5
+  }
+]

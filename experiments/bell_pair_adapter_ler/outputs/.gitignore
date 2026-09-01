@@ -1,0 +1,11 @@
+# Generated circuit/decoder artifacts are reproducible from the committed experiment source.
+**/circuits/
+**/dems/
+**/sinter_progress.csv
+
+# Older direct-merge outputs predate the phase-aware intrinsic experiment.
+/circuits/
+/dems/
+/manifest.json
+/summary.csv
+/pilot_x_r3/

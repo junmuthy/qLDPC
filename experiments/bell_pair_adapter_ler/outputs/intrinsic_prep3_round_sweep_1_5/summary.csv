@@ -1,0 +1,11 @@
+name,logical_basis,preparation_rounds,surgery_rounds,rounds,noise_scope,physical_error_rate,bell_pair_infidelity,shots,discards,errors,logical_error_rate,ler_95ci_low,ler_95ci_high,seconds,decoder
+rotated_surface_d3_steane_d3_joint_x_prep3_surg1_intrinsic_p0p001_bell0,X,3,1,1,intrinsic,0.001,0.0,4369,0,217,0.04966811627374685,0.04361222330781679,0.05651522538747045,0.919,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg2_intrinsic_p0p001_bell0,X,3,2,2,intrinsic,0.001,0.0,5585,0,203,0.036347358997314234,0.03174907291734255,0.041583023160254015,39.092,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg3_intrinsic_p0p001_bell0,X,3,3,3,intrinsic,0.001,0.0,10000,0,42,0.0042,0.0031088769681385277,0.005671895816224385,214.15499999999997,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg4_intrinsic_p0p001_bell0,X,3,4,4,intrinsic,0.001,0.0,10000,0,25,0.0025,0.0016939976111583195,0.0036880807676648924,665.0753934988575,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg5_intrinsic_p0p001_bell0,X,3,5,5,intrinsic,0.001,0.0,10000,0,17,0.0017,0.0010617073611205116,0.0027209854150957837,1278.5976100532246,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg1_intrinsic_p0p001_bell0,Z,3,1,1,intrinsic,0.001,0.0,6417,0,204,0.031790556334735855,0.02777027358542326,0.03637107945404834,0.209,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg2_intrinsic_p0p001_bell0,Z,3,2,2,intrinsic,0.001,0.0,6609,0,200,0.03026176426085641,0.026396788618453782,0.03467249019844884,14.732000000000001,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg3_intrinsic_p0p001_bell0,Z,3,3,3,intrinsic,0.001,0.0,10000,0,30,0.003,0.0021022876940520996,0.004279406686400436,100.896,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg4_intrinsic_p0p001_bell0,Z,3,4,4,intrinsic,0.001,0.0,10000,0,14,0.0014,0.000834162028874972,0.002348761146363729,151.53836251408234,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg5_intrinsic_p0p001_bell0,Z,3,5,5,intrinsic,0.001,0.0,10000,0,12,0.0012,0.0006866043187699607,0.002096472455817011,436.3367916280045,qldpc_bp_osd

@@ -1,0 +1,11 @@
+name,logical_basis,preparation_rounds,surgery_rounds,rounds,noise_scope,physical_error_rate,bell_pair_infidelity,shots,discards,errors,logical_error_rate,ler_95ci_low,ler_95ci_high,seconds,decoder
+rotated_surface_d3_steane_d3_joint_x_prep3_surg1_intrinsic_p0p001_bell0p001,X,3,1,1,intrinsic,0.001,0.001,6690,0,326,0.048729446935724965,0.04382419968501861,0.05415264408328881,1.594298454001546,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg2_intrinsic_p0p001_bell0p001,X,3,2,2,intrinsic,0.001,0.001,6790,0,239,0.03519882179675994,0.031071751376239267,0.03985151960988326,40.242464699957054,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg3_intrinsic_p0p001_bell0p001,X,3,3,3,intrinsic,0.001,0.001,10000,0,38,0.0038,0.002769903124779159,0.005211176858280293,230.64922363328515,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg4_intrinsic_p0p001_bell0p001,X,3,4,4,intrinsic,0.001,0.001,10000,0,23,0.0023,0.001533154495882851,0.0034490774822886323,633.3191431598971,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_x_prep3_surg5_intrinsic_p0p001_bell0p001,X,3,5,5,intrinsic,0.001,0.001,10000,0,21,0.0021,0.0013739917049838345,0.0032083938725359184,1293.759663546458,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg1_intrinsic_p0p001_bell0p001,Z,3,1,1,intrinsic,0.001,0.001,6417,0,234,0.0364656381486676,0.03214970544978634,0.04133621720486778,0.2054931359598413,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg2_intrinsic_p0p001_bell0p001,Z,3,2,2,intrinsic,0.001,0.001,6289,0,208,0.033073620607409766,0.02893109900086189,0.03778621170338305,30.673054602055345,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg3_intrinsic_p0p001_bell0p001,Z,3,3,3,intrinsic,0.001,0.001,10000,0,24,0.0024,0.0016133788093978356,0.0035687763690995114,193.08501812635222,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg4_intrinsic_p0p001_bell0p001,Z,3,4,4,intrinsic,0.001,0.001,10000,0,19,0.0019,0.0012167441596287053,0.002965795017239319,269.7416803369997,qldpc_bp_osd
+rotated_surface_d3_steane_d3_joint_z_prep3_surg5_intrinsic_p0p001_bell0p001,Z,3,5,5,intrinsic,0.001,0.001,10000,0,17,0.0017,0.0010617073611205116,0.0027209854150957837,612.5734657680732,qldpc_bp_osd
