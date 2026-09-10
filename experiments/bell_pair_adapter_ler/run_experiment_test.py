@@ -1,22 +1,123 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import sinter
 
-from qldpc import codes
+from qldpc import codes, decoders
+from qldpc.circuits.detector_reduction import remove_inactive_detectors
 from qldpc.codes.common import CSSCode
+from qldpc.decoders.dems import DetectorErrorModelArrays
 from qldpc.objects import Pauli
 
 from .run_experiment import (
     BuiltExperiment,
     _filter_stats_for_experiments,
+    _wilson_interval,
     build_experiment,
     build_experiment_for_codes,
     build_experiment_matrix,
     build_fidelity_sweep_matrix,
+    write_artifacts,
 )
+
+
+def test_wilson_zero_and_all_error_endpoints_are_exact() -> None:
+    assert _wilson_interval(0, 1000)[0] == 0
+    assert _wilson_interval(1000, 1000)[1] == 1
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_hardware_reduction_preserves_error_distribution_and_paired_predictions(
+    basis: Pauli,
+) -> None:
+    full = build_experiment(
+        basis=basis,
+        rounds=4,
+        adapter_noise_targets="adapter_hardware",
+        bell_pair_infidelity=0.001,
+    )
+    reduced = remove_inactive_detectors(full.circuit)
+    assert 0 < reduced.circuit.num_detectors < full.circuit.num_detectors
+    a = DetectorErrorModelArrays(full.detector_error_model)
+    b = DetectorErrorModelArrays(reduced.detector_error_model)
+    projected = DetectorErrorModelArrays.from_arrays(
+        a.detector_flip_matrix[list(reduced.retained_detector_ids)],
+        a.observable_flip_matrix,
+        a.error_probs,
+    )
+    expected = {targets: prob for prob, targets in a.get_circuit_errors(projected.to_dem())}
+    actual = {targets: prob for prob, targets in b.get_circuit_errors(b.to_dem())}
+    assert actual == pytest.approx(expected, abs=1e-14)
+    records = full.circuit.compile_sampler(seed=32).sample(128)
+    detectors, obs = full.circuit.compile_m2d_converter().convert(
+        measurements=records, separate_observables=True
+    )
+    small_detectors, small_obs = reduced.circuit.compile_m2d_converter().convert(
+        measurements=records, separate_observables=True
+    )
+    assert np.array_equal(small_detectors, detectors[:, reduced.retained_detector_ids])
+    assert np.array_equal(obs, small_obs)
+    removed = sorted(set(range(full.circuit.num_detectors)) - set(reduced.retained_detector_ids))
+    assert not np.any(detectors[:, removed])
+    d1 = decoders.SinterDecoder().compile_decoder_for_dem(full.detector_error_model)
+    d2 = decoders.SinterDecoder().compile_decoder_for_dem(reduced.detector_error_model)
+    assert np.array_equal(d1.decode_shots(detectors), d2.decode_shots(small_detectors))
+
+
+def test_variants_have_distinct_artifacts_and_keep_default_identity(tmp_path: Path) -> None:
+    full = build_experiment(basis=Pauli.X, rounds=1)
+    explicit = build_experiment(basis=Pauli.X, rounds=1, adapter_noise_targets="full_surgery")
+    hardware = build_experiment(basis=Pauli.X, rounds=1, adapter_noise_targets="adapter_hardware")
+    reduced = build_experiment(
+        basis=Pauli.X, rounds=1, adapter_noise_targets="adapter_hardware", reduce_detectors=True
+    )
+    assert full.circuit == explicit.circuit
+    assert list(full.metadata.items()) == list(explicit.metadata.items())
+    assert "adapter_noise_targets" not in full.metadata  # Legacy Sinter identity stays unchanged.
+    assert len({full.name, hardware.name, reduced.name}) == 3
+    assert reduced.metadata["num_full_detectors"] == full.circuit.num_detectors
+    assert len(reduced.metadata["retained_detector_ids"]) == reduced.circuit.num_detectors
+    write_artifacts([full], tmp_path)
+    previous = (tmp_path / "manifest.json").read_bytes()
+    write_artifacts([explicit], tmp_path)
+    with pytest.raises(ValueError, match="different experiment"):
+        write_artifacts([hardware], tmp_path)
+    assert (tmp_path / "manifest.json").read_bytes() == previous
+    with pytest.raises(ValueError, match="adapter_noise_targets"):
+        build_experiment(basis=Pauli.X, rounds=1, adapter_noise_targets="typo")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_hgp_hardware_mode_builds_without_distance_search(basis: Pauli) -> None:
+    result = build_experiment_for_codes(
+        left_code=codes.HGPCode(codes.SimplexCode(3)),
+        right_code=codes.SurfaceCode(4, rotated=False),
+        basis=basis,
+        preparation_rounds=1,
+        surgery_rounds=1,
+        adapter_noise_targets="adapter_hardware",
+        reduce_detectors=True,
+    )
+    assert result.metadata["left_code_distance_status"] == "not_computed"
+    assert result.metadata["num_detectors"] < result.metadata["num_full_detectors"]
+
+
+def test_noise_target_selection_is_independent_of_phase_scope() -> None:
+    experiment = build_experiment(
+        basis=Pauli.X,
+        rounds=1,
+        noise_scope="end-to-end",
+        adapter_noise_targets="adapter_hardware",
+    )
+    assert "X_ERROR" in str(experiment.circuit) or "Z_ERROR" in str(experiment.circuit)
+    terminal = next(
+        op for op in reversed(list(experiment.circuit.flattened())) if op.name in {"M", "MX"}
+    )
+    assert terminal.gate_args_copy() == [0.001]
 
 
 @pytest.mark.parametrize(

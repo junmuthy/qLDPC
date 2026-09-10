@@ -55,15 +55,18 @@ def test_build_response_rows_compares_with_ideal_bell_reference() -> None:
 
 def test_build_response_rows_requires_ideal_reference() -> None:
     with pytest.raises(ValueError, match="no ideal-Bell reference"):
-        build_response_rows(
-            [_summary_row(infidelity=0.001, ler=0.015, low=0.012, high=0.018)]
-        )
+        build_response_rows([_summary_row(infidelity=0.001, ler=0.015, low=0.012, high=0.018)])
+
+
+def test_response_rejects_mixing_hardware_and_full_surgery_noise() -> None:
+    full = _summary_row(infidelity=0, ler=0.01, low=0.008, high=0.012)
+    hardware = dict(full, adapter_noise_targets="adapter_hardware")
+    with pytest.raises(ValueError, match="each noise policy"):
+        build_response_rows([full, hardware])
 
 
 def test_weighted_isotonic_pools_decreasing_neighbors() -> None:
-    assert weighted_isotonic([0.02, 0.01, 0.03], [1, 1, 1]) == pytest.approx(
-        [0.015, 0.015, 0.03]
-    )
+    assert weighted_isotonic([0.02, 0.01, 0.03], [1, 1, 1]) == pytest.approx([0.015, 0.015, 0.03])
 
 
 def test_requirement_rows_bracket_point_estimate_and_report_ci_limit() -> None:

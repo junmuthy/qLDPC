@@ -23,8 +23,11 @@ from .circuit import (
     logical_state_init,
 )
 from .gadget import GadgetLayout, build_gadget
+from .hardware import AdapterHardware, AdapterNoiseTargets
 
 __all__ = [
+    "AdapterHardware",
+    "AdapterNoiseTargets",
     "GadgetLayout",
     "Bridge",
     "build_gadget",

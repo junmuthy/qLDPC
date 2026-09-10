@@ -1,0 +1,36 @@
+{
+  "bell_pair_infidelities": [
+    0.0,
+    0.001
+  ],
+  "decoder": "qldpc_bp_osd",
+  "dem": "undecomposed_exact",
+  "hardware_records_paired": true,
+  "include_idling_error": false,
+  "machine": "x86_64",
+  "noise_scope": "intrinsic",
+  "physical_error_rate": 0.001,
+  "preparation_rounds": 3,
+  "python": "3.11.15",
+  "repeats": 3,
+  "rounds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "seed": 20260911,
+  "shots_per_repeat": 256,
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "timing_shots_excluded_from_production_ler": true,
+  "versions": {
+    "ldpc": "2.4.1",
+    "numpy": "2.2.6",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}

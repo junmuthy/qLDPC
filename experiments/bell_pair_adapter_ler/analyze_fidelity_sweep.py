@@ -82,6 +82,18 @@ def read_summary(path: Path) -> list[dict[str, str]]:
 
 def build_response_rows(summary_rows: Sequence[dict[str, str]]) -> list[dict[str, Any]]:
     """Add ideal-pair comparisons and total Bell-pair exposure to summary rows."""
+    policies = {
+        (
+            row.get("noise_scope", "intrinsic"),
+            row.get("adapter_noise_targets", "full_surgery"),
+            row.get("detector_reduction", "none"),
+            row["preparation_rounds"],
+            row["physical_error_rate"],
+        )
+        for row in summary_rows
+    }
+    if len(policies) > 1:
+        raise ValueError("Analyze each noise policy/preparation/physical-error setting separately")
     ideal_rows: dict[tuple[str, int], dict[str, str]] = {}
     for row in summary_rows:
         key = (row["logical_basis"], int(row["surgery_rounds"]))
@@ -391,7 +403,9 @@ def plot_excess_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
     figure.suptitle("Bell-induced excess adapter logical error rate")
     figure.tight_layout()
     figure.savefig(output_dir / "adapter_excess_ler_vs_bell_fidelity.pdf", bbox_inches="tight")
-    figure.savefig(output_dir / "adapter_excess_ler_vs_bell_fidelity.png", dpi=200, bbox_inches="tight")
+    figure.savefig(
+        output_dir / "adapter_excess_ler_vs_bell_fidelity.png", dpi=200, bbox_inches="tight"
+    )
     plt.close(figure)
 
 

@@ -1,0 +1,26 @@
+{
+  "adapter_noise_targets": "adapter_hardware",
+  "bases": [
+    "X",
+    "Z"
+  ],
+  "bell_pair_infidelity": 0.0,
+  "build_only": false,
+  "compute_exact_distances": false,
+  "include_idling_error": false,
+  "max_errors": 200,
+  "max_shots": 10000,
+  "noise_scope": "intrinsic",
+  "num_workers": 4,
+  "output_dir": "experiments/bell_pair_adapter_ler/outputs/adapter_hardware_prep3_round_sweep_1_5_comparison/bell0",
+  "physical_error_rate": 0.001,
+  "preparation_rounds": 3,
+  "reduce_detectors": true,
+  "rounds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ]
+}

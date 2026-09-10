@@ -393,6 +393,7 @@ class NoiseModel:
         immune_qubits: Collection[int] | None = None,
         immune_op_tag: str = DEFAULT_IMMUNE_OP_TAG,
         insert_ticks: bool = True,
+        active_qubits: Collection[int] | None = None,
     ) -> stim.Circuit:
         f"""Construct a noisy version of the given circuit.
 
@@ -410,12 +411,18 @@ class NoiseModel:
                 noiseless.  Default: "{DEFAULT_IMMUNE_OP_TAG}".
             insert_ticks: If True, automatically inserts TICK operations to prevent qubit reuse
                 conflicts.  If False, assumes that this preprocessing is not necessary.
+            active_qubits: Restrict added noise to primitive operations touching these qubits.
+                A selected two-qubit operation keeps its full error channel on both operands.
+                Idling noise is restricted to this set. None selects all operations; an empty
+                set adds no noise. Existing explicit noise channels are preserved. Immunity
+                and immune tags take precedence over this selection.
 
         Returns:
             stim.Circuit: A noisy version of the input circuit.
         """
         system_qubits = set(system_qubits or range(circuit.num_qubits))
         immune_qubits = set(immune_qubits or [])
+        active = None if active_qubits is None else set(active_qubits)
 
         if insert_ticks:
             # split moments with TICKs to prevent qubit reuse conflicts
@@ -427,7 +434,7 @@ class NoiseModel:
 
         first_moment = True
         for moment_or_repeat_block in _iter_moments_and_repeat_blocks(
-            circuit, immune_qubits, immune_op_tag
+            circuit, immune_qubits if active is None else immune_qubits | {-1}, immune_op_tag
         ):
             if first_moment:
                 first_moment = False
@@ -442,6 +449,9 @@ class NoiseModel:
                         moment_or_repeat_block.body_copy(),
                         system_qubits=system_qubits,
                         immune_qubits=immune_qubits,
+                        immune_op_tag=immune_op_tag,
+                        insert_ticks=insert_ticks,
+                        active_qubits=active,
                     )
                     noisy_body.append("TICK")
                     noisy_circuit.append(
@@ -458,6 +468,7 @@ class NoiseModel:
                     system_qubits=system_qubits,
                     immune_qubits=immune_qubits,
                     immune_op_tag=immune_op_tag,
+                    active_qubits=active,
                 )
 
         return noisy_circuit
@@ -470,6 +481,7 @@ class NoiseModel:
         system_qubits: set[int],
         immune_qubits: set[int],
         immune_op_tag: str,
+        active_qubits: set[int] | None = None,
     ) -> None:
         """Apps noise to a moment and appends it to a circuit (in-place).
 
@@ -486,7 +498,10 @@ class NoiseModel:
         """
         noise_after_moment = stim.Circuit()
         for op in moment:
-            if immune_op_tag in op.tag or (rule := self.get_noise_rule(op)) is None:
+            selected = active_qubits is None or any(
+                target.qubit_value in active_qubits for target in op.targets_copy()
+            )
+            if not selected or immune_op_tag in op.tag or (rule := self.get_noise_rule(op)) is None:
                 circuit.append(op)
             else:
                 noisy_op, after = rule.noisy_operation(op, immune_qubits=immune_qubits)
@@ -500,7 +515,9 @@ class NoiseModel:
             self._inplace_append_idle_errors(
                 circuit=circuit,
                 moment=moment,
-                system_qubits=system_qubits,
+                system_qubits=(
+                    system_qubits if active_qubits is None else system_qubits & active_qubits
+                ),
                 immune_qubits=immune_qubits,
             )
 
@@ -742,7 +759,7 @@ def _split_targets_if_needed(
         Circuit instructions, potentially split into smaller pieces.
     """
     op_type = OP_TYPES[op.name]
-    if op_type == CLIFFORD_2Q:
+    if op_type in (CLIFFORD_2Q, JUST_MEASURE_2Q):
         yield from _split_targets_clifford_2q(op, immune_qubits, immune_op_tag)
     elif op_type == CLIFFORD_PP or op_type == JUST_MEASURE_PP:
         yield from _split_targets_pp(op)
@@ -789,7 +806,7 @@ def _split_targets_clifford_2q(
     Yields:
         Circuit instructions split into individual two-qubit gate operations.
     """
-    assert OP_TYPES[op.name] == CLIFFORD_2Q
+    assert OP_TYPES[op.name] in (CLIFFORD_2Q, JUST_MEASURE_2Q)
     targets = op.targets_copy()
     if (
         immune_qubits

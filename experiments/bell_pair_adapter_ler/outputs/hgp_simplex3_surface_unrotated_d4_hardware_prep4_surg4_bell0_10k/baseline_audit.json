@@ -1,0 +1,28 @@
+[
+  {
+    "baseline_name": "hgp_simplex3_98_18_4_surface_unrotated_d4_joint_x_prep4_surg4_intrinsic_p0p001_bell0",
+    "canonical_circuit_matches_archive": true,
+    "full_num_dem_errors": 20045,
+    "full_num_detectors": 1030,
+    "hardware_num_dem_errors": 2803,
+    "hardware_num_detectors": 340,
+    "legacy_dem_analysis": "undecomposed",
+    "legacy_dem_matches_explicit_undecomposed_model": true,
+    "logical_basis": "X",
+    "num_adapter_hardware_qubits": 43,
+    "num_qubits": 279
+  },
+  {
+    "baseline_name": "hgp_simplex3_98_18_4_surface_unrotated_d4_joint_z_prep4_surg4_intrinsic_p0p001_bell0",
+    "canonical_circuit_matches_archive": true,
+    "full_num_dem_errors": 18127,
+    "full_num_detectors": 1030,
+    "hardware_num_dem_errors": 2683,
+    "hardware_num_detectors": 335,
+    "legacy_dem_analysis": "undecomposed",
+    "legacy_dem_matches_explicit_undecomposed_model": true,
+    "logical_basis": "Z",
+    "num_adapter_hardware_qubits": 43,
+    "num_qubits": 279
+  }
+]

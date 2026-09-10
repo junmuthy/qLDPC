@@ -21,6 +21,88 @@ import stim
 from qldpc import circuits
 
 
+@pytest.mark.parametrize("insert_ticks", [False, True])
+def test_active_qubits_select_each_primitive_and_keep_cross_boundary_faults(
+    insert_ticks: bool,
+) -> None:
+    source = stim.Circuit("""
+        R 0 1 2 3
+        TICK
+        H 0 1
+        TICK
+        CX 0 2 1 3
+        TICK
+        M 0 1 2 3
+    """)
+    result = circuits.DepolarizingNoiseModel(0.1).noisy_circuit(
+        source, active_qubits={0}, insert_ticks=insert_ticks
+    )
+    expected = stim.Circuit("""
+        R 0 1 2 3
+        X_ERROR(0.1) 0
+        TICK
+        H 0 1
+        DEPOLARIZE1(0.1) 0
+        TICK
+        CX 0 2 1 3
+        DEPOLARIZE2(0.1) 0 2
+        TICK
+        M(0.1) 0
+        M 1 2 3
+    """)
+    assert result == expected
+
+
+def test_active_selection_handles_repeats_idle_immunity_and_explicit_noise() -> None:
+    source = stim.Circuit("""
+        REPEAT 2 {
+            H 1
+            TICK
+            CX[ideal] 0 2
+            TICK
+            DEPOLARIZE1(0.03) 3
+        }
+    """)
+    model = circuits.DepolarizingNoiseModel(0.1, include_idling_error=True)
+    result = model.noisy_circuit(
+        source, active_qubits={0}, system_qubits={0, 1, 2, 3}, immune_op_tag="ideal"
+    )
+    assert isinstance(result[0], stim.CircuitRepeatBlock)
+    body = result[0].body_copy()
+    assert "CX[ideal] 0 2" in str(body)
+    assert "DEPOLARIZE2" not in str(body)
+    assert "DEPOLARIZE1(0.1) 0" in str(body)
+    assert "DEPOLARIZE1(0.03) 3" in str(body)
+    for op in body:
+        if op.name == "DEPOLARIZE1" and op.gate_args_copy() == [0.1]:
+            assert [t.value for t in op.targets_copy()] == [0]
+    empty = model.noisy_circuit(source, active_qubits=set(), immune_op_tag="ideal")
+    assert all(
+        op.name != "DEPOLARIZE1" or op.gate_args_copy() == [0.03] for op in empty.flattened()
+    )
+    immune = model.noisy_circuit(
+        stim.Circuit("CX 0 1"), active_qubits={0}, immune_qubits={1}, insert_ticks=False
+    )
+    assert "DEPOLARIZE2" not in str(immune)
+
+
+def test_active_filter_preserves_measurement_pairs_products_and_feedback() -> None:
+    source = stim.Circuit("""
+        MXX 0 1 2 3
+        TICK
+        MPP X0*X1 Z2*Z3
+        TICK
+        CX rec[-1] 0 2 3
+    """)
+    result = circuits.DepolarizingNoiseModel(0.1).noisy_circuit(source, active_qubits={0})
+    assert "MXX(0.1) 0 1" in str(result)
+    assert "MXX 2 3" in str(result)
+    assert "MPP(0.1) X0*X1" in str(result)
+    assert "MPP Z2*Z3" in str(result)
+    assert "DEPOLARIZE2" not in str(result)
+    assert result.num_measurements == source.num_measurements
+
+
 def _circuits_are_equivalent(
     circuit_a: stim.Circuit, circuit_b: stim.Circuit, atol: float = 1e-10
 ) -> bool:

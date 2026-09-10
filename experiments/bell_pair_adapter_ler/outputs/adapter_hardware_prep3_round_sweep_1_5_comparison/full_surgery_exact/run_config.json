@@ -1,0 +1,27 @@
+{
+  "adapter_noise_targets": "full_surgery",
+  "bell_pair_infidelities": [
+    0.0,
+    0.001
+  ],
+  "dem_analysis": "undecomposed_exact",
+  "include_idling_error": false,
+  "max_errors": 200,
+  "max_shots": 10000,
+  "noise_scope": "intrinsic",
+  "num_workers": 8,
+  "physical_error_rate": 0.001,
+  "preparation_rounds": 3,
+  "surgery_rounds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "versions": {
+    "ldpc": "2.4.1",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}

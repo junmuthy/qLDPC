@@ -36,6 +36,7 @@ from qldpc.objects import Pauli
 
 from .bridge import Bridge
 from .gadget import GadgetLayout
+from .hardware import AdapterHardware, AdapterNoiseTargets
 
 
 def _get_target_recs(
@@ -1115,6 +1116,7 @@ def build_preinitialized_joint_ppm_circuit(
     adapter_noise_model: NoiseModel | None = None,
     preparation_noise_model: NoiseModel | None = None,
     closure_noise_model: NoiseModel | None = None,
+    adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     data_init: str | tuple[str, ...] | list[str] | None = None,
     preparation_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
     surgery_syndrome_measurement_strategy: SyndromeMeasurementStrategy | None = None,
@@ -1126,10 +1128,19 @@ def build_preinitialized_joint_ppm_circuit(
     experiment can keep input preparation and diagnostic closure ideal while
     applying noise to adapter initialization, merged QEC, and detachment.
 
+    ``adapter_noise_targets="adapter_hardware"`` restricts noise during those
+    phases to operations touching added data, checks supported on added data,
+    and auxiliary surgery ancillas. Cross-boundary gates keep their full noise
+    channel, including faults on block data. Block-only gates are ideal but can
+    propagate previously introduced faults. Preparation/closure models are
+    independent of this spatial selection.
+
     The two gadgets always represent separate physical blocks, even if both were
     constructed from the same ``CSSCode`` object.  Shared-data/intracode surgery
     remains available through ``build_joint_ppm_circuit``.
     """
+    if adapter_noise_targets not in ("full_surgery", "adapter_hardware"):
+        raise ValueError(f"Unknown adapter_noise_targets: {adapter_noise_targets!r}")
     if preparation_rounds < 1:
         raise ValueError(f"preparation_rounds must be positive, got {preparation_rounds}")
     if surgery_rounds < 1:
@@ -1248,6 +1259,14 @@ def build_preinitialized_joint_ppm_circuit(
 
     preparation_system = set(prep_qubit_ids.all_qubits)
     adapter_data_system = set(data_ids + ancilla_ids + bridge_ids)
+    # Resolve after the surgery strategy has allocated its auxiliary ancillas.
+    active_qubits = (
+        AdapterHardware.from_code(
+            joint_code, qubit_ids, num_block_data_qubits=n_l + n_r
+        ).all_qubits
+        if adapter_noise_targets == "adapter_hardware"
+        else None
+    )
     if preparation_noise_model is not None:
         preparation = preparation_noise_model.noisy_circuit(
             preparation,
@@ -1257,14 +1276,17 @@ def build_preinitialized_joint_ppm_circuit(
         adapter_initialization = adapter_noise_model.noisy_circuit(
             adapter_initialization,
             system_qubits=adapter_data_system,
+            active_qubits=active_qubits,
         )
         surgery = adapter_noise_model.noisy_circuit(
             surgery,
             system_qubits=set(qubit_ids.all_qubits),
+            active_qubits=active_qubits,
         )
         detachment = adapter_noise_model.noisy_circuit(
             detachment,
             system_qubits=adapter_data_system,
+            active_qubits=active_qubits,
         )
     if closure_noise_model is not None:
         closure = closure_noise_model.noisy_circuit(

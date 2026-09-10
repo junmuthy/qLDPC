@@ -14,6 +14,7 @@ from experiments.bell_pair_adapter_ler.run_experiment import (
     DEFAULT_NOISE_SCOPE,
     DEFAULT_PHYSICAL_ERROR_RATE,
     build_fidelity_sweep_matrix,
+    default_output_dir,
     sample_experiments,
     write_artifacts,
     write_summary,
@@ -21,15 +22,13 @@ from experiments.bell_pair_adapter_ler.run_experiment import (
 from qldpc.objects import Pauli
 
 DEFAULT_OUTPUT_DIR = (
-    Path(__file__).resolve().parent
-    / "outputs"
-    / "intrinsic_prep3_surg4_bell_fidelity_sweep_pilot"
+    Path(__file__).resolve().parent / "outputs" / "intrinsic_prep3_surg4_bell_fidelity_sweep_pilot"
 )
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument(
         "--bell-pair-infidelities",
         type=float,
@@ -41,6 +40,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bases", choices=("X", "Z"), nargs="+", default=["X", "Z"])
     parser.add_argument("--physical-error-rate", type=float, default=DEFAULT_PHYSICAL_ERROR_RATE)
     parser.add_argument("--include-idling-error", action="store_true")
+    parser.add_argument(
+        "--adapter-noise-targets",
+        choices=("full_surgery", "adapter_hardware"),
+        default="full_surgery",
+    )
+    parser.add_argument("--reduce-detectors", action="store_true")
     parser.add_argument(
         "--noise-scope",
         choices=("intrinsic", "operational", "end-to-end"),
@@ -63,6 +68,12 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if args.output_dir is None:
+        args.output_dir = (
+            default_output_dir(args.adapter_noise_targets, args.reduce_detectors) / "fidelity_sweep"
+            if args.adapter_noise_targets != "full_surgery" or args.reduce_detectors
+            else DEFAULT_OUTPUT_DIR
+        )
     missing_existing_data = [path for path in args.existing_data if not path.is_file()]
     if missing_existing_data:
         raise FileNotFoundError(f"existing Sinter data not found: {missing_existing_data}")
@@ -78,13 +89,19 @@ def main() -> None:
         include_idling_error=args.include_idling_error,
         preparation_rounds=args.preparation_rounds,
         noise_scope=args.noise_scope,
+        adapter_noise_targets=args.adapter_noise_targets,
+        reduce_detectors=args.reduce_detectors,
     )
     write_artifacts(experiments, args.output_dir)
     run_config = {
         "bases": args.bases,
+        "adapter_noise_targets": args.adapter_noise_targets,
+        "reduce_detectors": args.reduce_detectors,
         "bell_pair_infidelities": args.bell_pair_infidelities,
         "bell_pair_fidelities": [1 - value for value in args.bell_pair_infidelities],
-        "existing_data_filepaths": [os.path.relpath(path, args.output_dir) for path in args.existing_data],
+        "existing_data_filepaths": [
+            os.path.relpath(path, args.output_dir) for path in args.existing_data
+        ],
         "include_idling_error": args.include_idling_error,
         "max_errors": args.max_errors,
         "max_shots": args.max_shots,

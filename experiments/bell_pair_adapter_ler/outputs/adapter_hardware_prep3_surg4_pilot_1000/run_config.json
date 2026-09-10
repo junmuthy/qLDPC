@@ -1,0 +1,18 @@
+{
+  "bell_pair_infidelity": 0.0,
+  "detector_error_model": "undecomposed_exact",
+  "include_idling_error": false,
+  "noise_scope": "intrinsic",
+  "output_dir": "experiments/bell_pair_adapter_ler/outputs/adapter_hardware_prep3_surg4_pilot_1000",
+  "paired_hardware_samples": true,
+  "physical_error_rate": 0.001,
+  "preparation_rounds": 3,
+  "rounds": 4,
+  "seed": 20260910,
+  "shots": 1000,
+  "versions": {
+    "ldpc": "2.4.1",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}

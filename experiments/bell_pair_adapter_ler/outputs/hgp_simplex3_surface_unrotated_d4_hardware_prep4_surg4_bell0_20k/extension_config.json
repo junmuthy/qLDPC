@@ -1,0 +1,14 @@
+{
+  "source_directory": "../hgp_simplex3_surface_unrotated_d4_hardware_prep4_surg4_bell0_10k",
+  "source_checkpoint_sha256": "562a9e7b6f2908947a415823e95fea349bdd0f627ba8559218edc7a21555667e",
+  "source_shots_per_basis": 10000,
+  "target_total_shots_per_basis": 20000,
+  "new_shots_per_basis": 10000,
+  "source_failures": {"X": 11, "Z": 13},
+  "source_strong_ids": {
+    "X": "d4ac9e802c6db2dd8a6b3adabeb1b0aa1c37f4f4c34defc47760b0d107fbe52a",
+    "Z": "b85f74f320866580d9f5f6ca373a7ff15455caee8902e83d3c13f66809acad54"
+  },
+  "hardware_estimates_at_10000_and_20000_are_independent": false,
+  "full_surgery_reference_extended": false
+}
