@@ -59,7 +59,7 @@ LABELS = {
     "bell_order": "A: Bell order",
     "local_order": "B: Local order",
     "local_layers": "C: Local layers",
-    "exact_dual": "Exact dual\n(combined control)",
+    "exact_dual": "Exact dual\n(combined)",
 }
 
 

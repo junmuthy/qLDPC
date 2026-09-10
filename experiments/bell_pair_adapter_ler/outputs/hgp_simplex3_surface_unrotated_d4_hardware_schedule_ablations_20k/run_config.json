@@ -1,0 +1,34 @@
+{
+  "adapter_noise_targets": "adapter_hardware",
+  "baseline_directory": "/home/judah_unmuth/Documents/multistaq/qLDPC-bell-syndromes/experiments/bell_pair_adapter_ler/outputs/hgp_simplex3_surface_unrotated_d4_hardware_prep4_surg4_bell0_20k",
+  "bell_pair_fidelity": 1,
+  "compute_exact_distances": false,
+  "dem_analysis": "undecomposed_exact",
+  "detector_reduction": "inactive_rows",
+  "dual_reference_directory": "/home/judah_unmuth/Documents/multistaq/qLDPC-bell-syndromes/experiments/bell_pair_adapter_ler/outputs/hgp_simplex3_surface_unrotated_d4_hardware_xz_dual_prep4_surg4_bell0_20k",
+  "git_commit": "918cee54cbaafb16537f532997353e9ff6a74e9d",
+  "include_idling_error": false,
+  "max_shots": 20000,
+  "noise_scope": "intrinsic",
+  "num_workers": 8,
+  "physical_error_rate": 0.001,
+  "pilot_shots": 1000,
+  "policies": [
+    "bell_order",
+    "local_order",
+    "local_layers"
+  ],
+  "preparation_rounds": 4,
+  "surgery_rounds": 4,
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "versions": {
+    "ldpc": "2.4.1",
+    "numpy": "2.2.6",
+    "scipy": "1.17.1",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}
