@@ -37,6 +37,7 @@ from qldpc.objects import Pauli
 from .bridge import Bridge
 from .gadget import GadgetLayout
 from .hardware import AdapterHardware, AdapterNoiseTargets
+from .schedule import JointPPMSchedule, validate_local_layers
 
 
 def _get_target_recs(
@@ -69,6 +70,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         adapter_split: tuple[Sequence[int], Sequence[int]] | None = None,
         edge_coloring_strategy: str = "smallest_last",
         bell_pair_fidelity: float = 1.0,
+        schedule: JointPPMSchedule | None = None,
     ) -> None:
         if g_l.code is g_r.code and not independent_blocks:
             raise ValueError(
@@ -89,6 +91,7 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         self.adapter_split = self._resolve_adapter_split(adapter_split, width=bridge.width)
         self.edge_coloring_strategy = edge_coloring_strategy
         self.bell_pair_fidelity = _validate_bell_pair_fidelity(bell_pair_fidelity)
+        self.schedule = schedule or JointPPMSchedule()
 
     @staticmethod
     def _resolve_adapter_split(
@@ -163,6 +166,33 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
         right_factors = tuple(factor for factor in factors if factor[0] in right_cols)
         return _validate_factor_split(factors, left_factors, right_factors)
 
+    def local_interaction_circuits(
+        self, code: CSSCode, qubit_ids: QubitIDs
+    ) -> tuple[stim.Circuit, stim.Circuit]:
+        """Return local-only X and Z gate layers, independently of family order."""
+        nonselected = set(range(code.num_checks)) - set(self.selected_check_indices(code))
+        circuits = []
+        for subgraph in code.get_syndrome_subgraphs():
+            edges = [
+                edge
+                for edge in subgraph.edges
+                if (edge[0] if not edge[0].is_data else edge[1]).index in nonselected
+            ]
+            circuits.append(
+                EdgeColoring.graph_to_circuit(
+                    subgraph.edge_subgraph(edges).copy(), qubit_ids, self.edge_coloring_strategy
+                )
+                if edges
+                else stim.Circuit()
+            )
+        if len(circuits) != 2:
+            raise ValueError("Joint CSS schedule requires separate X and Z subgraphs")
+        if self.schedule.local_layers is not None:
+            for replacement, reference in zip(self.schedule.local_layers, circuits):
+                validate_local_layers(replacement, reference)
+            return self.schedule.local_layers[0].copy(), self.schedule.local_layers[1].copy()
+        return circuits[0], circuits[1]
+
     def get_circuit(
         self,
         code: QuditCode,
@@ -192,19 +222,11 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
 
         if nonselected_ids:
             circuit.append("RX", nonselected_ids)
-            nonselected_set = set(nonselected_indices)
-            for subgraph in code.get_syndrome_subgraphs():
-                edges = [
-                    edge
-                    for edge in subgraph.edges
-                    if (edge[0] if not edge[0].is_data else edge[1]).index in nonselected_set
-                ]
-                if edges:
-                    circuit += EdgeColoring.graph_to_circuit(
-                        subgraph.edge_subgraph(edges).copy(),
-                        qubit_ids,
-                        self.edge_coloring_strategy,
-                    )
+            local_layers = dict(
+                zip((Pauli.X, Pauli.Z), self.local_interaction_circuits(code, qubit_ids))
+            )
+            for pauli in self.schedule.local_order:
+                circuit += local_layers[pauli]
             circuit.append("MX", nonselected_ids)
 
             for offset, check_index in enumerate(nonselected_indices):
@@ -212,9 +234,17 @@ class JointPPMSelectiveBellPairSyndrome(SyndromeMeasurementStrategy):
             num_measurements += len(nonselected_indices)
 
         matrix = np.asarray(code.matrix, dtype=np.uint8) % 2
-        for bell_index, check_index in enumerate(sorted(selected_indices)):
+        # Partner allocation is tied to check identity, NEVER extraction position.
+        partners = dict(zip(sorted(selected_indices), qubit_ids.ancilla))
+        bell_indices = [
+            i
+            for pauli in self.schedule.bell_order
+            for i in sorted(selected_indices)
+            if (i < code.num_checks_x) == (pauli is Pauli.X)
+        ]
+        for check_index in bell_indices:
             check_id = qubit_ids.check[check_index]
-            bell_right = qubit_ids.ancilla[bell_index]
+            bell_right = partners[check_index]
             factors = _row_to_pauli_factors(matrix[check_index], len(code))
             left_factors, right_factors = self._split_factors(factors)
             m_left, m_right = _append_bell_pair_check_measurement(
@@ -1261,9 +1291,7 @@ def build_preinitialized_joint_ppm_circuit(
     adapter_data_system = set(data_ids + ancilla_ids + bridge_ids)
     # Resolve after the surgery strategy has allocated its auxiliary ancillas.
     active_qubits = (
-        AdapterHardware.from_code(
-            joint_code, qubit_ids, num_block_data_qubits=n_l + n_r
-        ).all_qubits
+        AdapterHardware.from_code(joint_code, qubit_ids, num_block_data_qubits=n_l + n_r).all_qubits
         if adapter_noise_targets == "adapter_hardware"
         else None
     )
@@ -1696,9 +1724,7 @@ def _surgery_observable(
         )
     circuit = stim.Circuit()
     meas_targets = [
-        target
-        for cid in meas_check_ids
-        for target in _get_target_recs(measurement_record, cid)
+        target for cid in meas_check_ids for target in _get_target_recs(measurement_record, cid)
     ]
     circuit.append("OBSERVABLE_INCLUDE", meas_targets, 0)
     data_targets = [

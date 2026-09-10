@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import hashlib
 import json
 import math
 import os
@@ -22,6 +23,7 @@ from qldpc.circuits.detector_reduction import remove_inactive_detectors
 from qldpc.circuits.surgery import (
     AdapterHardware,
     AdapterNoiseTargets,
+    JointPPMSchedule,
     JointPPMSelectiveBellPairSyndrome,
     build_bridge,
     build_gadget,
@@ -124,6 +126,7 @@ def build_experiment_for_codes(
     compute_exact_distances: bool = False,
     adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     reduce_detectors: bool = False,
+    surgery_schedule: JointPPMSchedule | None = None,
 ) -> BuiltExperiment:
     """Build a phased joint-PPM experiment for any two binary stabilizer CSS codes.
 
@@ -166,6 +169,7 @@ def build_experiment_for_codes(
         bridge,
         independent_blocks=True,
         bell_pair_fidelity=1 - bell_pair_infidelity,
+        schedule=surgery_schedule,
     )
     noise_model = DepolarizingNoiseModel(
         physical_error_rate,
@@ -271,6 +275,14 @@ def build_experiment_for_codes(
             num_full_dem_errors=full_num_dem_errors,
             retained_detector_ids=list(retained_detector_ids),
         )
+    if surgery_schedule is not None:
+        schedule_metadata = surgery_schedule.metadata()
+        fingerprint = hashlib.sha256(
+            json.dumps(schedule_metadata, sort_keys=True).encode()
+        ).hexdigest()
+        name += f"_schedule_{fingerprint[:16]}"
+        metadata.update(name=name, surgery_schedule=schedule_metadata)
+        metadata = json.loads(json.dumps(metadata, sort_keys=True))
     return BuiltExperiment(name, circuit, detector_error_model, metadata)
 
 

@@ -25,11 +25,13 @@ from .circuit import (
 from .dual_schedule import CSSXZDuality
 from .gadget import GadgetLayout, build_gadget
 from .hardware import AdapterHardware, AdapterNoiseTargets
+from .schedule import JointPPMSchedule
 
 __all__ = [
     "AdapterHardware",
     "AdapterNoiseTargets",
     "CSSXZDuality",
+    "JointPPMSchedule",
     "GadgetLayout",
     "Bridge",
     "build_gadget",
