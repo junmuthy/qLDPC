@@ -1,0 +1,2 @@
+{"invocation_wall_seconds": 17.580895627994323, "stage_cap_per_task": 1000, "stage_wall_seconds": 14.594453838013578, "total_errors": 123, "total_shots": 10000}
+{"invocation_wall_seconds": 137.1348412160005, "stage_cap_per_task": 20000, "stage_wall_seconds": 119.55373885799781, "total_errors": 2727, "total_shots": 200000}

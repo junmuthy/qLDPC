@@ -1,0 +1,45 @@
+{
+  "adapter_noise_targets": "adapter_hardware",
+  "bell_pair_fidelities": [
+    1.0,
+    0.999
+  ],
+  "compute_exact_distances": false,
+  "dem_analysis": "undecomposed_exact",
+  "detector_reduction": "inactive_rows",
+  "git_commit": "736aa2fcf59b69c3e92d386afb2c05e657809fd6",
+  "include_idling_error": false,
+  "max_shots": 20000,
+  "noise_scope": "intrinsic",
+  "num_workers": 8,
+  "physical_error_rate": 0.001,
+  "pilot_shots": 1000,
+  "preparation_rounds": 3,
+  "reference_directory": "/home/judah_unmuth/Documents/multistaq/qLDPC-bell-syndromes/experiments/bell_pair_adapter_ler/outputs/adapter_hardware_prep3_round_sweep_1_5_comparison",
+  "reused_bases": [
+    "X",
+    "Z"
+  ],
+  "sampled_bases": [
+    "Z"
+  ],
+  "schedule_policy": "ppm_basis_first_local_v1",
+  "surgery_rounds": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "versions": {
+    "ldpc": "2.4.1",
+    "numpy": "2.2.6",
+    "scipy": "1.17.1",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}
