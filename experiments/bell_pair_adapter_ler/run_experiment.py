@@ -33,6 +33,17 @@ DEFAULT_BELL_PAIR_INFIDELITY = 0.0
 DEFAULT_ROUNDS = (3, 5)
 DEFAULT_PREPARATION_ROUNDS = 3
 DEFAULT_BASES = (Pauli.X, Pauli.Z)
+DEFAULT_FIDELITY_SWEEP_INFIDELITIES = (
+    0.0,
+    1e-5,
+    3e-5,
+    1e-4,
+    3e-4,
+    1e-3,
+    3e-3,
+    1e-2,
+    3e-2,
+)
 NoiseScope = Literal["intrinsic", "operational", "end-to-end"]
 DistanceStatus = Literal["known", "exact", "not_computed"]
 DEFAULT_NOISE_SCOPE: NoiseScope = "intrinsic"
@@ -286,6 +297,44 @@ def build_experiment_matrix(
     ]
 
 
+def build_fidelity_sweep_matrix(
+    *,
+    bell_pair_infidelities: tuple[float, ...] = DEFAULT_FIDELITY_SWEEP_INFIDELITIES,
+    bases: tuple[Pauli, ...] = DEFAULT_BASES,
+    rounds: tuple[int, ...] = (4,),
+    physical_error_rate: float = DEFAULT_PHYSICAL_ERROR_RATE,
+    include_idling_error: bool = False,
+    preparation_rounds: int = DEFAULT_PREPARATION_ROUNDS,
+    noise_scope: NoiseScope = DEFAULT_NOISE_SCOPE,
+    compute_exact_distances: bool = False,
+) -> list[BuiltExperiment]:
+    """Build a Surface/Steane matrix over Bell-pair infidelities, bases, and rounds."""
+    if not bell_pair_infidelities:
+        raise ValueError("bell_pair_infidelities must not be empty")
+    validated_infidelities = tuple(
+        _validate_probability(value, "bell_pair_infidelity")
+        for value in bell_pair_infidelities
+    )
+    if len(set(validated_infidelities)) != len(validated_infidelities):
+        raise ValueError("bell_pair_infidelities must not contain duplicates")
+
+    return [
+        build_experiment(
+            basis=basis,
+            rounds=num_rounds,
+            physical_error_rate=physical_error_rate,
+            bell_pair_infidelity=bell_pair_infidelity,
+            include_idling_error=include_idling_error,
+            preparation_rounds=preparation_rounds,
+            noise_scope=noise_scope,
+            compute_exact_distances=compute_exact_distances,
+        )
+        for basis in bases
+        for num_rounds in rounds
+        for bell_pair_infidelity in validated_infidelities
+    ]
+
+
 def write_artifacts(experiments: list[BuiltExperiment], output_dir: Path) -> None:
     """Write Stim circuits, detector error models, and a shared manifest."""
     circuits_dir = output_dir / "circuits"
@@ -334,6 +383,7 @@ def sample_experiments(
     num_workers: int,
     max_shots: int,
     max_errors: int,
+    existing_data_filepaths: tuple[Path, ...] = (),
 ) -> list[sinter.TaskStats]:
     """Collect resumable decoded logical-error statistics with BP+OSD."""
     tasks = [
@@ -341,7 +391,7 @@ def sample_experiments(
         for experiment in experiments
     ]
     decoder = decoders.SinterDecoder()
-    return sinter.collect(
+    collected_stats = sinter.collect(
         tasks=tasks,
         decoders=["qldpc_bp_osd"],
         custom_decoders={"qldpc_bp_osd": decoder},
@@ -350,7 +400,26 @@ def sample_experiments(
         max_errors=max_errors,
         print_progress=True,
         save_resume_filepath=output_dir / "sinter_progress.csv",
+        existing_data_filepaths=existing_data_filepaths,
     )
+    return _filter_stats_for_experiments(collected_stats, experiments)
+
+
+def _filter_stats_for_experiments(
+    stats: list[sinter.TaskStats],
+    experiments: list[BuiltExperiment],
+) -> list[sinter.TaskStats]:
+    """Exclude auxiliary Sinter data whose task metadata do not exactly match the request."""
+    requested_metadata = {
+        json.dumps(experiment.metadata, sort_keys=True, separators=(",", ":"))
+        for experiment in experiments
+    }
+    return [
+        result
+        for result in stats
+        if json.dumps(result.json_metadata, sort_keys=True, separators=(",", ":"))
+        in requested_metadata
+    ]
 
 
 def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
@@ -364,6 +433,8 @@ def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
         "noise_scope",
         "physical_error_rate",
         "bell_pair_infidelity",
+        "bell_pair_fidelity",
+        "num_bell_pair_checks_per_round",
         "shots",
         "discards",
         "errors",
@@ -381,6 +452,7 @@ def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
             key=lambda item: (
                 item.json_metadata["logical_basis"],
                 item.json_metadata["rounds"],
+                item.json_metadata["bell_pair_infidelity"],
             ),
         ):
             kept_shots = result.shots - result.discards
@@ -396,6 +468,10 @@ def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
                     "noise_scope": result.json_metadata["noise_scope"],
                     "physical_error_rate": result.json_metadata["physical_error_rate"],
                     "bell_pair_infidelity": result.json_metadata["bell_pair_infidelity"],
+                    "bell_pair_fidelity": result.json_metadata["bell_pair_fidelity"],
+                    "num_bell_pair_checks_per_round": result.json_metadata[
+                        "num_bell_pair_checks_per_round"
+                    ],
                     "shots": result.shots,
                     "discards": result.discards,
                     "errors": result.errors,

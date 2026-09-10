@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import sinter
 
 from qldpc import codes
 from qldpc.codes.common import CSSCode
@@ -10,9 +11,11 @@ from qldpc.objects import Pauli
 
 from .run_experiment import (
     BuiltExperiment,
+    _filter_stats_for_experiments,
     build_experiment,
     build_experiment_for_codes,
     build_experiment_matrix,
+    build_fidelity_sweep_matrix,
 )
 
 
@@ -76,6 +79,58 @@ def test_requested_matrix_contains_both_bases_and_round_counts() -> None:
         for experiment in experiments
     }
     assert actual == {("X", 3), ("X", 5), ("Z", 3), ("Z", 5)}
+
+
+def test_fidelity_sweep_matrix_contains_every_requested_combination() -> None:
+    experiments = build_fidelity_sweep_matrix(
+        bell_pair_infidelities=(0.0, 0.001),
+        bases=(Pauli.X,),
+        rounds=(3, 4),
+    )
+
+    actual = {
+        (
+            experiment.metadata["logical_basis"],
+            experiment.metadata["rounds"],
+            experiment.metadata["bell_pair_infidelity"],
+        )
+        for experiment in experiments
+    }
+    assert actual == {
+        ("X", 3, 0.0),
+        ("X", 3, 0.001),
+        ("X", 4, 0.0),
+        ("X", 4, 0.001),
+    }
+    assert len({experiment.name for experiment in experiments}) == len(experiments)
+
+
+@pytest.mark.parametrize("infidelities", [(), (0.001, 0.001)])
+def test_fidelity_sweep_matrix_rejects_empty_or_duplicate_grid(
+    infidelities: tuple[float, ...],
+) -> None:
+    with pytest.raises(ValueError, match="bell_pair_infidelities"):
+        build_fidelity_sweep_matrix(bell_pair_infidelities=infidelities)
+
+
+def test_auxiliary_sinter_data_are_filtered_by_exact_metadata() -> None:
+    experiment = build_experiment(basis=Pauli.X, rounds=2)
+    legacy_metadata = dict(experiment.metadata)
+    legacy_metadata.pop("joint_code_distance_status")
+    requested = sinter.TaskStats(
+        strong_id="requested",
+        decoder="qldpc_bp_osd",
+        json_metadata=experiment.metadata,
+        shots=100,
+    )
+    legacy = sinter.TaskStats(
+        strong_id="legacy",
+        decoder="qldpc_bp_osd",
+        json_metadata=legacy_metadata,
+        shots=100,
+    )
+
+    assert _filter_stats_for_experiments([requested, legacy], [experiment]) == [requested]
 
 
 @pytest.mark.parametrize(

@@ -109,3 +109,38 @@ Artifacts are written under `outputs/`:
 
 Artifact names include preparation rounds, surgery rounds, and noise scope, so new intrinsic runs do
 not overwrite the earlier direct-merge pilot files.
+
+## Bell-pair fidelity sweep
+
+The fidelity sweep holds the Surface-3/Steane adapter, physical error rate, and phase lengths fixed
+while varying the independent Werner-state Bell-pair infidelity `p_B = 1 - F_B`. The default grid
+is logarithmically spaced from `p_B = 10^-5` through `3e-2` and includes the ideal `p_B = 0`
+reference. Four surgery rounds consume 20 Bell pairs: five crossing checks in each round.
+
+Run the 20,000-shot pilot:
+
+```bash
+PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache \
+  MPLCONFIGDIR=/tmp/qldpc-matplotlib \
+  ../.venv/bin/python experiments/bell_pair_adapter_ler/run_fidelity_sweep.py \
+  --max-shots 20000 --max-errors 400 --num-workers 12
+```
+
+Re-running the same command resumes its own `sinter_progress.csv`. The optional `--existing-data`
+argument accepts additional Sinter files with exactly matching task identities. Older result files
+whose metadata schema differs are deliberately excluded instead of being silently mixed into the
+summary.
+
+The sweep writes the standard circuit manifest and Sinter files plus:
+
+- `run_config.json`: the grid, sampling limits, and reused input data.
+- `fidelity_response.csv`: absolute LER, ideal-pair baseline, excess LER, and total Bell exposure.
+- `fidelity_requirements.csv`: monotone point-estimate and conservative 95%-interval brackets for
+  10% and 25% allowable LER overhead.
+- `adapter_ler_vs_bell_fidelity.{pdf,png}`: absolute LER with Wilson 95% intervals.
+- `adapter_excess_ler_vs_bell_fidelity.{pdf,png}`: excess over the ideal-pair baseline.
+
+The scalar-fidelity model assumes equal residual `X`, `Y`, and `Z` probabilities on one Bell half.
+For a particular distillation protocol, fidelity alone is sufficient only when its output is well
+approximated by this Werner model. Biased or correlated distillation outputs require their complete
+residual error model for a quantitative adapter prediction.
