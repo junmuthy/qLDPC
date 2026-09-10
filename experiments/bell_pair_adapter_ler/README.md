@@ -417,3 +417,58 @@ Fisher exact tests, and Holm adjustment over the six planned comparisons (valid 
 baselines). Intermediate pilot plots are descriptive, not repeated significance stopping tests.
 No equivalence or improvement is inferred merely from overlapping pointwise error bars.
 Worker times and stage wall times are historical workload records, not controlled benchmarks.
+
+## Surface–Steane local-order-only round sweep
+
+`run_surface_local_order.py` tests the lighter PPM-basis-first local rule without
+changing either adapter's geometry or logical supports. XX remains at legacy local
+X-then-Z and is reused without new sampling. Only ZZ changes to local Z-then-X.
+Bell-family order, Bell partners, within-check gates, the local gate layers themselves,
+preparation, detachment, and terminal readout are unchanged. This is not an exact-dual
+construction and does not require choosing equivalent logical representatives.
+
+The ten new ZZ configurations span 1–5 adapter rounds and Bell fidelities 1 and 0.999.
+All use rotated Surface-3 (left) and Steane (right), logical index zero, three ideal
+preparation rounds, hardware-only p=0.001, no idling noise, ideal closure, existing
+BP+OSD settings, and exact undecomposed DEM analysis with inactive-detector reduction.
+The 20 legacy XX/ZZ hardware configurations in
+`outputs/adapter_hardware_prep3_round_sweep_1_5_comparison/{bell0,bell0p001}/` are
+read-only references; no HGP or full-surgery data are pooled into this study.
+
+Before sampling, all 20 default **canonical serialized circuits** and ordered DEMs
+must match their archives. The serialization qualification matters: Stim text rounds
+floating-point gate arguments, so an in-memory gate argument need not have the same
+last binary bit as its text round trip. Circuit text must match exactly and ordered
+DEM equality is required independently, including error probabilities. The complete
+archive files are hashed and rechecked before every analysis.
+
+Each new configuration must preserve the full physical gate/noise inventory, ideal
+preparation, canonical detector/observable meanings, Bell partner and gate sequences,
+and complete tick depth. Additional checks require exactly local Z layers followed
+by the original X layers, and an unchanged quantum detachment/readout suffix. Each
+Bell fidelity is audited with its actual full noisy circuit. Noiseless sampling,
+decoder smoke tests, and nested-metadata task-identity round trips are also tested.
+
+```bash
+PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache MPLBACKEND=Agg \
+  MPLCONFIGDIR=/tmp/qldpc-matplotlib OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_surface_local_order \
+  --max-shots 20000 --pilot-shots 1000 --num-workers 8
+```
+
+The new directory is `outputs/surface_steane_hardware_local_order_prep3_rounds1_5_20k/`.
+Ten unique task identities share a resumable `sinter_progress.csv`. First all ten reach
+1,000 pilot shots each, then the same tasks continue to 20,000 total shots each; pilot
+counts must not be added again. XX is never passed to the sampler. `--build-only`
+validates without sampling; `--analyze-only` regenerates the comparison without new shots.
+
+The PDF/PNG plots LER versus rounds, separately for the two Bell fidelities, with three
+curves: unchanged/reused legacy XX, legacy ZZ, and new local-order-only ZZ. Pointwise
+95% Wilson intervals and upper-limit markers for zero failures are used.
+`comparison.csv` includes actual shot/failure counts, depth, model sizes, and worker
+time; `differences.csv` compares only new ZZ against the matching legacy ZZ using
+Newcombe/Wilson intervals, nominal Fisher tests, and Holm adjustment across ten tests.
+Legacy points stopped at 10,000 shots or about 200 failures, unlike the new fixed-shot
+run. These nominal intervals/tests do not claim stopping-rule-adjusted coverage or
+formal equivalence. Historical worker times are workload records, not controlled
+benchmarks. All old results and their checkpoints remain unchanged.
