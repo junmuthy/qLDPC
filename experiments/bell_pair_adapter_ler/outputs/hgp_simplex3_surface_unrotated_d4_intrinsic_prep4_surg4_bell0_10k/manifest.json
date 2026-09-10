@@ -1,0 +1,86 @@
+[
+  {
+    "bell_pair_fidelity": 1.0,
+    "bell_pair_infidelity": 0.0,
+    "circuit_path": "circuits/hgp_simplex3_98_18_4_surface_unrotated_d4_joint_x_prep4_surg4_intrinsic_p0p001_bell0.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/hgp_simplex3_98_18_4_surface_unrotated_d4_joint_x_prep4_surg4_intrinsic_p0p001_bell0.dem",
+    "include_idling_error": false,
+    "joint_code_distance_status": "not_computed",
+    "joint_code_parameters": [
+      136,
+      18,
+      null
+    ],
+    "left_code": "hgp_simplex3_98_18_4",
+    "left_code_distance_status": "not_computed",
+    "left_code_parameters": [
+      98,
+      18,
+      null
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "X",
+    "name": "hgp_simplex3_98_18_4_surface_unrotated_d4_joint_x_prep4_surg4_intrinsic_p0p001_bell0",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 7,
+    "num_dem_errors": 20045,
+    "num_detectors": 1030,
+    "num_observables": 1,
+    "num_qubits": 279,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 4,
+    "right_code": "surface_unrotated_d4",
+    "right_code_distance_status": "known",
+    "right_code_parameters": [
+      25,
+      1,
+      4
+    ],
+    "right_logical_index": 0,
+    "rounds": 4,
+    "surgery_rounds": 4
+  },
+  {
+    "bell_pair_fidelity": 1.0,
+    "bell_pair_infidelity": 0.0,
+    "circuit_path": "circuits/hgp_simplex3_98_18_4_surface_unrotated_d4_joint_z_prep4_surg4_intrinsic_p0p001_bell0.stim",
+    "decoder": "qldpc_bp_osd",
+    "dem_path": "dems/hgp_simplex3_98_18_4_surface_unrotated_d4_joint_z_prep4_surg4_intrinsic_p0p001_bell0.dem",
+    "include_idling_error": false,
+    "joint_code_distance_status": "not_computed",
+    "joint_code_parameters": [
+      136,
+      18,
+      null
+    ],
+    "left_code": "hgp_simplex3_98_18_4",
+    "left_code_distance_status": "not_computed",
+    "left_code_parameters": [
+      98,
+      18,
+      null
+    ],
+    "left_logical_index": 0,
+    "logical_basis": "Z",
+    "name": "hgp_simplex3_98_18_4_surface_unrotated_d4_joint_z_prep4_surg4_intrinsic_p0p001_bell0",
+    "noise_scope": "intrinsic",
+    "num_bell_pair_checks_per_round": 7,
+    "num_dem_errors": 18127,
+    "num_detectors": 1030,
+    "num_observables": 1,
+    "num_qubits": 279,
+    "physical_error_rate": 0.001,
+    "preparation_rounds": 4,
+    "right_code": "surface_unrotated_d4",
+    "right_code_distance_status": "known",
+    "right_code_parameters": [
+      25,
+      1,
+      4
+    ],
+    "right_logical_index": 0,
+    "rounds": 4,
+    "surgery_rounds": 4
+  }
+]

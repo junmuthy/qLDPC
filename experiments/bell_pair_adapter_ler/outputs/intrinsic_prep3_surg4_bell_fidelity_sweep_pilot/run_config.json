@@ -1,0 +1,43 @@
+{
+  "bases": [
+    "X",
+    "Z"
+  ],
+  "bell_pair_fidelities": [
+    1.0,
+    0.99999,
+    0.99997,
+    0.9999,
+    0.9997,
+    0.999,
+    0.997,
+    0.99,
+    0.97
+  ],
+  "bell_pair_infidelities": [
+    0.0,
+    1e-05,
+    3e-05,
+    0.0001,
+    0.0003,
+    0.001,
+    0.003,
+    0.01,
+    0.03
+  ],
+  "existing_data_filepaths": [],
+  "include_idling_error": false,
+  "max_errors": 400,
+  "max_shots": 20000,
+  "noise_scope": "intrinsic",
+  "num_workers": 12,
+  "physical_error_rate": 0.001,
+  "preparation_rounds": 3,
+  "relative_ler_overheads": [
+    0.1,
+    0.25
+  ],
+  "surgery_rounds": [
+    4
+  ]
+}

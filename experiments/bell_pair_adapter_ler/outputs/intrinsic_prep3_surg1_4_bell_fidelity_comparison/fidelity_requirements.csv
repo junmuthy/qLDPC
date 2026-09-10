@@ -1,0 +1,17 @@
+logical_basis,surgery_rounds,allowable_relative_ler_overhead,isotonic_ideal_bell_logical_error_rate,max_tested_infidelity_meeting_point_estimate,min_tested_fidelity_meeting_point_estimate,next_tested_infidelity,next_tested_fidelity,point_estimate_status,max_tested_infidelity_meeting_conservative_95ci,min_tested_fidelity_meeting_conservative_95ci
+X,1,0.1,0.04415639161133945,0.001,0.999,0.003,0.997,bracketed_by_tested_points,0.0,1.0
+X,1,0.25,0.04415639161133945,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+X,2,0.1,0.032034425053789145,0.0,1.0,1e-05,0.99999,bracketed_by_tested_points,0.0,1.0
+X,2,0.25,0.032034425053789145,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+X,3,0.1,0.00305,0.001,0.999,0.003,0.997,bracketed_by_tested_points,0.0,1.0
+X,3,0.25,0.00305,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+X,4,0.1,0.00221,0.0001,0.9999,0.0003,0.9997,bracketed_by_tested_points,0.0,1.0
+X,4,0.25,0.00221,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+Z,1,0.1,0.03443722064201544,0.001,0.999,0.003,0.997,bracketed_by_tested_points,0.0,1.0
+Z,1,0.25,0.03443722064201544,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.001,0.999
+Z,2,0.1,0.02931524830452855,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+Z,2,0.25,0.02931524830452855,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0,1.0
+Z,3,0.1,0.00265,3e-05,0.99997,0.0001,0.9999,bracketed_by_tested_points,0.0,1.0
+Z,3,0.25,0.00265,0.001,0.999,0.003,0.997,bracketed_by_tested_points,0.0,1.0
+Z,4,0.1,0.0019175,0.0001,0.9999,0.0003,0.9997,bracketed_by_tested_points,1e-05,0.99999
+Z,4,0.25,0.0019175,0.003,0.997,0.01,0.99,bracketed_by_tested_points,0.0001,0.9999
