@@ -447,6 +447,7 @@ def sample_experiments(
     max_shots: int,
     max_errors: int,
     existing_data_filepaths: tuple[Path, ...] = (),
+    print_progress: bool = True,
 ) -> list[sinter.TaskStats]:
     """Collect resumable decoded logical-error statistics with BP+OSD."""
     tasks = [
@@ -471,7 +472,7 @@ def sample_experiments(
         num_workers=num_workers,
         max_shots=max_shots,
         max_errors=max_errors,
-        print_progress=True,
+        print_progress=print_progress,
         save_resume_filepath=output_dir / "sinter_progress.csv",
         existing_data_filepaths=existing_data_filepaths,
     )

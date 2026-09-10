@@ -1,0 +1,2 @@
+{"errors": 0, "invocation_wall_seconds": 21.488946117002342, "shots": 1000, "stage_cap": 1000, "stage_wall_seconds": 20.966608353999618, "strong_id": "92f475cf23e91416fbe133fed29c59d11bd68ca673681de2c5483d557c28e41f"}
+{"errors": 19, "invocation_wall_seconds": 221.6706247559996, "shots": 20000, "stage_cap": 20000, "stage_wall_seconds": 200.18148576599924, "strong_id": "92f475cf23e91416fbe133fed29c59d11bd68ca673681de2c5483d557c28e41f"}

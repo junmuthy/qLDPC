@@ -1,0 +1,26 @@
+{
+  "adapter_noise_targets": "adapter_hardware",
+  "bell_pair_fidelity": 1.0,
+  "compute_exact_distances": false,
+  "dem_analysis": "undecomposed_exact",
+  "include_idling_error": false,
+  "max_shots": 20000,
+  "noise_scope": "intrinsic",
+  "num_workers": 8,
+  "physical_error_rate": 0.001,
+  "pilot_shots": 1000,
+  "preparation_rounds": 4,
+  "reference_directory": "/home/judah_unmuth/Documents/multistaq/qLDPC-bell-syndromes/experiments/bell_pair_adapter_ler/outputs/hgp_simplex3_surface_unrotated_d4_hardware_prep4_surg4_bell0_20k",
+  "schedule_policy": "xz_dual_from_x_v1",
+  "surgery_rounds": 4,
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "versions": {
+    "ldpc": "2.4.1",
+    "numpy": "2.2.6",
+    "sinter": "1.16.0",
+    "stim": "1.16.0"
+  }
+}

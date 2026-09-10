@@ -323,3 +323,49 @@ Historical and new worker times, normalized per 10,000 shots, are included as wo
 records, not as a controlled runtime benchmark. `invocations.jsonl` records wall-clock time
 for each completed invocation (including build/analysis; a resumed invocation measures only
 that invocation, not all previous work). The original data and its checkpoints are not modified.
+
+## Exact X/Z-dual hardware schedule
+
+`run_hgp_dual_schedule.py` is a separate opt-in hardware-only experiment. It derives ZZ from
+the complete reference XX circuit, preserving gate order, Bell-check order, ideal preparation
+and closure, measurement-record order, and detector/observable definitions. It does not insert
+extra physical Hadamard gates or change the default surgery schedule.
+
+The generic `CSSXZDuality` helper validates a supplied data-column permutation against every
+opposite-basis stabilizer row and matches check ancillas and Bell partners. The HGP/surface
+experiment supplies its explicit block-transposition mapping and additionally validates the
+chosen logical support and the adapter-only noise mask. It transports basis-dependent resets,
+measurements, controlled gates, and Pauli noise together. Unsupported operations or invalid
+maps raise errors. This does not assume that arbitrary CSS codes are self-dual: the helper
+requires an explicit verified correspondence. Annotation coordinates follow the transported
+reference layout rather than the legacy ZZ row order.
+
+Before sampling, the runner requires the ordered dual ZZ detector-error model to equal the
+archived hardware XX model exactly, including probabilities and detector/error-column order.
+This is a symmetry control, not an optimization claim. With these noise and decoder settings,
+XX and dual ZZ have the same predicted decoded error statistics; independent shot samples need
+not yield identical counts. The hardware-only test does not explain the archived full-surgery
+ZZ excess, since block-only faults remain disabled.
+
+```bash
+PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache MPLBACKEND=Agg \
+  MPLCONFIGDIR=/tmp/qldpc-matplotlib OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_hgp_dual_schedule \
+  --max-shots 20000 --pilot-shots 1000 --num-workers 8
+```
+
+Only the new ZZ task is sampled. The 1,000-shot pilot is resumed to 20,000 **total** shots,
+not added to a separate 20,000-shot estimate. Existing hardware XX/ZZ 20,000-shot results
+are read-only references. No full-surgery experiment or exact-distance search is built.
+`--build-only` performs validation without production sampling; `--analyze-only` regenerates
+the comparison. The default directory is
+`outputs/hgp_simplex3_surface_unrotated_d4_hardware_xz_dual_prep4_surg4_bell0_20k/`.
+
+New schedule metadata is canonically ordered and has its own task identity. The saved-artifact
+round-trip identity is tested to avoid restarting from zero due to metadata ordering. A
+directory containing another experiment is rejected. `schedule_audit.json` records the full
+qubit map, reference hash, logical/mask checks, DEM equality, and task ID. The comparison
+PDF/PNG shows archived XX, archived ZZ, and new dual ZZ with 95% Wilson intervals;
+`comparison.csv` also records normalized worker time. These historical timings are not a
+controlled speed benchmark. `invocations.jsonl` records completed pilot/production stage wall
+times and cumulative invocation time; pilot and final cumulative estimates are correlated.

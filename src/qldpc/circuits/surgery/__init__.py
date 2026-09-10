@@ -22,12 +22,14 @@ from .circuit import (
     keep_only_observable,
     logical_state_init,
 )
+from .dual_schedule import CSSXZDuality
 from .gadget import GadgetLayout, build_gadget
 from .hardware import AdapterHardware, AdapterNoiseTargets
 
 __all__ = [
     "AdapterHardware",
     "AdapterNoiseTargets",
+    "CSSXZDuality",
     "GadgetLayout",
     "Bridge",
     "build_gadget",
