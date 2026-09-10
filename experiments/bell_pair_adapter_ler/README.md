@@ -369,3 +369,51 @@ PDF/PNG shows archived XX, archived ZZ, and new dual ZZ with 95% Wilson interval
 `comparison.csv` also records normalized worker time. These historical timings are not a
 controlled speed benchmark. `invocations.jsonl` records completed pilot/production stage wall
 times and cumulative invocation time; pilot and final cumulative estimates are correlated.
+
+## One-factor HGP hardware schedule tests
+
+`run_hgp_schedule_ablations.py` compares three independent changes to each legacy basis:
+
+- A, `bell_order`: Bell-assisted Z checks before X checks, with partner ownership and
+  within-family/within-check ordering fixed.
+- B, `local_order`: local Z interaction layers before X layers; Bell extraction unchanged.
+- C, `local_layers`: local layers mapped from the *opposite legacy basis*, with the target's
+  legacy X-then-Z family order restored. Bell extraction is untouched. This replaces local
+  coupling order and parallel grouping together and can change depth.
+
+These are **not cumulative changes**. Four ideal preparation rounds, adapter initialization,
+four noisy adapter rounds, detachment, and ideal terminal readout retain the legacy protocol.
+The blocks are HGP simplex [[98,18,4]] and unrotated surface distance 4, logical index zero,
+hardware-only noise at p=0.001, Bell F=1, and no idling noise. No exact distances are searched.
+
+`JointPPMSchedule` exposes independent family-order and validated local-layer controls.
+Defaults reproduce the archived hardware circuits/DEMs exactly. Replacement layers must
+preserve every local check-data gate and have no within-layer qubit conflicts. Bell partner
+allocation depends on check identity, not extraction position. Preparation does not receive
+the surgery scheduling controls. The experiment runner checks full gate/noise inventories,
+ideal preparation, physical detector/observable identities (including their canonical order),
+and noiseless correctness. Only measurement references are regenerated; records are not
+transported wholesale from the opposite basis. The DEM and inactive-detector selection are
+recomputed with the legacy policy, so their sizes can legitimately change.
+
+```bash
+PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache MPLBACKEND=Agg \
+  MPLCONFIGDIR=/tmp/qldpc-matplotlib OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_hgp_schedule_ablations \
+  --max-shots 20000 --pilot-shots 1000 --num-workers 8
+```
+
+The default new directory is `outputs/hgp_simplex3_surface_unrotated_d4_hardware_schedule_ablations_20k/`.
+Each of six tasks has a separate `Z/` or `X/` policy subdirectory and checkpoint. The pilot
+is included in the 20,000-shot total. ZZ runs precede XX. No error-count stopping rule truncates
+the planned shot total. Nested task metadata is recursively canonicalized for restart safety.
+An exactly equal ordered DEM triggers a stop before sampling so reuse cannot be silently
+misreported as new independent data. `--build-only` validates; `--analyze-only` plots saved results.
+
+`comparison.csv` and the PDF/PNG show both legacy baselines, the six one-factor variants, and
+the previous combined-control exact-dual ZZ reference. `differences.csv` reports pointwise
+Newcombe/Wilson 95% intervals on differences from the corresponding legacy baseline, two-sided
+Fisher exact tests, and Holm adjustment over the six planned comparisons (valid with shared
+baselines). Intermediate pilot plots are descriptive, not repeated significance stopping tests.
+No equivalence or improvement is inferred merely from overlapping pointwise error bars.
+Worker times and stage wall times are historical workload records, not controlled benchmarks.
