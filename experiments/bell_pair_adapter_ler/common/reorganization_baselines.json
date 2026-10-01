@@ -1,0 +1,59 @@
+{
+  "source_commit": "30c6a55f",
+  "conditions": [
+    {
+      "preset": "surface-steane",
+      "m": 3,
+      "rounds": 2,
+      "basis": "X",
+      "circuit": "bd19c01f3b5c52d21adc4fd7e614f27537ee09339df4040024d0ab4e458ef343",
+      "dem": "ba0b88cebe6f9ae64eb58fea3d6bfaded1eb3193dfff5d2f40458ef735ca6da0",
+      "strong_id": "5cdbdbdf9d75a0a47868c3a9ead24f97fb16f33f5142745b6571273e0c00d590"
+    },
+    {
+      "preset": "surface-steane",
+      "m": 3,
+      "rounds": 2,
+      "basis": "Z",
+      "circuit": "4fbd83dedb0c5574a9eba72ea06eb4a2afb1b2ddbc8ca37b3c56683b94351694",
+      "dem": "f0f782f137733cfb848c1038e3ab5e3320b9b091f401794ddf1f777a113274a0",
+      "strong_id": "07029bd15b997e5d07f876de5b56d048e947128c7a78de00c334bc098c6c489d"
+    },
+    {
+      "preset": "hgp-simplex-surface",
+      "m": 3,
+      "rounds": 4,
+      "basis": "X",
+      "circuit": "6108838d94777cc740fa17250b3e1579d833c7f16d6281a85b8eaca07182db12",
+      "dem": "5827c3470fa96f7565b754f15bc7b06142638d48336ef9238a894950698b33f5",
+      "strong_id": "287ee9e6e2400d13daf474601ba778c6ebc21f8f4eeae9ac5254578ed810adb0"
+    },
+    {
+      "preset": "hgp-simplex-surface",
+      "m": 3,
+      "rounds": 4,
+      "basis": "Z",
+      "circuit": "ffdeccc160d8a36b43b14ee35dfb6fa4132025d23fa360fb68df8d6ab475f78f",
+      "dem": "287f9614be5e277d259fe21fb634f7f9c9cf0c9fffa7049be7d4224b4f6022b3",
+      "strong_id": "2149e9f3683b2b6181a9d3b067779373ea589c2964c2c763d0936dcb928d4441"
+    },
+    {
+      "preset": "hgp-simplex-surface",
+      "m": 4,
+      "rounds": 8,
+      "basis": "X",
+      "circuit": "a234e40a9a7f2d92a80f704c9a4f64dea0b665afd1fb642ef81a788450e48269",
+      "dem": "2ebfaae7b595967de490b6d945da4878fdf39ca5ab6f584dc953f361a66001eb",
+      "strong_id": "44059b5f90e19733cc7b0bc441ec208b3d42b02dc3af1c219cc0e2d0e74b68ba"
+    },
+    {
+      "preset": "hgp-simplex-surface",
+      "m": 4,
+      "rounds": 8,
+      "basis": "Z",
+      "circuit": "9ea0370c830e1c67be5bc9f7d6e68cb73bd24a2a1c616ebf79fc7a51c1415f25",
+      "dem": "2dbc9dd3d457831925f79173be9ed78312e9581f8d1a05be7fc468af7db4153f",
+      "strong_id": "f7ff520036665dede4a133473fd5f5a437a686db1a2cbaa13611a786f5670fef"
+    }
+  ]
+}

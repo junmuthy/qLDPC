@@ -1,0 +1,7 @@
+{
+  "single_fault_audit.py": {
+    "old_sha256": "014ad7a33f2900449741d95beabea073fd837d3a757bb0128be1b5718e326fcb",
+    "new_sha256": "2b3327a1e48c202db72da0013495ef927f8b8feb2ff77b26487bbff6f6d8966b",
+    "reason": "Reviewed import/output-path relocation and explicit identity-compatibility calls; fault enumeration and decoder algorithms unchanged."
+  }
+}

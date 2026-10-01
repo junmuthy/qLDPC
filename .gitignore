@@ -6,6 +6,10 @@ notes.txt
 experiments/bivariate_bicycle/codes.csv
 experiments/quantum_tanner/codes
 
+# Adapter LER results/checkpoints are local artifacts, not simulation source.
+# Previously committed result files remain tracked.
+/experiments/bell_pair_adapter_ler/outputs/
+
 # python cache
 __pycache__
 
