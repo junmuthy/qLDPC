@@ -63,6 +63,107 @@ experiment = build_experiment_for_codes(
 The inputs must be binary, non-subsystem CSS codes. The two arguments always describe separate
 physical blocks, even when they reference the same `CSSCode` object.
 
+## PPM-basis-first version for future hardware tests
+
+Use `schedule_policy="ppm_basis_first"` in `build_experiment_for_codes`,
+`build_experiment`, `build_experiment_matrix`, or `build_fidelity_sweep_matrix`.
+The versioned identity is `ppm_basis_first_local_v1`:
+
+| Logical PPM | Local check-family order | Bell-assisted check-family order |
+|---|---|---|
+| `XX` | `X→Z` | `X→Z` |
+| `ZZ` | `Z→X` | `X→Z` |
+
+Only merged-round **local family order** changes. Independent preparation,
+within-family gate layers, adapter geometry, Bell partners, detachment, and
+terminal closure are unchanged. This is not the exact-dual construction, nor a
+claim that the rule is optimal. Existing builders still default to the legacy
+schedule and retain their old checkpoint identities.
+
+For any pair of compatible binary stabilizer CSS codes:
+
+```python
+experiment = build_experiment_for_codes(
+    left_code=left_code,
+    right_code=right_code,
+    basis=Pauli.Z,
+    preparation_rounds=4,
+    surgery_rounds=4,
+    physical_error_rate=0.001,
+    bell_pair_infidelity=0.0,
+    noise_scope="intrinsic",
+    adapter_noise_targets="adapter_hardware",
+    reduce_detectors=True,
+    schedule_policy="ppm_basis_first",
+)
+```
+
+At the lower-level circuit API, use `JointPPMSchedule.ppm_basis_first(basis)` as
+the merged-round syndrome strategy's schedule. The generic builder rejects
+combining a named nonlegacy policy with a custom `surgery_schedule`.
+
+The named policy uses an explicitly undecomposed detector error model (DEM),
+recorded in the manifest and passed unchanged to BP+OSD. Its names and task
+identities are distinct from legacy runs, **even for XX**, whose circuit is
+unchanged. Old shots are not automatically pooled. The original full-surgery
+default retains Sinter's automatic DEM analysis; comparing to that archive changes
+decoder representation as well as any chosen noise policy.
+
+The dedicated runner below defaults to intrinsic **hardware-only** noise and
+inactive-detector reduction. The code blocks and their ideal operations remain
+in the circuit; this is not removal of the blocks or an equivalent acceleration
+of full-surgery noise. Exact-distance searches and idling noise stay disabled.
+
+Start with an HGP-simplex `m=3` / unrotated surface `d=4` pilot:
+
+```bash
+PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_ppm_basis_first \
+  --code-pair hgp-simplex-surface --simplex-m 3 --surface-distance 4 \
+  --preparation-rounds 4 --rounds 4 --max-shots 1000 --num-workers 4 \
+  --output-dir experiments/bell_pair_adapter_ler/outputs/hgp_m3_surface_d4_ppm_first_pilot
+```
+
+Repeat the same command to resume, or increase `--max-shots` to extend the
+**cumulative per-condition** cap. Changing the codes, rounds, logical indices,
+noise, circuit, or DEM requires a new output directory. Every invocation is
+logged; resumable batches are saved in `sinter_progress.csv`. Ctrl-C saves any
+already-flushed batches; an in-flight batch may be lost. No old checkpoints are
+imported automatically.
+
+For a larger construction, use `--simplex-m 4 --surface-distance 8` and a new
+output directory. Start with `--build-only`, then a small shot cap before
+committing to hours of decoding. The surface distance defaults to `2**(m-1)`
+if omitted for the HGP preset. `--code-pair surface-steane` selects the original
+rotated Surface-3/Steane pair. Both bases are sampled unless `--bases X` or
+`--bases Z` is specified. Explicit logical indices are also supported.
+
+Timing is recorded in `invocations.jsonl`, separately from task identity:
+
+- Code construction wall time and each circuit/DEM build wall time.
+- Sampling/decoding collection wall time, including worker startup and decoder
+  compilation; this is not pure decoder time or per-condition elapsed time.
+- Newly collected shots and worker seconds for this invocation only, plus
+  cumulative counts. `summary.csv` contains cumulative per-condition worker
+  seconds, LER, Wilson intervals, and explicit local/Bell orders.
+- Worker count, thread settings, Python/platform, and dependency versions.
+
+For a timing pilot, add `--profile --max-batch-size 128 --max-batch-seconds 5`.
+Profiling requires the optional `psutil` package and writes newly flushed batch
+statistics to `batch_samples.jsonl`, plus one-second parent/descendant RSS samples
+to `resource_samples.jsonl`. Each record identifies its invocation. The sampled
+sum of process RSS may double-count shared pages and miss short peaks; it is not
+unique physical memory. The batch-time target does not interrupt a slow shot.
+Profiling and collection limits do not change the circuit/decoder task identity.
+
+Do not interpret summed worker seconds as elapsed time, or divide resumed
+cumulative shots by the latest invocation's time. Small pilots can be dominated
+by startup and rare expensive decoder cases; they are not reliable speedup or
+low-LER estimates. Keep hardware, worker count, shot budget, and noise/decoder
+policies matched for future speed comparisons. This scheduling rule by itself
+does not promise a speedup.
+
 ## Distance metadata
 
 Exact code distance is not needed to build the circuit or detector error model, decode samples, or
@@ -472,3 +573,197 @@ Legacy points stopped at 10,000 shots or about 200 failures, unlike the new fixe
 run. These nominal intervals/tests do not claim stopping-rule-adjusted coverage or
 formal equivalence. Historical worker times are workload records, not controlled
 benchmarks. All old results and their checkpoints remain unchanged.
+
+## Reusable HGP exact-dual ZZ pilot and timing comparison
+
+`run_hgp_xz_dual.py` generalizes the earlier m=3 exact-dual experiment without
+changing it or the PPM-basis-first runner. Its default target is simplex HGP
+`m=4` / unrotated surface `d=8`, logical index zero in each block, four ideal
+independent preparation rounds and eight adapter rounds. It samples **only new
+ZZ shots**. Existing matching-basis XX and ZZ results are read-only references;
+they are never imported into the new checkpoint.
+
+`hgp_xz_dual.py` derives candidate sector-transposition permutations from the
+actual HGP seed dimensions and surface distance. It validates logical supports,
+all opposite-basis check rows, Bell-partner ownership, physical block/adapter
+partitions, and the hardware-only noise mask with `CSSXZDuality`. This preset
+does not assume arbitrary CSS codes or arbitrary logical selections admit this
+map: incompatible selections fail instead of choosing a different logical.
+Exact distance searches remain disabled.
+
+The entire XX circuit is transported into ZZ, including its ideal boundaries,
+measurement-record references, controlled gates, and Pauli noise. No physical
+Hadamards are inserted. Local extraction and Bell extraction both become `Z→X`,
+and local gate layers are transported from XX. Metadata explicitly labels the
+transported boundary and detector-order conventions; it does not inherit the
+source XX's order labels. The ordered dual ZZ DEM must equal the source XX DEM
+exactly, including error probabilities and column order. Both full and reduced
+circuits must pass noiseless sampling. The source XX and native matching-basis
+ZZ circuits/DEMs must also match the requested reference artifacts, and reference
+checkpoint task identities are verified before collection.
+
+The default pilot is **256 then 1,000 cumulative ZZ shots**. It stops at 1,000;
+there is no implicit 20,000-shot production stage. Both stages use eight workers,
+a batch-size cap of 32, a target batch/flush interval of five seconds, and
+process/batch profiling. A slow shot or batch can exceed the interval; callback
+records can aggregate multiple internal batches.
+
+```bash
+env PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache \
+  MPLCONFIGDIR=/tmp/qldpc-mpl MPLBACKEND=Agg \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_hgp_xz_dual \
+  --simplex-m 4 --surface-distance 8 --preparation-rounds 4 --rounds 8 \
+  --physical-error-rate 0.001 --bell-pair-infidelity 0 \
+  --pilot-shots 256 --max-shots 1000 --num-workers 8 \
+  --reference-dir experiments/bell_pair_adapter_ler/outputs/ppm_basis_first_hgp_m4_d8_prep4_surg8_10000/samples \
+  --output-dir experiments/bell_pair_adapter_ler/outputs/exact_xz_dual_hgp_m4_d8_prep4_surg8_pilot_1000
+```
+
+Add `--build-only` to validate and save artifacts without sampling, or
+`--analyze-only` to rebuild/validate the same configuration and regenerate plots
+from saved counts without sampling. On resume use the same command/directory;
+`--max-shots` is cumulative, not additional. Worker counts and profiling controls
+may change without changing the task identity. Changing the experiment metadata
+or saved circuit/DEM is rejected. A POSIX advisory lock prevents concurrent
+writers; the `.collection.lock` file remaining on disk does not mean a job is
+active. Foreign checkpoints, including the source XX checkpoint, are rejected.
+
+Artifacts include:
+
+- `schedule_audit.json`: complete validated map, circuit/DEM and reference hashes,
+  noiseless checks, and stable task identity.
+- `sinter_progress.csv`: flushed, resumable ZZ counts. Interruptions preserve
+  completed batches but can lose unfinished work. `summary.csv` updates at stage
+  completion or handled interruption, not after every batch.
+- `invocations.jsonl`, `batch_samples.jsonl`, `resource_samples.jsonl`: stage
+  before/after counts, timestamps, work and wall time, and sampled process-tree RSS.
+- `comparison.csv` and `hgp_xz_dual_comparison.pdf/.png`: the two archived
+  matching-basis estimates plus the independent dual ZZ pilot, with counts and
+  pointwise 95% Wilson intervals. With only a few failures, wide overlapping
+  pilot intervals do not establish equivalence.
+- `stage_timings.csv`: new/incremental shot counts, wall time, throughput,
+  worker time per shot, and peak summed RSS for each new invocation.
+- `timing_comparison.csv`, `timing_notes.json`, and `hgp_xz_dual_timing.pdf/.png`:
+  comparison of profiled worker seconds per shot at the current pilot's worker
+  count. For the m=4 eight-worker comparison, only the archived eight-worker
+  9,000-new-shot-per-basis stage is used; earlier four-worker pilot shots are
+  excluded from timing, but remain part of the 10,000-shot LER estimates.
+
+Timing ratios are descriptive sampled work ratios, not controlled wall-time
+speedups. The archived eight workers shared XX and ZZ, whereas this pilot runs
+ZZ alone. The archived combined collection wall time is labelled as shared and
+must not be added across basis rows or interpreted as ZZ-only elapsed time.
+Worker seconds include sampling/decoding, not pure decoder CPU time; different
+random faults, shot counts, startup/tail overhead, and laptop load can affect
+timing. Summed RSS can double-count shared pages. Timing plots intentionally
+have no statistical error bars inferred from aggregated batch records.
+
+## Matching-basis hardware-only Bell-fidelity sweeps
+
+`run_ppm_fidelity_sweep.py` reuses the generic CSS circuit builder and the current
+matching-basis code presets. It does not invoke the exact-dual runner or search
+for code distances. Default settings are HGP simplex m=3 / unrotated surface d=4,
+four ideal preparation rounds, four adapter rounds, physical p=0.001, intrinsic
+adapter-hardware noise, inactive-detector reduction, and no idling noise.
+XX uses local X→Z, ZZ uses local Z→X, and both use Bell X→Z.
+
+The nine default Bell source fidelities are 1, 0.99999, 0.99997, 0.9999, 0.9997,
+0.999, 0.997, 0.99, and 0.97. Noise is an independent equal-X/Y/Z Pauli channel
+on one Bell half with total probability 1-F. Physical gate noise stays fixed,
+including at F=1. Both PPM bases give 18 conditions, sharing eight workers total.
+This HGP construction consumes seven Bell pairs per round, or 28 per PPM.
+
+Start the fixed-budget 1,000-shot-per-condition pilot:
+
+```bash
+env PYTHONPATH=src:. NUMBA_CACHE_DIR=/tmp/qldpc-numba-cache \
+  MPLCONFIGDIR=/tmp/qldpc-mpl MPLBACKEND=Agg \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  ../.venv/bin/python -m experiments.bell_pair_adapter_ler.run_ppm_fidelity_sweep \
+  --simplex-m 3 --surface-distance 4 --preparation-rounds 4 --rounds 4 \
+  --physical-error-rate 0.001 --num-workers 8 --max-shots 1000 \
+  --output-dir experiments/bell_pair_adapter_ler/outputs/ppm_basis_first_hgp_m3_d4_prep4_surg4_bell_fidelity
+```
+
+After reviewing pilot timing, repeat with `--max-shots 20000` to extend the same
+checkpoints, retaining pilot samples. There is no early failure-count stop and
+no automatic extension beyond the requested cumulative cap. `--build-only`
+validates without sampling. `--analyze-only` regenerates a completed target's
+report without sampling. The ideal F=1 point and at least one nonideal point
+are required; use `--bell-pair-fidelities ...` or `--bell-pair-infidelities ...`
+to specify another grid. A changed grid requires a new output directory.
+
+Before collection, the runner checks that only explicit Bell-source probabilities
+change: other physical operations, their noise, and the hardware mask stay fixed.
+Each circuit passes a 32-shot noiseless detector/observable check. The source
+channel can insert noise-only moments in the existing builder; the comparison
+normalizes consecutive empty TICK markers after removing that channel. This is
+safe here because idling noise is disabled; actual saved circuits are unmodified,
+and this check makes no claim about physical adapter latency.
+
+The output directory is protected by an advisory writer lock. Resuming verifies
+the full manifest/grid, circuit/DEM contents, checkpoint strong IDs, dependency
+versions and decoder source hashes. There is no import of archived shot counts.
+Completed batches are checkpointed, with a 128-shot maximum and a target five-second
+batch interval; slow in-flight batches are not forcibly interrupted. Interruptions
+retain flushed samples. `summary.csv` updates on completion or handled interruption;
+use `sinter_progress.csv` for live counts.
+
+`invocations.jsonl`, `batch_samples.jsonl`, and `resource_samples.jsonl` record
+incremental work, shared collection wall time, and process-tree RSS. Final plots,
+summary counts, fidelity/excess tables, and timing are saved under `analysis_1000/`
+and later `analysis_20000/`, so the pilot report is not overwritten by production.
+Plots use fidelity labels with logarithmic spacing in infidelity. Zero-failure
+points display upper endpoints of pointwise 95% Wilson intervals, not zero LER
+on a logarithmic axis. Excess intervals use the existing envelope formed from
+the point's and baseline's marginal Wilson bounds; these are not simultaneous
+confidence guarantees over the sweep. Engineering requirement brackets are
+exploratory and do not establish saturation from overlapping confidence bars.
+
+The original Surface/Steane fidelity archive used full-surgery noise, not this
+hardware-only mask. It is not pooled or overlaid as a matched code-size comparison.
+
+## XX physical-noise / distance comparison
+
+`run_physical_noise_comparison.py` compares HGP-simplex/surface m=3/r=4,
+m=3/r=8, and m=4/r=8 at physical p=0.0003 and 0.0001, XX only, with one
+four-worker pool at a time and a 1,000-shot-per-condition pilot target.
+See [PHYSICAL_NOISE_COMPARISON.md](PHYSICAL_NOISE_COMPARISON.md) for controls,
+checkpoint/resume commands, validation, timing, and interpretation. It retains
+the production decoder and plots exact binomial intervals including upper bounds
+for zero failures. Archived p=0.001 controls are read-only and never pooled into
+the new samples; no 10k extension or exact-distance search starts automatically.
+
+For the targeted continuation of just the two d=8/eight-round XX low-p points,
+see [D8_TWO_NOISE_EXTENSION.md](D8_TWO_NOISE_EXTENSION.md). The runner adds
+200,000 shots to each fixed seed, stopping at 500,000 (p=1e-4) and 300,000
+(p=3e-4), with eight shared workers and a separate resumable checkpoint.
+
+For 20,000 additional shots at p=0.001 for both eight-round XX distances, see
+[HIGH_P_EIGHT_ROUND_EXTENSION.md](HIGH_P_EIGHT_ROUND_EXTENSION.md). The fixed-seed
+continuation targets 40,000 total shots for d=4 and 30,000 for d=8, preserves the
+latest low-p references, and reuses the same checkpoint/unequal-target safeguards.
+
+The single-point continuation in [D8_SINGLE_POINT_EXTENSION.md](D8_SINGLE_POINT_EXTENSION.md)
+adds 500,000 shots only to the d=8/eight-round XX p=1e-4 point, reaching one million
+total. All other points retain their latest counts, including the extended high-p data.
+
+`plot_d8_low_p_mean_history.py` reconstructs the cumulative XX LER at d=8,
+eight rounds, p=1e-4 from the original checkpoint and its continuations. It verifies
+and excludes imported seed rows, snapshots only complete live CSV lines, and writes
+timestamped PDF/PNG/CSV reports under `outputs/ppm_basis_first_hgp_d8_xx_p1e4_surg8_mean_history/`.
+This is saved-batch order, not per-shot or wall-clock history. The pointwise
+one-sigma jackknife band is not a simultaneous confidence band, neighboring
+cumulative estimates are correlated, and zero-failure prefixes have no band.
+The script neither locks nor modifies the running collector.
+
+For four fresh XX/eight-round conditions at the geometric midpoints of the
+existing physical-noise intervals, see [LOG_MIDPOINT_SWEEP.md](LOG_MIDPOINT_SWEEP.md).
+The runner uses one eight-worker pool, includes its 1,000-shot timing pilot in
+the 100,000-shot-per-condition targets, and freezes the latest six reference points.
+
+`run_d4_midpoint_extension.py` selectively adds 100,000 shots to only the d4,
+eight-round, lower-midpoint XX point. The fixed 100k seed gives a resumable 200k
+total, with eight workers and a separate checkpoint; the other nine comparison
+points remain read-only. The continuation writes an updated data-only comparison.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Literal
 
 import pytest
 import stim
@@ -15,6 +16,21 @@ from .bridge import build_bridge
 from .circuit import JointPPMSelectiveBellPairSyndrome, _stitch_intercode
 from .gadget import build_gadget
 from .schedule import JointPPMSchedule, validate_local_layers
+
+
+@pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
+def test_ppm_basis_first_preset(basis: Pauli) -> None:
+    schedule = JointPPMSchedule.ppm_basis_first(basis)
+    assert schedule.local_order[0] == basis
+    assert set(schedule.local_order) == {Pauli.X, Pauli.Z}
+    assert schedule.bell_order == (Pauli.X, Pauli.Z)
+    assert schedule.local_layers is None
+    assert JointPPMSchedule().local_order == (Pauli.X, Pauli.Z)
+
+
+def test_ppm_basis_first_rejects_non_css_basis() -> None:
+    with pytest.raises(ValueError, match="PPM basis"):
+        JointPPMSchedule.ppm_basis_first(Pauli.Y)
 
 
 @pytest.mark.parametrize("field", ["local_order", "bell_order"])
@@ -39,7 +55,9 @@ def test_reject_invalid_local_layers(bad: str, message: str) -> None:
 
 
 @pytest.mark.parametrize("basis", [Pauli.X, Pauli.Z])
-def test_independent_order_controls_preserve_check_and_bell_partners(basis: Pauli) -> None:
+def test_independent_order_controls_preserve_check_and_bell_partners(
+    basis: Literal[Pauli.X, Pauli.Z],
+) -> None:
     left, right = codes.SurfaceCode(3), codes.SteaneCode()
     gl = build_gadget(left, left.get_logical_ops(basis)[0], basis=basis)
     gr = build_gadget(right, right.get_logical_ops(basis)[0], basis=basis)

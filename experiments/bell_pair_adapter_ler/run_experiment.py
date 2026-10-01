@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -50,6 +51,8 @@ DEFAULT_FIDELITY_SWEEP_INFIDELITIES = (
     3e-2,
 )
 NoiseScope = Literal["intrinsic", "operational", "end-to-end"]
+SchedulePolicy = Literal["legacy", "ppm_basis_first"]
+PPM_BASIS_FIRST_VERSION = "ppm_basis_first_local_v1"
 DistanceStatus = Literal["known", "exact", "not_computed"]
 DEFAULT_NOISE_SCOPE: NoiseScope = "intrinsic"
 
@@ -127,14 +130,24 @@ def build_experiment_for_codes(
     adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     reduce_detectors: bool = False,
     surgery_schedule: JointPPMSchedule | None = None,
+    schedule_policy: SchedulePolicy = "legacy",
 ) -> BuiltExperiment:
     """Build a phased joint-PPM experiment for any two binary stabilizer CSS codes.
 
     Exact code distances are metadata only and are not computed by default.  Set
     ``compute_exact_distances`` to opt into potentially expensive distance searches.
+    ``schedule_policy="ppm_basis_first"`` uses the PPM basis's local family first,
+    leaves Bell order and preparation unchanged, and selects the saved undecomposed
+    DEM for decoding. Legacy circuits and checkpoint identities remain the default.
     """
     if basis not in (Pauli.X, Pauli.Z):
         raise ValueError(f"basis must be Pauli.X or Pauli.Z, got {basis!r}")
+    if schedule_policy not in ("legacy", "ppm_basis_first"):
+        raise ValueError(f"Unknown schedule_policy: {schedule_policy!r}")
+    if schedule_policy == "ppm_basis_first":
+        if surgery_schedule is not None:
+            raise ValueError("Choose either schedule_policy or a custom surgery_schedule, not both")
+        surgery_schedule = JointPPMSchedule.ppm_basis_first(basis)
     if preparation_rounds < 1:
         raise ValueError(f"preparation_rounds must be positive, got {preparation_rounds}")
     if surgery_rounds < 1:
@@ -282,6 +295,13 @@ def build_experiment_for_codes(
         ).hexdigest()
         name += f"_schedule_{fingerprint[:16]}"
         metadata.update(name=name, surgery_schedule=schedule_metadata)
+        if schedule_policy == "ppm_basis_first":
+            name += "_ppm_basis_first"
+            metadata.update(
+                name=name,
+                schedule_policy=PPM_BASIS_FIRST_VERSION,
+                dem_analysis="undecomposed_exact",
+            )
         metadata = json.loads(json.dumps(metadata, sort_keys=True))
     return BuiltExperiment(name, circuit, detector_error_model, metadata)
 
@@ -298,6 +318,7 @@ def build_experiment(
     compute_exact_distances: bool = False,
     adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     reduce_detectors: bool = False,
+    schedule_policy: SchedulePolicy = "legacy",
 ) -> BuiltExperiment:
     """Surface-3/Steane preset for the generic CSS adapter experiment.
 
@@ -320,6 +341,7 @@ def build_experiment(
         compute_exact_distances=compute_exact_distances,
         adapter_noise_targets=adapter_noise_targets,
         reduce_detectors=reduce_detectors,
+        schedule_policy=schedule_policy,
     )
 
 
@@ -335,6 +357,7 @@ def build_experiment_matrix(
     compute_exact_distances: bool = False,
     adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     reduce_detectors: bool = False,
+    schedule_policy: SchedulePolicy = "legacy",
 ) -> list[BuiltExperiment]:
     """Build every requested basis/round combination."""
     return [
@@ -349,6 +372,7 @@ def build_experiment_matrix(
             compute_exact_distances=compute_exact_distances,
             adapter_noise_targets=adapter_noise_targets,
             reduce_detectors=reduce_detectors,
+            schedule_policy=schedule_policy,
         )
         for basis in bases
         for num_rounds in rounds
@@ -367,6 +391,7 @@ def build_fidelity_sweep_matrix(
     compute_exact_distances: bool = False,
     adapter_noise_targets: AdapterNoiseTargets = "full_surgery",
     reduce_detectors: bool = False,
+    schedule_policy: SchedulePolicy = "legacy",
 ) -> list[BuiltExperiment]:
     """Build a Surface/Steane matrix over Bell-pair infidelities, bases, and rounds."""
     if not bell_pair_infidelities:
@@ -389,6 +414,7 @@ def build_fidelity_sweep_matrix(
             compute_exact_distances=compute_exact_distances,
             adapter_noise_targets=adapter_noise_targets,
             reduce_detectors=reduce_detectors,
+            schedule_policy=schedule_policy,
         )
         for basis in bases
         for num_rounds in rounds
@@ -460,6 +486,10 @@ def sample_experiments(
     max_errors: int,
     existing_data_filepaths: tuple[Path, ...] = (),
     print_progress: bool = True,
+    progress_callback: Callable[[sinter.Progress], None] | None = None,
+    max_batch_size: int | None = None,
+    max_batch_seconds: int | None = None,
+    max_shots_by_strong_id: dict[str, int] | None = None,
 ) -> list[sinter.TaskStats]:
     """Collect resumable decoded logical-error statistics with BP+OSD."""
     tasks = [
@@ -471,11 +501,26 @@ def sample_experiments(
             detector_error_model=(
                 experiment.detector_error_model
                 if "adapter_noise_targets" in experiment.metadata
+                or experiment.metadata.get("dem_analysis") == "undecomposed_exact"
                 else None
             ),
         )
         for experiment in experiments
     ]
+    if max_shots_by_strong_id is not None:
+        # Limits are collection policy, never part of circuit/decoder metadata.
+        # Set the decoder before computing IDs, matching Sinter's collection tasks.
+        for task in tasks:
+            task.decoder = "qldpc_bp_osd"
+        ids = {task.strong_id() for task in tasks}
+        if len(ids) != len(tasks) or set(max_shots_by_strong_id) != ids:
+            raise ValueError("Per-task shot limits must match exactly the selected strong IDs")
+        if any(not 0 < limit <= max_shots for limit in max_shots_by_strong_id.values()):
+            raise ValueError("Per-task shot limits must be positive and within the global cap")
+        for task in tasks:
+            task.collection_options = sinter.CollectionOptions(
+                max_shots=max_shots_by_strong_id[task.strong_id()]
+            )
     decoder = decoders.SinterDecoder()
     collected_stats = sinter.collect(
         tasks=tasks,
@@ -487,6 +532,9 @@ def sample_experiments(
         print_progress=print_progress,
         save_resume_filepath=output_dir / "sinter_progress.csv",
         existing_data_filepaths=existing_data_filepaths,
+        progress_callback=progress_callback,
+        max_batch_size=max_batch_size,
+        max_batch_seconds=max_batch_seconds,
     )
     return _filter_stats_for_experiments(collected_stats, experiments)
 
@@ -536,6 +584,9 @@ def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
         "seconds",
         "decoder",
     ]
+    include_schedule = any("schedule_policy" in result.json_metadata for result in stats)
+    if include_schedule:
+        fieldnames += ["schedule_policy", "local_order", "bell_order", "dem_analysis"]
     with (output_dir / "summary.csv").open("w", encoding="utf-8", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
@@ -584,6 +635,31 @@ def write_summary(stats: list[sinter.TaskStats], output_dir: Path) -> None:
                     "ler_95ci_high": interval_high,
                     "seconds": result.seconds,
                     "decoder": result.decoder,
+                    **(
+                        {
+                            "schedule_policy": result.json_metadata.get(
+                                "schedule_policy", "legacy"
+                            ),
+                            "local_order": ",".join(
+                                result.json_metadata.get("surgery_schedule", {}).get(
+                                    "local_order", ["X", "Z"]
+                                )
+                            ),
+                            "bell_order": ",".join(
+                                result.json_metadata.get("surgery_schedule", {}).get(
+                                    "bell_order", ["X", "Z"]
+                                )
+                            ),
+                            "dem_analysis": result.json_metadata.get(
+                                "dem_analysis",
+                                "undecomposed_exact"
+                                if "adapter_noise_targets" in result.json_metadata
+                                else "sinter_auto",
+                            ),
+                        }
+                        if include_schedule
+                        else {}
+                    ),
                 }
             )
 
@@ -612,6 +688,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--reduce-detectors", action="store_true")
     parser.add_argument(
+        "--schedule-policy", choices=("legacy", "ppm_basis_first"), default="legacy"
+    )
+    parser.add_argument(
         "--noise-scope",
         choices=("intrinsic", "operational", "end-to-end"),
         default=DEFAULT_NOISE_SCOPE,
@@ -638,7 +717,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     if args.output_dir is None:
-        args.output_dir = default_output_dir(args.adapter_noise_targets, args.reduce_detectors)
+        args.output_dir = default_output_dir(
+            args.adapter_noise_targets, args.reduce_detectors, args.schedule_policy
+        )
     bases = tuple(Pauli[basis] for basis in args.bases)
     rounds = tuple(args.rounds)
     experiments = build_experiment_matrix(
@@ -652,6 +733,7 @@ def main() -> None:
         compute_exact_distances=args.compute_exact_distances,
         adapter_noise_targets=args.adapter_noise_targets,
         reduce_detectors=args.reduce_detectors,
+        schedule_policy=args.schedule_policy,
     )
     write_artifacts(experiments, args.output_dir)
 
@@ -692,11 +774,15 @@ def main() -> None:
     print(f"results written to {args.output_dir / 'summary.csv'}")
 
 
-def default_output_dir(targets: AdapterNoiseTargets, reduce_detectors: bool) -> Path:
+def default_output_dir(
+    targets: AdapterNoiseTargets, reduce_detectors: bool, schedule_policy: SchedulePolicy = "legacy"
+) -> Path:
     """New modes get their own default directory, away from legacy results."""
     base = Path(__file__).resolve().parent / "outputs"
     if targets != "full_surgery" or reduce_detectors:
         base /= targets + ("_active_detectors" if reduce_detectors else "")
+    if schedule_policy == "ppm_basis_first":
+        base /= PPM_BASIS_FIRST_VERSION
     return base
 
 

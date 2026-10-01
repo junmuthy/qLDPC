@@ -27,6 +27,20 @@ class JointPPMSchedule:
     bell_order: tuple[Pauli, Pauli] = (Pauli.X, Pauli.Z)
     local_layers: tuple[stim.Circuit, stim.Circuit] | None = None
 
+    @classmethod
+    def ppm_basis_first(cls, basis: Pauli) -> JointPPMSchedule:
+        """Measure the PPM's local check family first, leaving Bell extraction unchanged.
+
+        XX uses local X then Z; ZZ uses local Z then X. Both retain Bell X then Z
+        and the original within-family gate layers. This is a scheduling convention,
+        not an exact X/Z duality or a guarantee of optimal logical performance.
+        Supply this to the merged-round strategy only to retain preparation order.
+        """
+        if basis not in (Pauli.X, Pauli.Z):
+            raise ValueError("PPM basis must be Pauli.X or Pauli.Z")
+        other = Pauli.Z if basis == Pauli.X else Pauli.X
+        return cls(local_order=(basis, other))
+
     def __post_init__(self) -> None:
         for order in (self.local_order, self.bell_order):
             if len(order) != 2 or set(order) != {Pauli.X, Pauli.Z}:

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Analyze and plot a Surface/Steane Bell-pair-fidelity sweep."""
+"""Analyze and plot a Bell-pair-fidelity sweep (Surface/Steane labels by default)."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import math
+import textwrap
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -301,16 +302,22 @@ def _label_fidelity_axis(axis: Axes, infidelities: Sequence[float]) -> None:
     axis.set_xlabel(r"Bell-pair fidelity $F_B$")
 
 
-def plot_absolute_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
-    """Plot absolute adapter LER against Bell-pair fidelity with Wilson intervals."""
+def plot_absolute_ler(
+    rows: Sequence[dict[str, Any]],
+    output_dir: Path,
+    *,
+    title: str = "Surface-3 / Steane adapter sensitivity to Bell-pair fidelity",
+    subtitle: str = "",
+) -> None:
+    """Plot absolute adapter LER with Wilson intervals in vertically stacked panels."""
     grouped = _group_rows(rows)
     bases = sorted({basis for basis, _ in grouped})
-    figure, axes = plt.subplots(1, len(bases), figsize=(6.1 * len(bases), 4.6), squeeze=False)
+    figure, axes = plt.subplots(len(bases), 1, figsize=(6.1, 4.6 * len(bases)), squeeze=False)
     linthresh = _smallest_positive_infidelity(rows) / 3
     colors = plt.get_cmap("viridis")
     all_rounds = sorted({rounds for _, rounds in grouped})
 
-    for axis, basis in zip(axes[0], bases):
+    for axis, basis in zip(axes[:, 0], bases):
         for color_index, rounds in enumerate(all_rounds):
             group = grouped.get((basis, rounds))
             if not group:
@@ -321,14 +328,33 @@ def plot_absolute_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
             low = np.asarray([float(row["ler_95ci_low"]) for row in ordered])
             high = np.asarray([float(row["ler_95ci_high"]) for row in ordered])
             color = colors(color_index / max(1, len(all_rounds) - 1))
-            axis.errorbar(
+            nonzero = y > 0
+            axis.plot(
                 x,
-                y,
-                yerr=np.vstack((y - low, high - y)),
+                np.where(nonzero, y, np.nan),
                 marker="o",
-                capsize=3,
                 color=color,
                 label=f"{rounds} surgery rounds",
+            )
+            axis.errorbar(
+                x[nonzero],
+                y[nonzero],
+                yerr=np.maximum(
+                    0, np.vstack((y[nonzero] - low[nonzero], high[nonzero] - y[nonzero]))
+                ),
+                fmt="none",
+                capsize=3,
+                color=color,
+            )
+            axis.errorbar(
+                x[~nonzero],
+                high[~nonzero],
+                yerr=0.2 * high[~nonzero],
+                uplims=True,
+                marker="o",
+                linestyle="none",
+                capsize=3,
+                color=color,
             )
             ideal = ordered[0]
             axis.axhspan(
@@ -346,15 +372,31 @@ def plot_absolute_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
         axis.grid(which="both", alpha=0.25)
         axis.set_title(f"Logical {basis}{basis}")
         axis.legend()
-    axes[0][0].set_ylabel("Intrinsic adapter logical error rate")
-    figure.suptitle("Surface-3 / Steane adapter sensitivity to Bell-pair fidelity")
-    figure.tight_layout()
+        axis.set_ylabel("Intrinsic adapter logical error rate")
+    figure.suptitle(textwrap.fill(title, width=50, break_on_hyphens=False))
+    notes = [subtitle] if subtitle else []
+    if any(float(row["logical_error_rate"]) == 0 for row in rows):
+        notes.append(
+            "Downward arrows: zero observed failures; upper endpoint of 95% Wilson interval."
+        )
+    if notes:
+        wrapped_notes = "\n".join(
+            textwrap.fill(line, width=75) for note in notes for line in note.splitlines()
+        )
+        figure.text(0.5, 0.01, wrapped_notes, ha="center", fontsize=8)
+    figure.tight_layout(rect=(0, 0.10 if notes else 0, 1, 0.97))
     figure.savefig(output_dir / "adapter_ler_vs_bell_fidelity.pdf", bbox_inches="tight")
     figure.savefig(output_dir / "adapter_ler_vs_bell_fidelity.png", dpi=200, bbox_inches="tight")
     plt.close(figure)
 
 
-def plot_excess_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
+def plot_excess_ler(
+    rows: Sequence[dict[str, Any]],
+    output_dir: Path,
+    *,
+    title: str = "Bell-induced excess adapter logical error rate",
+    subtitle: str = "",
+) -> None:
     """Plot LER in excess of the ideal-Bell baseline with conservative intervals."""
     grouped = _group_rows(rows)
     bases = sorted({basis for basis, _ in grouped})
@@ -400,8 +442,10 @@ def plot_excess_ler(rows: Sequence[dict[str, Any]], output_dir: Path) -> None:
         axis.set_title(f"Logical {basis}{basis}")
         axis.legend()
     axes[0][0].set_ylabel(r"Excess LER $p_L(F_B)-p_L(1)$")
-    figure.suptitle("Bell-induced excess adapter logical error rate")
-    figure.tight_layout()
+    figure.suptitle(title)
+    if subtitle:
+        figure.text(0.5, 0.01, subtitle, ha="center", fontsize=8)
+    figure.tight_layout(rect=(0, 0.08 if subtitle else 0, 1, 0.97))
     figure.savefig(output_dir / "adapter_excess_ler_vs_bell_fidelity.pdf", bbox_inches="tight")
     figure.savefig(
         output_dir / "adapter_excess_ler_vs_bell_fidelity.png", dpi=200, bbox_inches="tight"
@@ -414,6 +458,8 @@ def write_fidelity_analysis(
     output_dir: Path,
     *,
     relative_overheads: Sequence[float] = (0.1, 0.25),
+    title: str = "Surface-3 / Steane adapter sensitivity to Bell-pair fidelity",
+    subtitle: str = "",
 ) -> None:
     """Write response tables, engineering requirement brackets, and plots."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -421,8 +467,8 @@ def write_fidelity_analysis(
     requirement_rows = build_requirement_rows(response_rows, relative_overheads)
     _write_rows(output_dir / "fidelity_response.csv", RESPONSE_FIELDS, response_rows)
     _write_rows(output_dir / "fidelity_requirements.csv", REQUIREMENT_FIELDS, requirement_rows)
-    plot_absolute_ler(response_rows, output_dir)
-    plot_excess_ler(response_rows, output_dir)
+    plot_absolute_ler(response_rows, output_dir, title=title, subtitle=subtitle)
+    plot_excess_ler(response_rows, output_dir, title=title + " — excess LER", subtitle=subtitle)
 
 
 def _parse_args() -> argparse.Namespace:
