@@ -7,11 +7,11 @@ for the HGP-simplex/surface adapter. It does not estimate an asymptotic threshol
 
 At each of `p=0.0003` and `p=0.0001`, collect XX only for:
 
-| Simplex seed | Unrotated surface distance | Adapter rounds | Purpose |
-|---|---|---|---|
-| `m=3` | `d=4` | `4` | Smaller-code baseline |
-| `m=3` | `d=4` | `8` | Equal-rounds control |
-| `m=4` | `d=8` | `8` | Larger code with scaled duration |
+| Simplex seed | Unrotated surface distance | Adapter rounds | Purpose                          |
+|--------------|----------------------------|----------------|----------------------------------|
+| `m=3`        | `d=4`                      | `4`            | Smaller-code baseline            |
+| `m=3`        | `d=4`                      | `8`            | Equal-rounds control             |
+| `m=4`        | `d=8`                      | `8`            | Larger code with scaled duration |
 
 All six use logical indices 0/0, four noiseless preparation rounds, ideal terminal
 closure, intrinsic adapter-hardware noise, inactive-detector reduction, no idling

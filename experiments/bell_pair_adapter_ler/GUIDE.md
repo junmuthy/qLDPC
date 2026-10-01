@@ -30,11 +30,11 @@ It is obtained directly from decoded observable failures. No code-memory LER is 
 
 ## Noise scopes
 
-| Scope | Preparation | Adapter initialization, surgery, detachment | Terminal closure |
-|---|---:|---:|---:|
-| `intrinsic` | Ideal | Noisy | Ideal |
-| `operational` | Ideal | Noisy | Noisy |
-| `end-to-end` | Noisy | Noisy | Noisy |
+| Scope         | Preparation | Adapter initialization, surgery, detachment | Terminal closure |
+|---------------|------------:|--------------------------------------------:|-----------------:|
+| `intrinsic`   | Ideal       | Noisy                                       | Ideal            |
+| `operational` | Ideal       | Noisy                                       | Noisy            |
+| `end-to-end`  | Noisy       | Noisy                                       | Noisy            |
 
 Errors and idling on original code-block data during the adapter window are part of the adapter
 error rate. Bell-pair infidelity is applied only to Bell pairs prepared during merged rounds.
@@ -70,9 +70,9 @@ Use `schedule_policy="ppm_basis_first"` in `build_experiment_for_codes`,
 The versioned identity is `ppm_basis_first_local_v1`:
 
 | Logical PPM | Local check-family order | Bell-assisted check-family order |
-|---|---|---|
-| `XX` | `X→Z` | `X→Z` |
-| `ZZ` | `Z→X` | `X→Z` |
+|-------------|--------------------------|----------------------------------|
+| `XX`        | `X→Z`                    | `X→Z`                            |
+| `ZZ`        | `Z→X`                    | `X→Z`                            |
 
 Only merged-round **local family order** changes. Independent preparation,
 within-family gate layers, adapter geometry, Bell partners, detachment, and

@@ -8,16 +8,16 @@ noise definitions, decoder, and interpretation of the reported LER.
 
 ## Find an experiment
 
-| Directory | Subject and starting point |
-|---|---|
-| [common/](common/) | Shared construction and sampling in `run_experiment.py`; profiling and stable path lookup. |
-| [pilots/](pilots/) | Start here for a new code size: `run_ppm_basis_first.py`, pilot validation, and timing summaries. |
-| [bell_fidelity/](bell_fidelity/) | Bell-source fidelity sweeps and their analysis, including `run_ppm_fidelity_sweep.py`. |
-| [comparisons/](comparisons/) | Full-surgery versus hardware-only noise, round-count comparisons, and historical comparison plots. |
-| [schedules/](schedules/) | Local-order changes, exact X/Z duality, one-factor schedule studies, and dual timing. |
-| [physical_noise/](physical_noise/) | [Physical-error-rate/distance comparison](physical_noise/PHYSICAL_NOISE_COMPARISON.md), controls, midpoint sweeps, and plots. |
-| [physical_noise/continuations/](physical_noise/continuations/) | Targeted shot extensions of specific earlier checkpoints; not standalone fresh-run recipes. |
-| [fault_analysis/](fault_analysis/) | [Single-fault audits](fault_analysis/SINGLE_FAULT_AUDIT.md), [effective-distance searches](fault_analysis/EFFECTIVE_DISTANCE_AUDIT.md), witnesses, and [paired-decoder checks](fault_analysis/FIVE_FAULT_AND_DECODER_PILOT.md). |
+| Directory                                                      | Subject and starting point                                                                                                                                                                                                      |
+|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [common/](common/)                                             | Shared construction and sampling in `run_experiment.py`; profiling and stable path lookup.                                                                                                                                      |
+| [pilots/](pilots/)                                             | Start here for a new code size: `run_ppm_basis_first.py`, pilot validation, and timing summaries.                                                                                                                               |
+| [bell_fidelity/](bell_fidelity/)                               | Bell-source fidelity sweeps and their analysis, including `run_ppm_fidelity_sweep.py`.                                                                                                                                          |
+| [comparisons/](comparisons/)                                   | Full-surgery versus hardware-only noise, round-count comparisons, and historical comparison plots.                                                                                                                              |
+| [schedules/](schedules/)                                       | Local-order changes, exact X/Z duality, one-factor schedule studies, and dual timing.                                                                                                                                           |
+| [physical_noise/](physical_noise/)                             | [Physical-error-rate/distance comparison](physical_noise/PHYSICAL_NOISE_COMPARISON.md), controls, midpoint sweeps, and plots.                                                                                                   |
+| [physical_noise/continuations/](physical_noise/continuations/) | Targeted shot extensions of specific earlier checkpoints; not standalone fresh-run recipes.                                                                                                                                     |
+| [fault_analysis/](fault_analysis/)                             | [Single-fault audits](fault_analysis/SINGLE_FAULT_AUDIT.md), [effective-distance searches](fault_analysis/EFFECTIVE_DISTANCE_AUDIT.md), witnesses, and [paired-decoder checks](fault_analysis/FIVE_FAULT_AND_DECODER_PILOT.md). |
 
 Tests are beside their corresponding scripts. Existing filenames are retained
 inside these directories. The [command migration map](COMMANDS.md) lists every
