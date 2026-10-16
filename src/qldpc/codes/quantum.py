@@ -38,8 +38,8 @@ from qldpc import abstract
 from qldpc._util import networkx as nx
 from qldpc.objects import CayleyComplex, ChainComplex, Node, Pauli, PauliXZ, QuditPauli
 
-from . import _cyclic
-from ._cyclic import LogicalFrameError, LogicalFrameResult
+from . import _symcity
+from ._symcity import CheckBasisError, CheckBasisResult, LogicalFrameError, LogicalFrameResult
 from .classical import (
     CyclicCode,
     GolayCode,
@@ -650,7 +650,7 @@ class GALACode(CSSCode):
         )
 
 
-class CyclicTypeCode(CSSCode):
+class SymCityCode(CSSCode):
     """Self-dual polynomial CSS code with cyclic symmetry among physical types.
 
     Let R = GF(2)[G] for a finite abelian logical translation group G of order N. Coefficients
@@ -658,13 +658,15 @@ class CyclicTypeCode(CSSCode):
     y**q - 1. There are p check families and t physical cycles of length q. The polynomial parent
     matrix has entries ``parent_matrix[a*q+u, b*q+v] = f_ab[(v-u) % q]``.
 
-    An independent polynomial check basis H must span the full parent check space. Its r rows
+    An independent polynomial check basis H is resolved automatically unless supplied. Its r rows
     represent r complete independent G orbits. A common logical frame J has s = tq - 2r rows and
     satisfies H J^dagger = 0, J J^dagger = I_s, and 1_s J_aug = 1_(tq). The adjoint inverts group
     elements and transposes; augmentation sums group coefficients. These conditions give
     ``matrix_x = matrix_z = H.regular_lift()`` and common X/Z logicals J.regular_lift(), encoding
     sN logical qubits in tqN physical qubits. Construction does not certify distance.
 
+    Check resolution tries whole parent orbits, alternative subsets, and polynomial combinations.
+    Inspect ``check_basis_result`` on success, or ``CheckBasisError.result`` on failure.
     With no explicit J, try a proved fiber shortcut and then bounded coefficient enumeration.
     Inspect ``logical_frame_result`` on success, or ``LogicalFrameError.result`` on failure.
     An inconclusive result does not prove that no frame exists. No library output is printed.
@@ -675,17 +677,19 @@ class CyclicTypeCode(CSSCode):
     The physical cycle preserves the stabilizer space; it need not fix the logical frame.
     Replacing the logical basis through inherited methods can change these displayed actions.
 
-    For example, the STAR-56 check space and its fiber logicals are constructed by::
+    For example, redundant check families over a noncyclic logical group are accepted by::
 
         from qldpc import abstract, codes
 
-        ring = abstract.GroupRing(abstract.CyclicGroup(4))
-        x = ring.generators[0]
-        zero, one = ring.zero, ring.one
-        a = [one, zero, x, one, x, zero, zero]  # 1 + y**3 + x*y**2 + x*y**4
-        a_dagger = [a[(-d) % 7].T for d in range(7)]
-        code = codes.CyclicTypeCode([[a, a_dagger]], check_rows=range(6))
-        assert (code.num_qubits, code.dimension, code.get_weight()) == (56, 8, 8)
+        ring = abstract.GroupRing(abstract.AbelianGroup(2, 2))
+        coefficients = abstract.RingArray.build(
+            [[[1], [1], [0], [0], [0]],
+             [[0], [0], [1], [1], [0]],
+             [[1], [1], [1], [1], [0]]], ring=ring,
+        )
+        code = codes.SymCityCode(coefficients)
+        assert (code.num_qubits, code.dimension) == (20, 4)
+        assert code.check_basis_result.selected_rows == (0, 1)
         assert code.logical_frame_result.status == "found"
 
     This is not limited to two blocks or fiber logicals. Ordinary binary logical-basis selection
@@ -702,6 +706,7 @@ class CyclicTypeCode(CSSCode):
     num_logical_orbits: int
     parent_matrix: abstract.RingArray
     check_basis: abstract.RingArray
+    check_basis_result: CheckBasisResult
     logical_prototypes: abstract.RingArray
     logical_frame_result: LogicalFrameResult
 
@@ -712,6 +717,7 @@ class CyclicTypeCode(CSSCode):
         *,
         check_rows: Sequence[int] | None = None,
         check_basis: abstract.RingArray | None = None,
+        check_search_limit: int | None = 10_000,
         logical_search_limit: int | None = 10_000,
     ) -> None:
         """Construct a code with validated checks and a supplied or automatically determined J.
@@ -726,8 +732,11 @@ class CyclicTypeCode(CSSCode):
             check_rows: Distinct polynomial parent-row indices selecting a complete independent
                 check-orbit basis. Omitted parent rows must be redundant.
             check_basis: An explicit polynomial basis, permitting general row combinations.
-                Mutually exclusive with check_rows. With neither, use the entire parent and
-                require it to be independent. An empty basis is allowed for a zero parent.
+                Mutually exclusive with check_rows. With neither, resolve a basis automatically.
+                An empty basis is allowed for a zero parent.
+            check_search_limit: Maximum fallback rank trials in automatic basis resolution.
+                The greedy pass is always allowed. None permits exhaustive solving, which has
+                exponential worst-case cost; zero permits only fast paths. Default: 10,000.
             logical_search_limit: Maximum coefficient candidates tested when logical_ops is
                 omitted; None allows exhaustive enumeration. Zero allows only the fiber shortcut
                 and linear inconsistency check. This is not a time limit. Default: 10,000.
@@ -735,16 +744,15 @@ class CyclicTypeCode(CSSCode):
         Raises:
             TypeError: An input has an inappropriate type.
             ValueError: Shapes, rings, checks, basis, or an explicit logical frame are invalid.
+            CheckBasisError: No independent orbit basis exists, or its search budget is exhausted.
             LogicalFrameError: Automatic solving proves infeasibility or exhausts its budget.
         """
-        if logical_search_limit is not None:
-            if isinstance(logical_search_limit, (bool, np.bool_)) or not isinstance(
-                logical_search_limit, (int, np.integer)
-            ):
-                raise TypeError("logical_search_limit must be a nonnegative integer or None")
-            if logical_search_limit < 0:
-                raise ValueError("logical_search_limit must be nonnegative")
-            logical_search_limit = int(logical_search_limit)
+        check_search_limit = _symcity.validate_search_limit(
+            check_search_limit, "check_search_limit"
+        )
+        logical_search_limit = _symcity.validate_search_limit(
+            logical_search_limit, "logical_search_limit"
+        )
         if check_rows is not None and check_basis is not None:
             raise ValueError("Provide only one of check_rows and check_basis")
 
@@ -770,6 +778,10 @@ class CyclicTypeCode(CSSCode):
         if np.any(self.parent_matrix @ self.parent_matrix.T):
             raise ValueError("The full cyclic parent checks do not commute")
 
+        parent = self.parent_matrix.regular_lift()
+        parent_rank = int(np.linalg.matrix_rank(parent))
+        automatic_basis = check_rows is None and check_basis is None
+        selected_rows = None
         basis = self.parent_matrix
         if check_rows is not None:
             rows = list(check_rows)
@@ -781,45 +793,56 @@ class CyclicTypeCode(CSSCode):
             if len(set(rows)) != len(rows) or any(ii < 0 or ii >= len(basis) for ii in rows):
                 raise ValueError("check_rows must contain distinct indices in the parent-row range")
             basis = abstract.RingArray(basis[rows], ring=self.ring)
+            selected_rows = tuple(rows)
         if check_basis is not None:
-            basis = _cyclic.copy_matrix(check_basis, self.ring, "check_basis")
-        self.check_basis = abstract.RingArray.build(basis, ring=self.ring)
-        self.num_check_orbits, num_types = self.check_basis.shape
-        if num_types != self.num_type_cycles * qq:
-            raise ValueError("check_basis must have one column per physical type (tq columns)")
-        self.num_logical_orbits = num_types - 2 * self.num_check_orbits
-
-        matrix = self.check_basis.regular_lift()
-        rank = np.linalg.matrix_rank(matrix)
-        expected_rank = self.num_check_orbits * self.group.order
-        if rank != expected_rank:
-            raise ValueError(
-                f"Check basis has binary rank {rank}, expected rN = {expected_rank}; "
-                "provide independent complete G orbits using check_rows or check_basis"
+            basis = _symcity.copy_matrix(check_basis, self.ring, "check_basis")
+        if automatic_basis:
+            if not parent_rank % self.group.order and (
+                self.parent_matrix.shape[1] - 2 * (parent_rank // self.group.order) < 1
+            ):
+                raise ValueError("The check basis must leave s = tq - 2r >= 1 logical orbits")
+            basis_result = _symcity.find_check_basis(
+                self.parent_matrix, parent, parent_rank, check_search_limit
             )
-        parent = self.parent_matrix.regular_lift()
-        if (
-            np.linalg.matrix_rank(parent) != rank
-            or np.linalg.matrix_rank(np.vstack((matrix, parent)).view(self.ring.field)) != rank
-        ):
-            raise ValueError("The check basis must span exactly the full parent check space")
-        if self.num_logical_orbits < 1:
-            raise ValueError("The check basis must leave s = tq - 2r >= 1 logical orbits")
+            if basis_result.status != "found":
+                raise CheckBasisError(basis_result)
+            assert basis_result.check_basis is not None
+            basis = basis_result.check_basis
+        try:
+            self.check_basis = _symcity.copy_matrix(basis, self.ring, "check_basis")
+            matrix = _symcity.validate_check_basis(self.check_basis, parent, parent_rank)
+        except (TypeError, ValueError) as error:
+            if automatic_basis:
+                raise RuntimeError("The check solver returned an invalid basis") from error
+            raise
+        self.num_check_orbits, num_types = self.check_basis.shape
+        self.num_logical_orbits = num_types - 2 * self.num_check_orbits
+        if not automatic_basis:
+            basis_result = CheckBasisResult(
+                "found",
+                self.check_basis,
+                selected_rows if parent_rank else (),
+                parent_rank,
+                "supplied",
+                0,
+                "Validated the supplied complete independent check-orbit basis.",
+            )
+        self.check_basis_result = basis_result
 
         if logical_ops is None:
-            result = _cyclic.find_logicals(
+            result = _symcity.find_logicals(
                 self.check_basis, self.block_coefficients, logical_search_limit
             )
             if result.status != "found":
                 raise LogicalFrameError(result)
             assert result.logical_ops is not None
             try:
-                _cyclic.validate_logicals(self.check_basis, result.logical_ops)
+                _symcity.validate_logicals(self.check_basis, result.logical_ops)
             except ValueError as error:
                 raise RuntimeError("The logical solver returned an invalid frame") from error
         else:
-            logical_ops = _cyclic.copy_matrix(logical_ops, self.ring, "logical_ops")
-            _cyclic.validate_logicals(self.check_basis, logical_ops)
+            logical_ops = _symcity.copy_matrix(logical_ops, self.ring, "logical_ops")
+            _symcity.validate_logicals(self.check_basis, logical_ops)
             result = LogicalFrameResult(
                 "found", logical_ops, "supplied", 0, "Validated the supplied compatible J."
             )
@@ -849,7 +872,7 @@ class CyclicTypeCode(CSSCode):
         if any(value.ring != ring for value in array.ravel()):
             raise ValueError("All block coefficients must use the same group ring")
         if ring.field.order != 2 or not ring.is_commutative:
-            raise ValueError("CyclicTypeCode requires an abelian group algebra over GF(2)")
+            raise ValueError("SymCityCode requires an abelian group algebra over GF(2)")
         return abstract.RingArray.build(array, ring=ring)
 
     def __str__(self) -> str:

@@ -34,13 +34,13 @@ from qldpc.objects import ChainComplex, Node, Pauli
 from .common_test import assert_valid_subgraphs
 
 
-def get_cyclic_steane_data(group: abstract.Group) -> abstract.RingArray:
+def get_symcity_steane_data(group: abstract.Group) -> abstract.RingArray:
     """Coefficients of the seven-position cyclic presentation of the Steane checks."""
     return abstract.RingArray.build([[[1, 1, 1, 0, 1, 0, 0]]], ring=group)
 
 
 @pytest.mark.parametrize("ell,period", [(4, 7), (3, 11)])
-def test_cyclic_type_star(ell: int, period: int) -> None:
+def test_symcity_star(ell: int, period: int) -> None:
     """Reproduce both STAR check spaces, including the BB coordinate convention."""
     ring = abstract.GroupRing(abstract.CyclicGroup(ell))
     xx = ring.generators[0]
@@ -48,7 +48,9 @@ def test_cyclic_type_star(ell: int, period: int) -> None:
     aa[0] = aa[3] = ring.one
     aa[2] = aa[4] = xx
     bb = [aa[(-dd) % period].T for dd in range(period)]
-    code = codes.CyclicTypeCode([[aa, bb]], check_rows=range(period - 1))
+    code = codes.SymCityCode([[aa, bb]], check_search_limit=0, logical_search_limit=0)
+    assert code.check_basis_result.selected_rows == tuple(range(period - 1))
+    assert code.check_basis_result.method == "greedy"
     assert (len(code), code.dimension, code.get_weight()) == (2 * period * ell, 2 * ell, 8)
     assert np.linalg.matrix_rank(code.matrix_x) == (period - 1) * ell
     assert np.array_equal(code.matrix_x, code.matrix_z)
@@ -75,7 +77,7 @@ def test_cyclic_type_star(ell: int, period: int) -> None:
             bb_code.get_matrix(pauli)[:, permutation].row_space(),
         )
     jj = abstract.RingArray.build([[1] * period + [0] * period, [0] * period + [1] * period], ring)
-    explicit = codes.CyclicTypeCode([[aa, bb]], jj, check_rows=range(period - 1))
+    explicit = codes.SymCityCode([[aa, bb]], jj, check_rows=range(period - 1))
     assert explicit == code
     assert explicit.logical_frame_result.method == "supplied"
     assert np.array_equal(code.get_logical_ops(Pauli.X), jj.regular_lift())
@@ -86,13 +88,13 @@ def test_cyclic_type_star(ell: int, period: int) -> None:
     assert explicit.logical_prototypes[0, 0] is not jj[0, 0]
 
 
-def test_cyclic_type_binary_oracle() -> None:
+def test_symcity_binary_oracle() -> None:
     """Check shifts, products, cancellations, and the adjoint against binary Kronecker blocks."""
     ring = abstract.GroupRing(abstract.CyclicGroup(3))
     xx = ring.generators[0]
     aa = [xx + ring.one + ring.one, xx, ring.zero]
     bb = [aa[(-dd) % 3].T for dd in range(3)]
-    code = codes.CyclicTypeCode([[aa, bb]], check_rows=[0, np.int64(1)])  # type: ignore[list-item]
+    code = codes.SymCityCode([[aa, bb]], check_rows=[0, np.int64(1)])  # type: ignore[list-item]
     identity = np.eye(3, dtype=int)
     shift_y = np.roll(identity, 1, axis=1)
     shift_x = np.roll(identity, 1, axis=0)
@@ -115,10 +117,11 @@ def test_cyclic_type_binary_oracle() -> None:
         abstract.AbelianGroup(2, 3),
     ],
 )
-def test_cyclic_type_single_block(group: abstract.Group) -> None:
+def test_symcity_single_block(group: abstract.Group) -> None:
     """Support one logical orbit and regular action of arbitrary abelian logical groups."""
-    data = get_cyclic_steane_data(group)
-    code = codes.CyclicTypeCode(data, check_rows=[0, 1, 2])
+    data = get_symcity_steane_data(group)
+    code = codes.SymCityCode(data, check_search_limit=0)
+    assert code.check_basis_result.selected_rows == (0, 1, 2)
     assert (len(code), code.dimension, code.get_weight()) == (7 * group.order, group.order, 4)
     expected = np.array([[1, 1, 1, 0, 1, 0, 0], [0, 1, 1, 1, 0, 1, 0], [0, 0, 1, 1, 1, 0, 1]])
     assert np.array_equal(code.matrix_x, np.kron(expected, np.eye(group.order, dtype=int)))
@@ -144,18 +147,18 @@ def test_cyclic_type_single_block(group: abstract.Group) -> None:
         assert np.any(logicals[:, witness].sum(axis=1))
 
 
-def test_cyclic_type_general_basis_and_logicals() -> None:
+def test_symcity_general_basis_and_logicals() -> None:
     """Accept polynomial row combinations and overlapping logical representatives."""
     ring = abstract.GroupRing(abstract.CyclicGroup(4))
-    data = get_cyclic_steane_data(ring.group)
-    original = codes.CyclicTypeCode(data, check_rows=[0, 1, 2])
+    data = get_symcity_steane_data(ring.group)
+    original = codes.SymCityCode(data, check_rows=[0, 1, 2])
     xx = ring.generators[0]
     basis = abstract.RingArray.build(original.check_basis, ring)
     basis[0] = basis[0] + xx * basis[1]
     logicals = abstract.RingArray.build(original.logical_prototypes, ring)
     correction = ring.one + xx + xx**2 + xx**3
     logicals[0] = logicals[0] + correction * original.check_basis[0]
-    changed = codes.CyclicTypeCode(data, logicals, check_basis=basis, logical_search_limit=0)
+    changed = codes.SymCityCode(data, logicals, check_basis=basis, logical_search_limit=0)
     assert np.array_equal(changed.matrix_x.row_space(), original.matrix_x.row_space())
     assert np.array_equal(changed.get_logical_ops(Pauli.X), logicals.regular_lift())
     assert np.any(np.logical_and(*changed.get_logical_ops(Pauli.X)[:2]))
@@ -165,20 +168,20 @@ def test_cyclic_type_general_basis_and_logicals() -> None:
     coefficients = np.zeros((3, 3, 7), dtype=int)
     for ii in range(3):
         coefficients[ii, ii] = [1, 1, 1, 0, 1, 0, 0]
-    code = codes.CyclicTypeCode(
+    code = codes.SymCityCode(
         abstract.RingArray.build(coefficients, ring),
-        check_rows=[7 * aa + uu for aa in range(3) for uu in range(3)],
+        check_search_limit=0,
     )
     assert (code.num_check_families, code.num_type_cycles, code.num_logical_orbits) == (3, 3, 3)
     assert (len(code), code.dimension) == (84, 12)
 
 
 @pytest.mark.parametrize("group", [abstract.CyclicGroup(3), abstract.AbelianGroup(2, 2)])
-def test_cyclic_type_general_solver(group: abstract.Group) -> None:
+def test_symcity_general_solver(group: abstract.Group) -> None:
     """Solve nonfiber constraints with nonconstant coefficients and translated pairings."""
     ring = abstract.GroupRing(group)
     xx = ring.generators[0]
-    code = codes.CyclicTypeCode([[[ring.one], [xx], [ring.zero]]])
+    code = codes.SymCityCode([[[ring.one], [xx], [ring.zero]]])
     result = code.logical_frame_result
     assert result.status == "found"
     assert result.method == "coefficients"
@@ -193,17 +196,17 @@ def test_cyclic_type_general_solver(group: abstract.Group) -> None:
     assert np.array_equal(jj.regular_lift()[:, np.argsort(physical)], jj.regular_lift()[action])
 
 
-def test_cyclic_type_solver_limits(capsys: pytest.CaptureFixture[str]) -> None:
+def test_symcity_solver_limits(capsys: pytest.CaptureFixture[str]) -> None:
     """Distinguish a bounded failed attempt from proved nonexistence and validate limits."""
     ring = abstract.GroupRing(abstract.TrivialGroup())
     data = abstract.RingArray.build([[[1], [1], [0], [0], [0]]], ring)
-    complete = codes.CyclicTypeCode(data, logical_search_limit=None)
+    complete = codes.SymCityCode(data, logical_search_limit=None)
     found_at = complete.logical_frame_result.num_candidates
     assert found_at > 1
-    assert codes.CyclicTypeCode(data, logical_search_limit=found_at) == complete
+    assert codes.SymCityCode(data, logical_search_limit=found_at) == complete
     for limit in (0, np.int64(found_at - 1)):
         with pytest.raises(codes.LogicalFrameError, match="existence remains undecided") as caught:
-            codes.CyclicTypeCode(data, logical_search_limit=limit)  # type: ignore[arg-type]
+            codes.SymCityCode(data, logical_search_limit=limit)  # type: ignore[arg-type]
         assert caught.value.result.status == "inconclusive"
         assert caught.value.result.num_candidates == limit
         assert caught.value.result.logical_ops is None
@@ -211,32 +214,35 @@ def test_cyclic_type_solver_limits(capsys: pytest.CaptureFixture[str]) -> None:
     impossible = abstract.RingArray.build([[[1, 1, 1, 1]]], ring)
     for exhaustive_limit in (None, 8):
         with pytest.raises(codes.LogicalFrameError, match="all candidates.*failed") as caught:
-            codes.CyclicTypeCode(impossible, check_rows=[0], logical_search_limit=exhaustive_limit)
+            codes.SymCityCode(impossible, check_rows=[0], logical_search_limit=exhaustive_limit)
         assert caught.value.result.status == "infeasible"
         assert caught.value.result.num_candidates == 8
     for invalid_limit in (True, 1.5):
         with pytest.raises(TypeError, match="nonnegative integer"):
-            codes.CyclicTypeCode(data, logical_search_limit=invalid_limit)  # type: ignore[arg-type]
+            codes.SymCityCode(data, logical_search_limit=invalid_limit)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="nonnegative"):
-        codes.CyclicTypeCode(data, logical_search_limit=-1)
+        codes.SymCityCode(data, logical_search_limit=-1)
     assert capsys.readouterr().out == ""
 
 
-def test_cyclic_type_even_cycle_and_empty_basis() -> None:
+def test_symcity_even_cycle_and_empty_basis() -> None:
     """Even physical cycles and zero checks are supported without assuming a fiber frame."""
     ring = abstract.GroupRing(abstract.TrivialGroup())
     data = abstract.RingArray.build([[[1, 0], [1, 0], [0, 0]]], ring)
-    code = codes.CyclicTypeCode(data)
+    code = codes.SymCityCode(data)
     assert (len(code), code.dimension) == (6, 2)
     assert code.logical_frame_result.method == "coefficients"
     zero = abstract.RingArray.build([[[0], [0]]], ring)
     empty = abstract.RingArray.build(np.zeros((0, 2), dtype=int), ring)
-    assert codes.CyclicTypeCode(zero, check_rows=[]) == codes.CyclicTypeCode(
-        zero, check_basis=empty
+    assert (
+        codes.SymCityCode(zero)
+        == codes.SymCityCode(zero, check_rows=[])
+        == codes.SymCityCode(zero, check_basis=empty)
     )
+    assert codes.SymCityCode(zero).check_basis_result.selected_rows == ()
 
 
-def test_cyclic_type_input_errors() -> None:
+def test_symcity_input_errors() -> None:
     """Reject malformed input and check-space violations before starting logical solving."""
     ring = abstract.GroupRing(abstract.TrivialGroup())
     one, zero = ring.one, ring.zero
@@ -251,46 +257,46 @@ def test_cyclic_type_input_errors() -> None:
         [np.array([[one, one]], dtype=object), np.array([[one]], dtype=object)],
     ):
         with pytest.raises(ValueError, match="p by t by q"):
-            codes.CyclicTypeCode(malformed)  # type: ignore[arg-type]
+            codes.SymCityCode(malformed)  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="RingMember"):
-        codes.CyclicTypeCode([[[1]]])  # type: ignore[list-item]
+        codes.SymCityCode([[[1]]])  # type: ignore[list-item]
     other = abstract.GroupRing(abstract.CyclicGroup(2))
     with pytest.raises(ValueError, match="same group ring"):
-        codes.CyclicTypeCode([[[one, other.one]]])
+        codes.SymCityCode([[[one, other.one]]])
     for bad_ring in (
         abstract.GroupRing(abstract.CyclicGroup(2), 3),
         abstract.GroupRing(abstract.SymmetricGroup(3)),
     ):
         with pytest.raises(ValueError, match="abelian group algebra over GF"):
-            codes.CyclicTypeCode([[[bad_ring.one]]])
+            codes.SymCityCode([[[bad_ring.one]]])
     with pytest.raises(ValueError, match="only one"):
-        codes.CyclicTypeCode(valid, check_rows=[0], check_basis=valid[0])
+        codes.SymCityCode(valid, check_rows=[0], check_basis=valid[0])
     for rows in ([True], [0.5]):
         with pytest.raises(TypeError, match="integer indices"):
-            codes.CyclicTypeCode(valid, check_rows=rows)  # type: ignore[arg-type]
+            codes.SymCityCode(valid, check_rows=rows)  # type: ignore[arg-type]
     for invalid_rows in ([-1], [1], [0, 0]):
         with pytest.raises(ValueError, match="distinct indices"):
-            codes.CyclicTypeCode(valid, check_rows=invalid_rows)
+            codes.SymCityCode(valid, check_rows=invalid_rows)
     for data in (
         [[[one], [zero], [zero]]],
         abstract.RingArray.build([[[1], [1], [0], [0], [0]], [[1], [0], [1], [0], [0]]], ring),
     ):
         with pytest.raises(ValueError, match="full cyclic parent.*do not commute"):
-            codes.CyclicTypeCode(data)
+            codes.SymCityCode(data)
     with pytest.raises(ValueError, match="s = tq - 2r"):
-        codes.CyclicTypeCode([[[one], [one]]])
-    steane = get_cyclic_steane_data(ring.group)
+        codes.SymCityCode([[[one], [one]]])
+    steane = get_symcity_steane_data(ring.group)
     with pytest.raises(ValueError, match="binary rank.*check_rows or check_basis"):
-        codes.CyclicTypeCode(steane)
+        codes.SymCityCode(steane, check_rows=range(7))
     with pytest.raises(ValueError, match="span exactly"):
-        codes.CyclicTypeCode(steane, check_rows=[0, 1])
-    good = codes.CyclicTypeCode(steane, check_rows=[0, 1, 2])
+        codes.SymCityCode(steane, check_rows=[0, 1])
+    good = codes.SymCityCode(steane, check_rows=[0, 1, 2])
     with pytest.raises(ValueError, match="tq columns"):
-        codes.CyclicTypeCode(steane, check_basis=abstract.RingArray(good.check_basis[:, :-1]))
+        codes.SymCityCode(steane, check_basis=abstract.RingArray(good.check_basis[:, :-1]))
     different = abstract.RingArray.build(good.check_basis, ring)
     different[0] = abstract.RingArray.build([1, 0, 0, 0, 0, 0, 0], ring)
     with pytest.raises(ValueError, match="span exactly"):
-        codes.CyclicTypeCode(steane, check_basis=different)
+        codes.SymCityCode(steane, check_basis=different)
 
     # Divisible binary rank does not certify a free orbit basis.
     uu = other.one + other.generators[0]
@@ -299,12 +305,12 @@ def test_cyclic_type_input_errors() -> None:
         [[other.zero], [uu], [other.zero], [other.zero]],
     ]
     with pytest.raises(ValueError, match="binary rank"):
-        codes.CyclicTypeCode(nonfree, check_rows=[0])
+        codes.SymCityCode(nonfree, check_rows=[0])
 
 
-def test_cyclic_type_logical_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_symcity_logical_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Validate explicit frames and replay any solver result before accepting it."""
-    from . import _cyclic
+    from . import _symcity
 
     ring = abstract.GroupRing(abstract.TrivialGroup())
     data = abstract.RingArray.build([[[1], [1], [0]]], ring)
@@ -315,22 +321,86 @@ def test_cyclic_type_logical_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         ([[0, 0, 1]], "augmentation"),
     ):
         with pytest.raises(ValueError, match=message):
-            codes.CyclicTypeCode(data, abstract.RingArray.build(values, ring))
+            codes.SymCityCode(data, abstract.RingArray.build(values, ring))
     with pytest.raises(TypeError, match="RingArray"):
-        codes.CyclicTypeCode(data, [[1, 1, 1]])  # type: ignore[arg-type]
+        codes.SymCityCode(data, [[1, 1, 1]])  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="two-dimensional"):
-        codes.CyclicTypeCode(data, abstract.RingArray.build([1, 1, 1], ring))
+        codes.SymCityCode(data, abstract.RingArray.build([1, 1, 1], ring))
     with pytest.raises(ValueError, match="same group ring"):
-        codes.CyclicTypeCode(data, abstract.RingArray.build([[1, 1, 1]], abstract.CyclicGroup(2)))
+        codes.SymCityCode(data, abstract.RingArray.build([[1, 1, 1]], abstract.CyclicGroup(2)))
     bad = codes.LogicalFrameResult(
         "found", abstract.RingArray.build([[0, 0, 0]], ring), "coefficients", 1, "bad result"
     )
-    monkeypatch.setattr(_cyclic, "find_logicals", lambda *args: bad)
+    monkeypatch.setattr(_symcity, "find_logicals", lambda *args: bad)
     with pytest.raises(RuntimeError, match="solver returned an invalid frame"):
-        codes.CyclicTypeCode(data)
+        codes.SymCityCode(data)
     # A supplied valid frame bypasses the patched solver entirely.
-    code = codes.CyclicTypeCode(data, abstract.RingArray.build([[1, 1, 1]], ring))
+    code = codes.SymCityCode(data, abstract.RingArray.build([[1, 1, 1]], ring))
     assert code.logical_frame_result.method == "supplied"
+
+
+def test_symcity_check_resolution() -> None:
+    """Resolve generic redundant presentations, with explicit overrides and separate budgets."""
+    ring = abstract.GroupRing(abstract.CyclicGroup(3))
+    xx = ring.generators[0]
+    e0, e1 = ring.one + xx + xx**2, xx + xx**2
+    parent = abstract.RingArray.build([[e0, e0, 0], [e1, e1, 0]], ring)
+    coefficients = abstract.RingArray(parent.reshape(2, 3, 1))
+    frame = abstract.RingArray.build([[1, 1, 1]], ring)
+    code = codes.SymCityCode(coefficients, frame, check_search_limit=None, logical_search_limit=0)
+    assert code.check_basis_result.method == "combinations"
+    assert code.check_basis_result.selected_rows is None
+    assert code.logical_frame_result.method == "supplied"
+    assert (len(code), code.dimension, code.num_check_orbits) == (9, 3, 1)
+    assert "SymCityCode" in str(code)
+    assert codes.SymCityCode(coefficients, frame) == code
+    explicit = codes.SymCityCode(
+        coefficients,
+        frame,
+        check_basis=code.check_basis,
+        check_search_limit=0,
+        logical_search_limit=0,
+    )
+    assert explicit == code
+    assert explicit.check_basis_result.method == "supplied"
+    for limit in (0, np.int64(2)):
+        with pytest.raises(codes.CheckBasisError, match="existence remains undecided") as caught:
+            codes.SymCityCode(coefficients, frame, check_search_limit=limit)  # type: ignore[arg-type]
+        assert caught.value.result.status == "inconclusive"
+        assert caught.value.result.num_candidates == limit
+    # After basis resolution, a zero logical budget remains a distinct logical-frame failure.
+    with pytest.raises(codes.LogicalFrameError, match="existence remains undecided"):
+        codes.SymCityCode(coefficients, logical_search_limit=0)
+    for invalid in (True, np.bool_(False), 1.5):
+        with pytest.raises(TypeError, match="check_search_limit"):
+            codes.SymCityCode(coefficients, check_search_limit=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="check_search_limit"):
+        codes.SymCityCode(coefficients, check_search_limit=-1)
+
+    other = abstract.GroupRing(abstract.CyclicGroup(2))
+    uu = other.one + other.generators[0]
+    nonfree = abstract.RingArray.build([[[uu], [0], [0]], [[0], [uu], [0]]], other)
+    for data in (nonfree, abstract.RingArray(nonfree[:1])):
+        with pytest.raises(codes.CheckBasisError) as caught:
+            codes.SymCityCode(data, check_search_limit=None)
+        assert caught.value.result.status == "infeasible"
+
+
+def test_symcity_check_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An invalid solver result is an internal error; an explicit basis bypasses that solver."""
+    from . import _symcity
+
+    ring = abstract.GroupRing(abstract.TrivialGroup())
+    coefficients = abstract.RingArray.build([[[1], [1], [0]]], ring)
+    bad = codes.CheckBasisResult(
+        "found", abstract.RingArray.build([[0, 0, 0]], ring), (0,), 1, "greedy", 0, "bad result"
+    )
+    monkeypatch.setattr(_symcity, "find_check_basis", lambda *args: bad)
+    with pytest.raises(RuntimeError, match="check solver returned an invalid basis"):
+        codes.SymCityCode(coefficients)
+    explicit = codes.SymCityCode(coefficients, check_rows=[0])
+    assert explicit.check_basis_result.selected_rows == (0,)
+    assert explicit.check_basis_result.method == "supplied"
 
 
 def test_trivial_code() -> None:

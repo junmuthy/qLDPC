@@ -44,11 +44,11 @@ def test_transversal_s() -> None:
         circuits.get_transversal_s(codes.ToricCode(2))
 
 
-def test_cyclic_type_transversal_gates() -> None:
+def test_symcity_transversal_gates() -> None:
     """Hadamard and signed phase gates act in the installed polynomial logical frame."""
     ring = abstract.GroupRing(abstract.CyclicGroup(2))
     coefficients = abstract.RingArray.build([[[1, 1, 1, 0, 1, 0, 0]]], ring)
-    code = codes.CyclicTypeCode(coefficients, check_rows=[0, 1, 2])
+    code = codes.SymCityCode(coefficients)
     circuit_h = stim.Circuit()
     circuit_h.append("H", range(len(code)))
     assert circuits.get_logical_tableau(code, circuit_h) == stim.Circuit("H 0 1").to_tableau()
