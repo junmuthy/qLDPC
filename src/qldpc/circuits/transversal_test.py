@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 import stim
 
-from qldpc import circuits, codes, external
+from qldpc import abstract, circuits, codes, external
 
 
 def test_transversal_s() -> None:
@@ -42,6 +42,19 @@ def test_transversal_s() -> None:
     # non-SWEL codes are rejected
     with pytest.raises(ValueError, match="SWEL"):
         circuits.get_transversal_s(codes.ToricCode(2))
+
+
+def test_cyclic_type_transversal_gates() -> None:
+    """Hadamard and signed phase gates act in the installed polynomial logical frame."""
+    ring = abstract.GroupRing(abstract.CyclicGroup(2))
+    coefficients = abstract.RingArray.build([[[1, 1, 1, 0, 1, 0, 0]]], ring)
+    code = codes.CyclicTypeCode(coefficients, check_rows=[0, 1, 2])
+    circuit_h = stim.Circuit()
+    circuit_h.append("H", range(len(code)))
+    assert circuits.get_logical_tableau(code, circuit_h) == stim.Circuit("H 0 1").to_tableau()
+    circuit_s = circuits.get_transversal_s(code)
+    assert {instruction.name for instruction in circuit_s} <= {"S", "S_DAG"}
+    assert circuits.get_logical_tableau(code, circuit_s) == stim.Circuit("S 0 1").to_tableau()
 
 
 def test_transversal_ops() -> None:

@@ -14,6 +14,7 @@ Getting started
 
    basics
    bivariate_bicycle_codes
+   cyclic_physical_types
    noise_models
    transversal_gates
 

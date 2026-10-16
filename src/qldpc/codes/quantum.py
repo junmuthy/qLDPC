@@ -38,6 +38,8 @@ from qldpc import abstract
 from qldpc._util import networkx as nx
 from qldpc.objects import CayleyComplex, ChainComplex, Node, Pauli, PauliXZ, QuditPauli
 
+from . import _cyclic
+from ._cyclic import LogicalFrameError, LogicalFrameResult
 from .classical import (
     CyclicCode,
     GolayCode,
@@ -645,6 +647,217 @@ class GALACode(CSSCode):
         size = len(generators)
         return abstract.RingArray(
             [[generators[(col - row) % size] for col in range(size)] for row in range(size)]
+        )
+
+
+class CyclicTypeCode(CSSCode):
+    """Self-dual polynomial CSS code with cyclic symmetry among physical types.
+
+    Let R = GF(2)[G] for a finite abelian logical translation group G of order N. Coefficients
+    ``block_coefficients[a][b][d]`` specify the scalar polynomial f_ab(y) over R, reduced modulo
+    y**q - 1. There are p check families and t physical cycles of length q. The polynomial parent
+    matrix has entries ``parent_matrix[a*q+u, b*q+v] = f_ab[(v-u) % q]``.
+
+    An independent polynomial check basis H must span the full parent check space. Its r rows
+    represent r complete independent G orbits. A common logical frame J has s = tq - 2r rows and
+    satisfies H J^dagger = 0, J J^dagger = I_s, and 1_s J_aug = 1_(tq). The adjoint inverts group
+    elements and transposes; augmentation sums group coefficients. These conditions give
+    ``matrix_x = matrix_z = H.regular_lift()`` and common X/Z logicals J.regular_lift(), encoding
+    sN logical qubits in tqN physical qubits. Construction does not certify distance.
+
+    With no explicit J, try a proved fiber shortcut and then bounded coefficient enumeration.
+    Inspect ``logical_frame_result`` on success, or ``LogicalFrameError.result`` on failure.
+    An inconclusive result does not prove that no frame exists. No library output is printed.
+
+    Physical coordinates are ordered (cycle, position_in_cycle, group_index), with the group
+    index varying fastest in ``tuple(group.generate())`` order. Logical coordinates are
+    (logical_orbit, group_index). Physical G translations regularly permute each logical orbit.
+    The physical cycle preserves the stabilizer space; it need not fix the logical frame.
+    Replacing the logical basis through inherited methods can change these displayed actions.
+
+    For example, the STAR-56 check space and its fiber logicals are constructed by::
+
+        from qldpc import abstract, codes
+
+        ring = abstract.GroupRing(abstract.CyclicGroup(4))
+        x = ring.generators[0]
+        zero, one = ring.zero, ring.one
+        a = [one, zero, x, one, x, zero, zero]  # 1 + y**3 + x*y**2 + x*y**4
+        a_dagger = [a[(-d) % 7].T for d in range(7)]
+        code = codes.CyclicTypeCode([[a, a_dagger]], check_rows=range(6))
+        assert (code.num_qubits, code.dimension, code.get_weight()) == (56, 8, 8)
+        assert code.logical_frame_result.status == "found"
+
+    This is not limited to two blocks or fiber logicals. Ordinary binary logical-basis selection
+    alone does not certify the polynomial orbit structure and augmentation required here.
+    """
+
+    block_coefficients: abstract.RingArray
+    ring: abstract.GroupRing
+    group: abstract.Group
+    cycle_order: int
+    num_type_cycles: int
+    num_check_families: int
+    num_check_orbits: int
+    num_logical_orbits: int
+    parent_matrix: abstract.RingArray
+    check_basis: abstract.RingArray
+    logical_prototypes: abstract.RingArray
+    logical_frame_result: LogicalFrameResult
+
+    def __init__(
+        self,
+        block_coefficients: abstract.RingArray | Sequence[Sequence[Sequence[abstract.RingMember]]],
+        logical_ops: abstract.RingArray | None = None,
+        *,
+        check_rows: Sequence[int] | None = None,
+        check_basis: abstract.RingArray | None = None,
+        logical_search_limit: int | None = 10_000,
+    ) -> None:
+        """Construct a code with validated checks and a supplied or automatically determined J.
+
+        Args:
+            block_coefficients: Nonempty rectangular p by t by q sequence of RingMember
+                coefficients, all over one binary abelian group algebra. Zero entries must also
+                be RingMember objects. Each innermost sequence gives increasing powers of y.
+            logical_ops: Optional s by tq polynomial common logical frame, over the same ring.
+
+        Keyword args:
+            check_rows: Distinct polynomial parent-row indices selecting a complete independent
+                check-orbit basis. Omitted parent rows must be redundant.
+            check_basis: An explicit polynomial basis, permitting general row combinations.
+                Mutually exclusive with check_rows. With neither, use the entire parent and
+                require it to be independent. An empty basis is allowed for a zero parent.
+            logical_search_limit: Maximum coefficient candidates tested when logical_ops is
+                omitted; None allows exhaustive enumeration. Zero allows only the fiber shortcut
+                and linear inconsistency check. This is not a time limit. Default: 10,000.
+
+        Raises:
+            TypeError: An input has an inappropriate type.
+            ValueError: Shapes, rings, checks, basis, or an explicit logical frame are invalid.
+            LogicalFrameError: Automatic solving proves infeasibility or exhausts its budget.
+        """
+        if logical_search_limit is not None:
+            if isinstance(logical_search_limit, (bool, np.bool_)) or not isinstance(
+                logical_search_limit, (int, np.integer)
+            ):
+                raise TypeError("logical_search_limit must be a nonnegative integer or None")
+            if logical_search_limit < 0:
+                raise ValueError("logical_search_limit must be nonnegative")
+            logical_search_limit = int(logical_search_limit)
+        if check_rows is not None and check_basis is not None:
+            raise ValueError("Provide only one of check_rows and check_basis")
+
+        self.block_coefficients = self._normalize_coefficients(block_coefficients)
+        self.ring = self.block_coefficients.ring
+        self.group = self.ring.group
+        self.num_check_families, self.num_type_cycles, self.cycle_order = (
+            self.block_coefficients.shape
+        )
+        qq = self.cycle_order
+        self.parent_matrix = abstract.RingArray.build(
+            [
+                [
+                    self.block_coefficients[aa, bb, (vv - uu) % qq]
+                    for bb in range(self.num_type_cycles)
+                    for vv in range(qq)
+                ]
+                for aa in range(self.num_check_families)
+                for uu in range(qq)
+            ],
+            ring=self.ring,
+        )
+        if np.any(self.parent_matrix @ self.parent_matrix.T):
+            raise ValueError("The full cyclic parent checks do not commute")
+
+        basis = self.parent_matrix
+        if check_rows is not None:
+            rows = list(check_rows)
+            if any(
+                isinstance(ii, (bool, np.bool_)) or not isinstance(ii, (int, np.integer))
+                for ii in rows
+            ):
+                raise TypeError("check_rows must contain integer indices")
+            if len(set(rows)) != len(rows) or any(ii < 0 or ii >= len(basis) for ii in rows):
+                raise ValueError("check_rows must contain distinct indices in the parent-row range")
+            basis = abstract.RingArray(basis[rows], ring=self.ring)
+        if check_basis is not None:
+            basis = _cyclic.copy_matrix(check_basis, self.ring, "check_basis")
+        self.check_basis = abstract.RingArray.build(basis, ring=self.ring)
+        self.num_check_orbits, num_types = self.check_basis.shape
+        if num_types != self.num_type_cycles * qq:
+            raise ValueError("check_basis must have one column per physical type (tq columns)")
+        self.num_logical_orbits = num_types - 2 * self.num_check_orbits
+
+        matrix = self.check_basis.regular_lift()
+        rank = np.linalg.matrix_rank(matrix)
+        expected_rank = self.num_check_orbits * self.group.order
+        if rank != expected_rank:
+            raise ValueError(
+                f"Check basis has binary rank {rank}, expected rN = {expected_rank}; "
+                "provide independent complete G orbits using check_rows or check_basis"
+            )
+        parent = self.parent_matrix.regular_lift()
+        if (
+            np.linalg.matrix_rank(parent) != rank
+            or np.linalg.matrix_rank(np.vstack((matrix, parent)).view(self.ring.field)) != rank
+        ):
+            raise ValueError("The check basis must span exactly the full parent check space")
+        if self.num_logical_orbits < 1:
+            raise ValueError("The check basis must leave s = tq - 2r >= 1 logical orbits")
+
+        if logical_ops is None:
+            result = _cyclic.find_logicals(
+                self.check_basis, self.block_coefficients, logical_search_limit
+            )
+            if result.status != "found":
+                raise LogicalFrameError(result)
+            assert result.logical_ops is not None
+            try:
+                _cyclic.validate_logicals(self.check_basis, result.logical_ops)
+            except ValueError as error:
+                raise RuntimeError("The logical solver returned an invalid frame") from error
+        else:
+            logical_ops = _cyclic.copy_matrix(logical_ops, self.ring, "logical_ops")
+            _cyclic.validate_logicals(self.check_basis, logical_ops)
+            result = LogicalFrameResult(
+                "found", logical_ops, "supplied", 0, "Validated the supplied compatible J."
+            )
+        assert result.logical_ops is not None
+        self.logical_frame_result = result
+        self.logical_prototypes = result.logical_ops
+        super().__init__(matrix, matrix, is_subsystem_code=False)
+        logical_matrix = self.logical_prototypes.regular_lift()
+        self.set_logical_ops_xz(logical_matrix, logical_matrix)
+
+    @staticmethod
+    def _normalize_coefficients(
+        coefficients: abstract.RingArray | Sequence[Sequence[Sequence[abstract.RingMember]]],
+    ) -> abstract.RingArray:
+        """Normalize the nonempty coefficient tensor and copy its individual ring entries."""
+        try:
+            array = np.asarray(coefficients, dtype=object)
+        except ValueError as error:
+            raise ValueError(
+                "block_coefficients must be a rectangular p by t by q array"
+            ) from error
+        if array.ndim != 3 or 0 in array.shape:
+            raise ValueError("block_coefficients must be a nonempty p by t by q array")
+        if not all(isinstance(value, abstract.RingMember) for value in array.ravel()):
+            raise TypeError("block_coefficients must contain only RingMember objects")
+        ring = array.flat[0].ring
+        if any(value.ring != ring for value in array.ravel()):
+            raise ValueError("All block coefficients must use the same group ring")
+        if ring.field.order != 2 or not ring.is_commutative:
+            raise ValueError("CyclicTypeCode requires an abelian group algebra over GF(2)")
+        return abstract.RingArray.build(array, ring=ring)
+
+    def __str__(self) -> str:
+        """Describe the physical cycles and prescribed logical group action."""
+        return (
+            f"{self.name} on {self.num_qubits} qubits with {self.num_type_cycles} physical cycles "
+            f"of length {self.cycle_order}, {self.num_logical_orbits} logical orbits, "
+            f"and logical group {self.group}"
         )
 
 
